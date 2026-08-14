@@ -1,0 +1,2564 @@
+# shoal-run — Project Specification
+
+> **Status:** Initial implementation specification  
+> **Project name:** `shoal-run` is a working/placeholder name. The project may be renamed when it grows beyond the original shoal-cluster use case.  
+> **Primary reference deployment:** the shoal cluster, accessed through `fishvision`  
+> **Initial implementation language:** Python 3.12
+
+---
+
+## 1. Purpose
+
+`shoal-run` is a portable experiment-execution layer for reproducible scientific computing.
+
+Its initial purpose is to make the following workflow possible from a developer workstation or laptop:
+
+1. develop or modify a scientific project locally;
+2. define an experiment through a project entry point and YAML configuration;
+3. stage the current source tree and inputs to a remote execution target;
+4. submit one or more tasks through the target scheduler;
+5. execute the tasks inside an Apptainer/Singularity-compatible container;
+6. monitor the run;
+7. collect logs, outputs, and provenance;
+8. retrieve requested results to the initiating machine.
+
+The first working implementation targets the **shoal** laboratory cluster:
+
+```text
+developer workstation
+        |
+        | SSH + rsync
+        v
+    fishvision
+        |
+        | /shoalhome shared through NFSv4
+        | Slurm
+        v
+ shoal compute nodes
+        |
+        | Apptainer
+        v
+ scientific executable
+```
+
+However, the internal architecture must not make shoal, Slurm, SSH, rsync, NFS, or Apptainer inseparable from the core experiment model.
+
+The long-term goal is a more general execution framework usable across:
+
+- local workstations;
+- laboratory clusters;
+- institutional HPC clusters;
+- national or international supercomputers;
+- multiple batch schedulers;
+- multiple staging/storage mechanisms;
+- Apptainer/Singularity-based scientific deployments;
+- human users;
+- coding agents;
+- autonomous or semi-autonomous research agents.
+
+The framework is intended to be useful as an **execution and provenance substrate for agentic research**, but it is not itself an autonomous scientist.
+
+---
+
+## 2. Core use case
+
+A large fraction of target projects follow a simple scientific pattern:
+
+```text
+main executable
+      +
+YAML configuration
+      +
+explicit random seed
+      =
+one experimental task
+```
+
+Examples include:
+
+```bash
+python main.py --config configs/test.yaml --seed 17
+```
+
+or:
+
+```bash
+./simulation --config configs/test.yaml --seed 17
+```
+
+The framework should make this pattern first-class without requiring every supported project to follow it exactly.
+
+A logical run may contain:
+
+```text
+one config × one seed
+```
+
+or:
+
+```text
+one config × many seeds
+```
+
+For example:
+
+```text
+configs/baseline.yaml × seeds 0..99
+```
+
+is one logical `Run` containing 100 `Task` objects.
+
+A scheduler backend may optimize such a task set into a native job array, but the core model must not define the task set as a Slurm array.
+
+---
+
+## 3. Long-term vision
+
+The long-term architecture should support a common experiment interface across heterogeneous execution environments.
+
+Potential future scheduler backends include:
+
+- Slurm;
+- PBS Pro;
+- LSF;
+- SGE;
+- HTCondor;
+- other batch systems encountered on scientific clusters.
+
+Potential future transports and staging mechanisms include:
+
+- local filesystem;
+- SSH;
+- rsync;
+- SFTP;
+- shared POSIX filesystems;
+- Globus;
+- object storage where appropriate.
+
+Potential future execution runtimes include:
+
+- Apptainer;
+- Singularity;
+- possibly other container runtimes if a real use case requires them.
+
+Potential future interfaces include:
+
+- command-line interface;
+- Python API;
+- MCP server;
+- REST API.
+
+Potential future high-level capabilities include:
+
+- parameter sweeps;
+- adaptive experiment campaigns;
+- structured result metrics;
+- run lineage;
+- resource-policy enforcement;
+- approval thresholds for autonomous agents;
+- integration with workflow engines;
+- automated experimental loops.
+
+These are **design goals**, not version 0.1 requirements.
+
+---
+
+## 4. Non-goals
+
+The initial project is not intended to be:
+
+- a replacement for Slurm, PBS, LSF, or other schedulers;
+- a cluster provisioning or administration system;
+- a general DAG workflow engine such as Snakemake or Nextflow;
+- a distributed object store;
+- a container image builder;
+- an experiment-analysis library;
+- a hyperparameter-optimization framework;
+- an autonomous scientific agent;
+- a general remote-shell wrapper;
+- an abstraction that attempts to hide every scheduler-specific feature.
+
+The framework executes and records scientific experiments.
+
+Higher-level software may later use it to implement workflows, autonomous research, optimization, or adaptive experimentation.
+
+---
+
+## 5. Design principles
+
+### 5.1 Portable scientific domain model
+
+Scientific concepts must be modeled independently from infrastructure.
+
+Primary domain concepts are:
+
+- `ExperimentSpec`
+- `Run`
+- `Task`
+- `ResourceRequest`
+- `Artifact`
+- `RunRecord`
+- `Target`
+
+Infrastructure-specific concepts belong behind adapters:
+
+- `Scheduler`
+- `Transport`
+- `Stager`
+- `ContainerRuntime`
+
+Core domain models must not depend on concrete Slurm, SSH, rsync, or Apptainer implementations.
+
+---
+
+### 5.2 Reproducibility by construction
+
+The framework must preserve enough information to identify what actually ran.
+
+A run should record, when available:
+
+- effective experiment specification;
+- effective YAML config;
+- explicit task seeds;
+- source revision;
+- dirty working-tree changes;
+- container identity;
+- target;
+- requested resources;
+- scheduler identifiers;
+- timestamps;
+- exit status;
+- produced artifacts.
+
+A later user should be able to reconstruct the execution as far as external dependencies and infrastructure allow.
+
+---
+
+### 5.3 Agents and humans use the same execution model
+
+The same core operations should support:
+
+- interactive human CLI use;
+- shell-based coding agents;
+- future structured agent tool interfaces.
+
+Human-readable output and machine-readable output must originate from the same internal result objects.
+
+Agents must not need to parse:
+
+- `squeue`;
+- `sbatch` prose;
+- scheduler-specific log naming conventions;
+- arbitrary human-formatted CLI output.
+
+---
+
+### 5.4 Minimal remote footprint
+
+Version 0.1 must not require a persistent daemon on the remote cluster.
+
+The reference architecture should work using mechanisms commonly permitted on scientific HPC systems:
+
+- SSH;
+- remote command execution;
+- scheduler CLI;
+- shared filesystems;
+- rsync;
+- Apptainer.
+
+A future optional service/API must not become a prerequisite for normal cluster use unless there is a compelling reason.
+
+---
+
+### 5.5 Progressive generalization
+
+Implement one complete vertical path before adding broad backend support.
+
+The first vertical path is:
+
+```text
+local client
+    ↓
+SSH
+    ↓
+remote workspace
+    ↓
+Slurm
+    ↓
+Apptainer
+    ↓
+shared filesystem
+    ↓
+result collection
+    ↓
+rsync back to client
+```
+
+Do not implement PBS, LSF, Globus, MCP, REST services, or a distributed database before the first real shoal workflow works.
+
+At the same time, avoid unnecessary coupling that would force a rewrite when a second concrete backend is introduced.
+
+---
+
+### 5.6 Generalize from real implementations
+
+Do not create abstractions solely because they might become useful.
+
+A preferred rule is:
+
+> Implement the first backend cleanly. Add the second real backend when needed. Refactor shared abstractions based on evidence from both.
+
+The framework should avoid both extremes:
+
+- a Slurm-specific implementation disguised as a generic framework;
+- a large speculative plugin architecture before one reliable execution path exists.
+
+---
+
+## 6. Conceptual architecture
+
+```text
+                    Human CLI
+                        |
+                        |
+                 +------+------+
+                 | Client/API  |
+                 +------+------+
+                        |
+                        | normalized requests/results
+                        |
+                 +------+------+
+                 | Orchestration|
+                 +------+------+
+                        |
+          +-------------+-------------+
+          |             |             |
+          v             v             v
+      Run model      Planner      Provenance
+          |
+          +--------------------------------------------+
+          |                |              |            |
+          v                v              v            v
+      Transport        Scheduler       Stager    ContainerRuntime
+          |                |              |            |
+         SSH             Slurm          rsync      Apptainer
+          |
+          v
+      remote target
+```
+
+Future interfaces such as a Python API or MCP server should sit above the orchestration layer rather than duplicating execution logic.
+
+---
+
+## 7. Core terminology
+
+### 7.1 Experiment
+
+An **Experiment** is the reusable scientific definition of how one task is executed.
+
+It is described by an `ExperimentSpec`.
+
+---
+
+### 7.2 Task
+
+A **Task** is one concrete execution of an experiment.
+
+A task normally contains at least:
+
+- experiment identity;
+- effective config;
+- explicit seed;
+- task ID;
+- resource request.
+
+---
+
+### 7.3 Run
+
+A **Run** groups one or more Tasks created by one logical submission.
+
+Examples:
+
+```text
+Run A
+└── config=test.yaml, seed=17
+```
+
+```text
+Run B
+├── config=baseline.yaml, seed=0
+├── config=baseline.yaml, seed=1
+├── ...
+└── config=baseline.yaml, seed=99
+```
+
+A Run is a framework concept.
+
+A scheduler job ID is an execution detail.
+
+---
+
+### 7.4 Target
+
+A **Target** describes where and how execution occurs.
+
+Examples:
+
+- local workstation;
+- shoal;
+- another Slurm cluster;
+- a PBS Pro supercomputer.
+
+A target combines site-specific backend configuration without embedding it in the experiment definition.
+
+---
+
+### 7.5 Artifact
+
+An **Artifact** is a file or directory associated with execution.
+
+Initial artifact categories include:
+
+- source snapshot;
+- effective configuration;
+- stdout;
+- stderr;
+- raw results;
+- scheduler metadata;
+- provenance metadata.
+
+Derived scientific analysis is outside the execution core.
+
+---
+
+## 8. Experiment specification
+
+### 8.1 Goals
+
+`ExperimentSpec` must describe **portable execution semantics**, not scheduler directives.
+
+A representative project-level file may look like:
+
+```yaml
+version: 1
+
+experiment:
+  name: collective-departure
+
+command:
+  argv:
+    - python
+    - main.py
+    - --config
+    - "{config}"
+    - --seed
+    - "{seed}"
+
+container:
+  image: containers/project.sif
+  gpu: true
+
+resources:
+  nodes: 1
+  tasks: 1
+  cpus_per_task: 4
+  gpus_per_task: 1
+  memory: 16GiB
+  walltime: "02:00:00"
+
+outputs:
+  include:
+    - results/**
+    - logs/**
+
+sync:
+  exclude:
+    - .git/
+    - .venv/
+    - __pycache__/
+    - .pytest_cache/
+    - .mypy_cache/
+    - .ruff_cache/
+    - shoal-results/
+```
+
+The exact schema may evolve during M0/M1, but the separation of concerns must remain.
+
+---
+
+### 8.2 Command representation
+
+Commands should be represented internally as argument vectors whenever practical.
+
+Preferred representation:
+
+```python
+[
+    "python",
+    "main.py",
+    "--config",
+    "/path/to/config.yaml",
+    "--seed",
+    "17",
+]
+```
+
+Avoid storing the canonical command only as a shell string.
+
+This provides:
+
+- safer execution;
+- easier quoting;
+- easier testing;
+- clearer provenance;
+- better machine manipulation.
+
+---
+
+### 8.3 Configs are opaque scientific inputs
+
+The framework does not need to understand the scientific contents of the project YAML config.
+
+For example:
+
+```yaml
+population:
+  size: 100
+
+simulation:
+  duration: 5000
+
+noise:
+  sigma: 0.1
+```
+
+is primarily an opaque input passed to the scientific executable.
+
+The framework needs to know:
+
+- which config file was used;
+- its effective content;
+- where it was staged;
+- which tasks consumed it.
+
+Version 0.1 does not require application-specific config schemas.
+
+---
+
+### 8.4 Explicit seeds
+
+Every stochastic Task must have an explicit integer seed.
+
+The framework must never silently rely on an implicit random seed.
+
+A Run may specify:
+
+```text
+seed = 42
+```
+
+or:
+
+```text
+seeds = 0..99
+```
+
+The seed supplied to each task must be recorded in the run metadata.
+
+---
+
+## 9. Resource model
+
+### 9.1 Portable resource fields
+
+The initial `ResourceRequest` should support:
+
+- `nodes`;
+- `tasks`;
+- `cpus_per_task`;
+- `gpus_per_task`;
+- memory;
+- wall time.
+
+Additional portable fields may be added only when supported by concrete use cases.
+
+---
+
+### 9.2 Backend-specific resources
+
+Not every scheduler or site can be represented perfectly through one portable ontology.
+
+Backend-specific options must therefore be possible, explicitly and separately.
+
+Example:
+
+```yaml
+resources:
+  nodes: 1
+  tasks: 1
+  cpus_per_task: 8
+  gpus_per_task: 1
+  memory: 32GiB
+  walltime: "04:00:00"
+
+  native:
+    slurm:
+      partition: gpu
+      qos: normal
+      constraint: a100
+```
+
+Portable resource semantics must not be silently changed by native options.
+
+Native options must be visible in the execution plan and provenance.
+
+---
+
+### 9.3 Unsupported resources
+
+If a target cannot satisfy a requested portable resource field, the framework must fail explicitly rather than silently ignore it.
+
+Example structured error:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "UNSUPPORTED_RESOURCE",
+    "message": "Target 'example' does not support gpus_per_task."
+  }
+}
+```
+
+---
+
+## 10. Target configuration
+
+Site-specific configuration must live outside project experiment configuration.
+
+A possible target configuration is:
+
+```yaml
+targets:
+
+  local:
+    transport:
+      type: local
+
+    scheduler:
+      type: local
+
+    staging:
+      type: local
+
+    container:
+      type: apptainer
+
+    workspace: "~/.local/share/shoal-run"
+
+  shoal:
+    transport:
+      type: ssh
+      host: fishvision
+
+    scheduler:
+      type: slurm
+
+    staging:
+      type: rsync
+
+    container:
+      type: apptainer
+
+    workspace: "/shoalhome/{user}/.shoal-run"
+```
+
+Target configuration may later include:
+
+- scheduler defaults;
+- partitions/queues;
+- scratch locations;
+- persistent storage locations;
+- module setup;
+- scheduler account/project;
+- site-specific environment setup;
+- staging constraints.
+
+---
+
+### 10.1 Configuration location
+
+A default user-level location should be supported, for example:
+
+```text
+~/.config/shoal-run/targets.yaml
+```
+
+The exact location may be finalized during implementation.
+
+Project repositories should not need to contain private cluster details.
+
+---
+
+### 10.2 Credentials
+
+Secrets must never be stored in:
+
+- `ExperimentSpec`;
+- target YAML committed to repositories;
+- `RunRecord`;
+- logs.
+
+Authentication should rely on external mechanisms such as:
+
+- SSH agent;
+- SSH config;
+- Kerberos/session mechanisms where required;
+- future credential stores appropriate to specific transports.
+
+---
+
+## 11. Backend interfaces
+
+The initial architecture should keep four infrastructure concerns independent.
+
+---
+
+### 11.1 Transport
+
+Responsibilities:
+
+- execute a command on the target control host;
+- test connectivity;
+- retrieve basic target capability information.
+
+Initial implementations:
+
+- `LocalTransport`
+- `SSHTransport`
+
+Conceptual interface:
+
+```python
+class Transport(Protocol):
+    def run(self, command: Command, ...) -> CommandResult:
+        ...
+```
+
+The exact Python API is not mandated by this document.
+
+---
+
+### 11.2 Scheduler
+
+Responsibilities:
+
+- submit an execution unit;
+- query scheduler state;
+- wait or poll where required;
+- cancel jobs;
+- expose accounting information where available;
+- map native scheduler states to portable states.
+
+Initial implementations:
+
+- `LocalScheduler`
+- `SlurmScheduler`
+
+Future implementations may include:
+
+- PBS Pro;
+- LSF;
+- SGE;
+- HTCondor.
+
+A Scheduler should consume a normalized execution description rather than an `ExperimentSpec` directly.
+
+---
+
+### 11.3 Stager
+
+Responsibilities:
+
+- create isolated run workspaces;
+- stage source/input files;
+- retrieve requested outputs;
+- support filesystem semantics of the target.
+
+Initial implementations:
+
+- `LocalStager`
+- `RsyncStager`
+
+A `SharedFilesystemStager` may be introduced if it makes the shoal implementation clearer.
+
+---
+
+### 11.4 ContainerRuntime
+
+Responsibilities:
+
+- construct container execution;
+- enable GPU passthrough;
+- apply bind mounts;
+- apply safe environment configuration;
+- perform basic runtime validation.
+
+Initial implementation:
+
+- `ApptainerRuntime`
+
+Example conceptual output:
+
+```bash
+apptainer exec --nv IMAGE \
+    python main.py --config CONFIG --seed SEED
+```
+
+Apptainer-specific command construction must belong to the container backend, not the Slurm backend.
+
+---
+
+## 12. Filesystem and staging model
+
+Do not assume every cluster resembles shoal.
+
+Potential target storage concepts include:
+
+```text
+$HOME       shared, persistent, often quota-limited
+$PROJECT    shared, persistent
+$SCRATCH    shared, high-throughput, temporary
+$TMPDIR     node-local
+```
+
+The architecture should eventually be able to distinguish semantic storage roles.
+
+Version 0.1 only needs what is required for shoal and local execution.
+
+---
+
+### 12.1 Immutable run workspaces
+
+Each submitted Run must receive its own isolated workspace.
+
+Never repeatedly synchronize development files into one mutable directory used by already-running jobs.
+
+Conceptually:
+
+```text
+<workspace>/
+└── runs/
+    ├── run_01.../
+    ├── run_02.../
+    └── run_03.../
+```
+
+A new local edit and submission must not alter the files being used by an existing Run.
+
+---
+
+### 12.2 Conceptual run-directory layout
+
+A remote Run may use:
+
+```text
+runs/<run-id>/
+├── source/
+├── input/
+├── runtime/
+├── output/
+├── logs/
+└── metadata/
+    ├── experiment.yaml
+    ├── config.yaml
+    ├── run.json
+    ├── provenance.json
+    └── scheduler.json
+```
+
+The physical directory layout is not a stable public API unless explicitly documented as such.
+
+---
+
+### 12.3 Staging current working trees
+
+Version 0.1 must support launching a run from the developer's current working tree without requiring:
+
+- Git commit;
+- Git push;
+- Git clone/pull on the target.
+
+This is essential for fast development cycles.
+
+`rsync` is the default reference mechanism for remote source staging.
+
+Common transient files should be excluded by default or configurable exclusions should make this straightforward.
+
+---
+
+## 13. Source provenance
+
+When the project is a Git working tree, record when practical:
+
+- current commit;
+- current branch, if useful;
+- dirty/clean status;
+- relevant dirty diff or patch.
+
+Git is used for provenance, not required as the transport protocol.
+
+An experiment must still be executable from a non-Git source directory.
+
+Missing optional Git provenance must not prevent execution.
+
+---
+
+## 14. Container provenance
+
+A run should record, when practical:
+
+- runtime type;
+- image path/reference;
+- image checksum/digest;
+- GPU mode;
+- bind mounts;
+- relevant container-specific options.
+
+Example:
+
+```json
+{
+  "runtime": "apptainer",
+  "image": "/shoalhome/user/containers/project.sif",
+  "sha256": "...",
+  "gpu": true
+}
+```
+
+If calculating an image digest is prohibitively expensive for every run, the implementation may use an explicit caching or optional strategy. It must not fabricate a digest.
+
+---
+
+## 15. Run identity
+
+Every Run receives a framework-generated immutable identifier independent of scheduler IDs.
+
+Example:
+
+```text
+run_01K...
+```
+
+Requirements:
+
+- globally unique enough for normal use;
+- safe in filesystem paths;
+- safe in JSON;
+- not derived solely from the Slurm job ID.
+
+Scheduler IDs are recorded separately.
+
+Human-friendly aliases may be added later.
+
+---
+
+## 16. Task identity
+
+Within a Run, every Task must have a stable task identifier.
+
+For a replicated experiment the logical relation may be:
+
+```text
+run_ABC
+├── task 0 → seed 0
+├── task 1 → seed 1
+├── ...
+└── task 99 → seed 99
+```
+
+A backend may map task IDs to scheduler-array indices, but they remain distinct concepts.
+
+---
+
+## 17. Portable state model
+
+Minimum Run states:
+
+- `CREATED`
+- `STAGING`
+- `SUBMITTED`
+- `QUEUED`
+- `RUNNING`
+- `SUCCEEDED`
+- `FAILED`
+- `CANCELLED`
+- `UNKNOWN`
+
+Tasks may have their own states when a Run contains multiple tasks.
+
+Native scheduler states must be translated into this model while preserving the original scheduler state when useful.
+
+For example:
+
+```json
+{
+  "state": "FAILED",
+  "backend_state": "OUT_OF_MEMORY"
+}
+```
+
+---
+
+## 18. Failure model
+
+The framework must distinguish at least:
+
+- local validation failure;
+- target configuration failure;
+- transport/connectivity failure;
+- source-staging failure;
+- scheduler-submission failure;
+- queue/execution failure;
+- scheduler timeout;
+- cancellation;
+- experiment non-zero exit;
+- result-retrieval failure;
+- provenance-recording failure where relevant.
+
+These failures must not be collapsed into one generic message if they imply different corrective actions.
+
+A result-retrieval failure after successful computation must not be reported as a computation failure.
+
+Partial logs and outputs should remain retrievable when possible after failure.
+
+---
+
+## 19. Run record and provenance
+
+A `RunRecord` should preserve, when available:
+
+- run ID;
+- experiment name;
+- framework/schema version;
+- run creation time;
+- initiator;
+- target;
+- normalized `ExperimentSpec`;
+- effective config;
+- task definitions;
+- task seeds;
+- source path/context;
+- Git commit;
+- dirty-tree status;
+- dirty diff;
+- container reference;
+- container digest/checksum;
+- portable resource request;
+- backend-native resource options;
+- scheduler type;
+- scheduler job IDs;
+- allocated nodes where available;
+- submission timestamp;
+- start timestamp;
+- completion timestamp;
+- portable final state;
+- native final state;
+- task exit codes;
+- artifact manifest;
+- retrieval state.
+
+Missing optional data must be represented as unavailable, not fabricated.
+
+---
+
+## 20. Artifacts and results
+
+Raw execution outputs should remain conceptually distinct from later analysis.
+
+Suggested categories:
+
+```text
+raw execution
+├── stdout/stderr
+├── raw result files
+├── checkpoints
+└── experiment-produced metadata
+
+derived analysis
+├── plots
+├── statistics
+└── reports
+```
+
+The framework primarily manages raw execution artifacts.
+
+Projects may choose to include analysis artifacts in their requested outputs, but the framework should not impose an analysis model in v0.1.
+
+---
+
+## 21. CLI design
+
+The CLI is the first public interface.
+
+The exact executable name may change with the project name.
+
+For this specification, examples use:
+
+```text
+shoal-run
+```
+
+---
+
+### 21.1 `validate`
+
+```bash
+shoal-run validate experiment.yaml
+```
+
+Responsibilities:
+
+- parse experiment specification;
+- validate portable schema;
+- detect obvious invalid fields;
+- not submit anything.
+
+Optional:
+
+```bash
+shoal-run validate experiment.yaml --target shoal
+```
+
+may additionally validate target capabilities.
+
+---
+
+### 21.2 `plan`
+
+```bash
+shoal-run plan experiment.yaml \
+    --config configs/test.yaml \
+    --seeds 0:9 \
+    --target shoal
+```
+
+`plan` must not submit jobs.
+
+It should expose:
+
+- normalized task set;
+- target;
+- requested resources;
+- selected execution strategy where known;
+- expected staging behavior;
+- backend/native options;
+- policy result when policy support exists.
+
+For an agent, `plan` is a key safety boundary.
+
+---
+
+### 21.3 `run`
+
+```bash
+shoal-run run experiment.yaml \
+    --config configs/test.yaml \
+    --seed 42 \
+    --target shoal
+```
+
+Semantics:
+
+```text
+validate
+  ↓
+plan
+  ↓
+stage
+  ↓
+submit
+  ↓
+wait
+  ↓
+collect metadata
+  ↓
+fetch requested outputs
+  ↓
+return meaningful exit status
+```
+
+A failed task must still allow logs and partial outputs to be collected when possible.
+
+---
+
+### 21.4 `submit`
+
+```bash
+shoal-run submit experiment.yaml \
+    --config configs/test.yaml \
+    --seeds 0:99 \
+    --target shoal
+```
+
+Semantics:
+
+```text
+validate
+  ↓
+plan
+  ↓
+stage
+  ↓
+submit
+  ↓
+record run ID
+  ↓
+return immediately
+```
+
+This is the preferred interface for long-running experiments.
+
+---
+
+### 21.5 `status`
+
+```bash
+shoal-run status <run-id>
+```
+
+For multi-task Runs, status should summarize task states.
+
+Example human output:
+
+```text
+Run: run_ABC
+State: RUNNING
+
+Tasks:
+  succeeded: 61
+  running:    8
+  queued:    31
+  failed:     0
+```
+
+---
+
+### 21.6 `logs`
+
+```bash
+shoal-run logs <run-id>
+```
+
+Task selection should be possible:
+
+```bash
+shoal-run logs <run-id> --task 17
+```
+
+Useful options may later include:
+
+```text
+--stdout
+--stderr
+--tail N
+```
+
+Agents and users should not need to know native scheduler log filenames.
+
+---
+
+### 21.7 `fetch`
+
+```bash
+shoal-run fetch <run-id>
+```
+
+Retrieves configured/requested outputs and relevant metadata.
+
+The destination must be deterministic or explicitly reported.
+
+Fetching should be idempotent where practical.
+
+---
+
+### 21.8 `cancel`
+
+```bash
+shoal-run cancel <run-id>
+```
+
+Cancels active scheduler jobs associated with the Run.
+
+Cancellation must be recorded in the RunRecord.
+
+---
+
+### 21.9 `inspect`
+
+```bash
+shoal-run inspect <run-id>
+```
+
+Returns detailed run/provenance information.
+
+---
+
+### 21.10 `list`
+
+```bash
+shoal-run list
+```
+
+Lists known Runs.
+
+Filtering by state, target, experiment, or recency may be added later.
+
+---
+
+### 21.11 `targets`
+
+```bash
+shoal-run targets
+```
+
+Lists configured targets and basic capabilities.
+
+Potential future operation:
+
+```bash
+shoal-run targets inspect shoal
+```
+
+---
+
+## 22. Structured output
+
+Every important command that returns programmatically useful information must support:
+
+```text
+--json
+```
+
+Human output may evolve more freely.
+
+Documented JSON structures are public interfaces and require greater stability.
+
+Human and JSON output must be generated from the same internal result object, not through independent execution paths.
+
+---
+
+### 22.1 Submission result example
+
+```json
+{
+  "ok": true,
+  "run_id": "run_01K2...",
+  "state": "SUBMITTED",
+  "target": "shoal",
+  "tasks": 100,
+  "backend": {
+    "scheduler": "slurm",
+    "job_ids": ["18372"]
+  }
+}
+```
+
+---
+
+### 22.2 Status result example
+
+```json
+{
+  "ok": true,
+  "run_id": "run_01K2...",
+  "state": "RUNNING",
+  "tasks": {
+    "total": 100,
+    "succeeded": 61,
+    "running": 8,
+    "queued": 31,
+    "failed": 0,
+    "cancelled": 0
+  }
+}
+```
+
+---
+
+### 22.3 Structured error example
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "RESOURCE_VALIDATION_ERROR",
+    "message": "Requested GPU resources are not valid for target 'shoal'.",
+    "details": {
+      "gpus_per_task": 4
+    }
+  }
+}
+```
+
+Failures must not be communicated only through free-form prose.
+
+CLI process exit codes should also reflect success or failure appropriately.
+
+---
+
+## 23. Agent-facing design requirements
+
+Version 0.1 does not implement an autonomous agent.
+
+It must nevertheless expose a clean substrate for agents.
+
+Required characteristics:
+
+- stable Run IDs;
+- stable Task IDs;
+- deterministic JSON output;
+- explicit seeds;
+- `plan` before submission;
+- inspectable resource requests;
+- structured errors;
+- asynchronous `submit`/`status` workflow;
+- machine-readable provenance;
+- no need to parse scheduler output;
+- no need to understand remote directory layout;
+- meaningful failure categories;
+- safe cancellation;
+- retrieval of logs and artifacts through framework operations.
+
+---
+
+### 23.1 Agent interface principle
+
+Agents should interact conceptually with:
+
+```text
+validate
+plan
+submit
+status
+logs
+fetch
+cancel
+inspect
+```
+
+rather than:
+
+```text
+ssh
+rsync
+sbatch
+squeue
+sacct
+scancel
+find slurm-*.out
+```
+
+This boundary is a central design goal.
+
+---
+
+### 23.2 Future MCP interface
+
+A future MCP server may expose the same core operations.
+
+MCP must be an interface adapter over the execution core, not the foundation of the architecture.
+
+Version 0.1 should rely on the CLI plus `--json` as the first agent-compatible interface.
+
+---
+
+## 24. Resource policy — future design constraint
+
+A future policy layer should be able to restrict autonomous execution.
+
+Example conceptual policy:
+
+```yaml
+agents:
+  development-agent:
+    allowed_targets:
+      - shoal
+
+    maximum:
+      nodes: 2
+      gpus: 2
+      walltime: "00:30:00"
+      concurrent_tasks: 16
+      gpu_hours_per_run: 2
+```
+
+Possible outcomes:
+
+```text
+allowed
+rejected
+approval_required
+```
+
+Policy evaluation belongs above scheduler submission.
+
+Scheduler accounts, QOS, partitions, and site permissions remain authoritative.
+
+No full policy engine is required for version 0.1.
+
+However, v0.1 architecture must not make such a layer difficult to add.
+
+---
+
+## 25. Parameter sweeps — future design constraint
+
+The logical task model should later generalize from:
+
+```text
+config × seed
+```
+
+to:
+
+```text
+config × parameter set × seed
+```
+
+Example future CLI:
+
+```bash
+shoal-run sweep configs/base.yaml \
+    --param density=0.1,0.2,0.3,0.4 \
+    --param noise=0.0,0.05,0.1 \
+    --replicates 20
+```
+
+The result would be:
+
+```text
+4 densities × 3 noise values × 20 seeds = 240 logical tasks
+```
+
+The backend decides whether to use:
+
+- scheduler arrays;
+- multiple jobs;
+- packed tasks;
+- another execution strategy.
+
+Version 0.1 does not require generic parameter sweeps.
+
+---
+
+## 26. Structured scientific metrics — future design constraint
+
+Experiment applications may later optionally publish a compact machine-readable result file.
+
+Example:
+
+```json
+{
+  "success": true,
+  "metrics": {
+    "accuracy": 0.843,
+    "mean_departure_time": 42.7,
+    "polarization": 0.68
+  }
+}
+```
+
+This would let agents inspect scientific results without parsing arbitrary logs or loading large result datasets.
+
+Structured metrics are distinct from arbitrary artifacts.
+
+Version 0.1 does not require scientific result interpretation.
+
+---
+
+## 27. Run lineage — future design constraint
+
+Future adaptive or agent-driven research may create Runs based on earlier Runs.
+
+A RunRecord may eventually include:
+
+```json
+{
+  "parent_run": "run_ABC",
+  "reason": "Increase replication near density=0.3",
+  "initiator": {
+    "type": "agent",
+    "name": "research-agent"
+  }
+}
+```
+
+This should support reconstruction of experiment campaigns such as:
+
+```text
+initial hypothesis
+      |
+      v
+initial sweep
+   |      |
+ run A   run B
+           |
+           v
+     agent follow-up
+       |        |
+     run C    run D
+```
+
+No lineage system is required for v0.1.
+
+---
+
+## 28. Shell and command safety
+
+Remote execution is a security boundary.
+
+Requirements:
+
+- prefer subprocess argument arrays over `shell=True`;
+- never concatenate untrusted YAML values directly into executable shell syntax;
+- quote values safely when shell scripts are unavoidable;
+- never log credentials;
+- never disable SSH host verification by default;
+- never expose a network daemon merely for convenience;
+- never bypass scheduler permissions;
+- run remote operations with the privileges of the configured user;
+- make backend-native options explicit and auditable.
+
+Generated scheduler scripts should be inspectable where practical.
+
+---
+
+## 29. Local execution backend
+
+A local backend is required early for:
+
+- development;
+- tests;
+- CI;
+- validating the orchestration model without a real cluster.
+
+Local execution should follow the same high-level model as remote execution:
+
+```text
+ExperimentSpec
+    ↓
+Run
+    ↓
+Task
+    ↓
+ContainerRuntime / command
+    ↓
+RunRecord
+    ↓
+Artifacts
+```
+
+Local execution must not be implemented as an unrelated special-case CLI path.
+
+---
+
+## 30. Shoal reference deployment
+
+The initial real-cluster integration target is shoal.
+
+Known topology:
+
+```text
+remote laptop/workstation
+        |
+        | SSH
+        v
+    fishvision
+        |
+        | Slurm control/submission
+        | shared /shoalhome
+        v
+   shoal1 ... shoal8
+        |
+        | Apptainer
+        v
+ experiment processes
+```
+
+`/shoalhome` is available on fishvision and the compute nodes through NFSv4.
+
+Shoal currently supports CPU and NVIDIA GPU workloads.
+
+A representative GPU allocation uses:
+
+```bash
+--gres=gpu:1
+```
+
+This must remain a target/backend detail rather than become part of the portable experiment model.
+
+---
+
+## 31. Shoal CPU acceptance scenario
+
+A user on a remote workstation must be able to launch a CPU experiment such as:
+
+```bash
+shoal-run run experiment.yaml \
+    --config configs/test.yaml \
+    --seed 1 \
+    --target shoal
+```
+
+without manually:
+
+- committing or pushing source;
+- SSHing interactively into fishvision;
+- synchronizing project files by hand;
+- writing an sbatch script;
+- invoking `sbatch`;
+- finding Slurm logs;
+- rsyncing result directories back.
+
+---
+
+## 32. Shoal GPU acceptance scenario
+
+The same must work for a GPU experiment whose `ExperimentSpec` requests a GPU.
+
+The generated execution must correctly provide GPU access inside Apptainer, including the equivalent of:
+
+```bash
+apptainer exec --nv ...
+```
+
+and the scheduled task must receive the appropriate scheduler GPU allocation.
+
+---
+
+## 33. Multi-seed execution
+
+Version 0.1 must support one logical Run containing multiple seeds.
+
+Example:
+
+```bash
+shoal-run submit experiment.yaml \
+    --config configs/test.yaml \
+    --seeds 0:99 \
+    --target shoal
+```
+
+The core expands this into 100 logical Tasks.
+
+The Slurm backend may optimize this using a native job array.
+
+The mapping between:
+
+- framework task ID;
+- seed;
+- Slurm array index;
+
+must be explicit and recorded.
+
+---
+
+## 34. Slurm backend
+
+Version 0.1 Slurm support must include:
+
+- submission;
+- synchronous waiting for `run`;
+- asynchronous submission for `submit`;
+- scheduler job ID capture;
+- state queries;
+- portable state mapping;
+- cancellation;
+- stdout/stderr handling;
+- exit/failure detection;
+- Slurm arrays for multi-seed runs;
+- CPU resources;
+- GPU resources.
+
+Where appropriate, the implementation may use standard Slurm commands such as:
+
+```text
+sbatch
+squeue
+sacct
+scancel
+srun
+```
+
+The rest of the application should not depend directly on their textual output formats.
+
+Parsing belongs inside the Slurm adapter.
+
+---
+
+## 35. Apptainer backend
+
+Version 0.1 assumes Apptainer is installed on the execution target.
+
+Minimum supported features:
+
+- image path;
+- normal execution;
+- NVIDIA GPU enablement;
+- bind mounts;
+- environment variables needed by the experiment.
+
+Apptainer invocation must be generated independently from Slurm submission.
+
+The architecture must remain compatible with sites still exposing the `singularity` command where practical, but implementing a separate Singularity backend is not a v0.1 requirement.
+
+---
+
+## 36. SSH transport
+
+The SSH transport should rely on normal user SSH configuration.
+
+It should support:
+
+- host aliases;
+- SSH agent authentication;
+- standard `~/.ssh/config`;
+- existing jump hosts when supported transparently by SSH.
+
+Do not build a parallel SSH configuration system unless required.
+
+The transport should not require inbound connectivity from the cluster to the client.
+
+---
+
+## 37. Rsync staging
+
+For the shoal reference implementation, rsync is the preferred source/result transport.
+
+Benefits include:
+
+- efficient incremental uploads;
+- no requirement to commit source before testing;
+- support for large project trees;
+- familiar HPC deployment semantics.
+
+Each Run must still receive an immutable source snapshot after staging.
+
+Result retrieval should remain possible separately from submission.
+
+---
+
+## 38. Persistence
+
+The client must persist enough metadata to find and manage previously submitted Runs after the original process exits.
+
+For asynchronous runs, this is mandatory.
+
+A simple local persistence mechanism is preferred for v0.1.
+
+Possible implementation:
+
+```text
+~/.local/share/shoal-run/runs/
+```
+
+with one structured record per Run.
+
+A relational database is not required for v0.1 unless implementation evidence shows that it substantially simplifies correctness.
+
+Persistence details are implementation choices, but public Run semantics must not depend on the initiating shell process remaining alive.
+
+---
+
+## 39. Concurrency and idempotency
+
+The implementation should anticipate multiple Runs existing simultaneously.
+
+Requirements:
+
+- Run IDs must avoid collisions;
+- staging one Run must not alter another;
+- status queries must be safe concurrently;
+- repeated `fetch` operations should not corrupt results;
+- repeated `cancel` requests should fail gracefully or be idempotent where practical.
+
+Distributed locking is not a v0.1 requirement unless tests demonstrate a real need.
+
+---
+
+## 40. Versioned schemas
+
+Public structured representations should include schema or format versioning where appropriate.
+
+At minimum, consider versioning for:
+
+- `ExperimentSpec`;
+- persisted `RunRecord`;
+- possibly target configuration.
+
+Example:
+
+```yaml
+version: 1
+```
+
+Do not silently reinterpret an incompatible old schema.
+
+Migration tooling is not required before there is more than one released schema version.
+
+---
+
+## 41. Logging
+
+Framework logs must be distinguishable from experiment stdout/stderr.
+
+Do not mix:
+
+```text
+shoal-run orchestration logs
+```
+
+with:
+
+```text
+scientific application stdout/stderr
+```
+
+Machine-readable result objects should expose paths or identifiers for relevant logs.
+
+Debug logging may include generated commands but must redact secrets.
+
+---
+
+## 42. Testing strategy
+
+### 42.1 Unit tests
+
+Unit tests should cover:
+
+- experiment-schema validation;
+- target-schema validation;
+- seed expansion;
+- task construction;
+- resource normalization;
+- command construction;
+- state mapping;
+- Slurm command/script generation;
+- shell quoting where unavoidable;
+- RunRecord serialization;
+- JSON result serialization;
+- error serialization;
+- artifact manifests.
+
+---
+
+### 42.2 Fake adapters
+
+Unit and integration tests must not require access to a real Slurm cluster.
+
+Implement fake/mock infrastructure adapters early.
+
+At minimum, tests should be able to simulate:
+
+```text
+SUBMITTED
+    ↓
+QUEUED
+    ↓
+RUNNING
+    ↓
+SUCCEEDED
+```
+
+and:
+
+```text
+SUBMITTED
+    ↓
+RUNNING
+    ↓
+FAILED
+```
+
+as well as cancellation.
+
+Recommended testing helpers include:
+
+- `FakeScheduler`;
+- `FakeTransport`;
+- `FakeStager`;
+- fake or recording container runtime.
+
+---
+
+### 42.3 Integration tests
+
+Default CI integration tests should cover complete orchestration without requiring shoal.
+
+Examples:
+
+- local Run lifecycle;
+- fake remote staging;
+- fake scheduler submission;
+- multi-task state aggregation;
+- run persistence;
+- JSON CLI output;
+- deterministic seed propagation;
+- failure propagation;
+- result retrieval.
+
+---
+
+### 42.4 System tests
+
+Tests requiring a real cluster must be opt-in.
+
+Shoal system tests should eventually cover:
+
+- SSH connectivity;
+- rsync staging;
+- CPU Slurm job;
+- GPU Slurm job;
+- Apptainer execution;
+- single-seed Run;
+- multi-seed array Run;
+- status querying;
+- log retrieval;
+- result retrieval;
+- cancellation;
+- experiment failure;
+- scheduler failure where safely testable.
+
+They must not run by default in ordinary CI.
+
+---
+
+## 43. Version 0.1 scope
+
+Version 0.1 is the first working vertical slice.
+
+Required infrastructure:
+
+- Python 3.12;
+- local execution;
+- SSH transport;
+- Slurm scheduler;
+- rsync staging;
+- Apptainer runtime;
+- local run persistence;
+- shoal target.
+
+Required scientific execution:
+
+- YAML config;
+- explicit seed;
+- one main executable/entry point;
+- single-seed task;
+- multi-seed task set.
+
+Required CLI operations:
+
+- `validate`;
+- `plan`;
+- `run`;
+- `submit`;
+- `status`;
+- `list`;
+- `logs`;
+- `fetch`;
+- `cancel`;
+- `inspect`;
+- `targets`.
+
+Required structured interface:
+
+- `--json` for programmatically useful commands.
+
+---
+
+## 44. Version 0.1 required scenarios
+
+The following scenarios must work before version 0.1 is considered complete.
+
+### Scenario 1 — local single-seed CPU task
+
+```text
+local source
+  ↓
+ExperimentSpec
+  ↓
+config + seed
+  ↓
+local/container execution
+  ↓
+RunRecord
+  ↓
+results
+```
+
+---
+
+### Scenario 2 — shoal single-seed CPU task
+
+```text
+client
+  ↓
+rsync
+  ↓
+fishvision
+  ↓
+Slurm
+  ↓
+shoal compute node
+  ↓
+Apptainer
+  ↓
+CPU experiment
+  ↓
+results
+  ↓
+client
+```
+
+---
+
+### Scenario 3 — shoal single-seed GPU task
+
+Same as Scenario 2 with correct scheduler GPU allocation and Apptainer NVIDIA support.
+
+---
+
+### Scenario 4 — shoal multi-seed Run
+
+One config and multiple seeds are represented as one Run and multiple Tasks.
+
+The Slurm backend uses a Slurm job array where appropriate.
+
+---
+
+### Scenario 5 — experiment failure
+
+A task exits non-zero.
+
+Requirements:
+
+- final state is correctly reported;
+- exit code is recorded;
+- stderr/stdout remain available;
+- partial outputs can be fetched where possible.
+
+---
+
+### Scenario 6 — cancellation
+
+An asynchronous Run can be cancelled through `shoal-run cancel`.
+
+The framework records the cancellation and reconciles scheduler state.
+
+---
+
+### Scenario 7 — disconnected client
+
+After:
+
+```bash
+shoal-run submit ...
+```
+
+the initiating shell process may exit.
+
+A later invocation can still:
+
+```bash
+shoal-run status <run-id>
+shoal-run logs <run-id>
+shoal-run fetch <run-id>
+```
+
+---
+
+## 45. Version 0.1 acceptance criterion
+
+A user on a remote laptop must be able to go from modified local source code to a completed shoal experiment with one framework command, without manually performing the deployment/scheduler/retrieval workflow.
+
+The primary synchronous experience should approximate:
+
+```bash
+shoal-run run experiment.yaml \
+    --config configs/test.yaml \
+    --seed 17 \
+    --target shoal
+```
+
+The primary asynchronous experience should approximate:
+
+```bash
+shoal-run submit experiment.yaml \
+    --config configs/test.yaml \
+    --seeds 0:99 \
+    --target shoal
+```
+
+followed later by:
+
+```bash
+shoal-run status <run-id>
+shoal-run logs <run-id>
+shoal-run fetch <run-id>
+```
+
+An LLM coding agent must be able to perform equivalent operations using documented CLI semantics and `--json`, without parsing scheduler-specific output.
+
+---
+
+## 46. Suggested initial repository structure
+
+A possible structure is:
+
+```text
+src/
+└── shoal_run/
+    ├── __init__.py
+    │
+    ├── domain/
+    │   ├── experiment.py
+    │   ├── run.py
+    │   ├── task.py
+    │   ├── resources.py
+    │   ├── artifacts.py
+    │   └── states.py
+    │
+    ├── orchestration/
+    │   ├── planner.py
+    │   ├── runner.py
+    │   └── provenance.py
+    │
+    ├── backends/
+    │   ├── transport/
+    │   │   ├── base.py
+    │   │   ├── local.py
+    │   │   └── ssh.py
+    │   │
+    │   ├── scheduler/
+    │   │   ├── base.py
+    │   │   ├── local.py
+    │   │   └── slurm.py
+    │   │
+    │   ├── staging/
+    │   │   ├── base.py
+    │   │   ├── local.py
+    │   │   └── rsync.py
+    │   │
+    │   └── container/
+    │       ├── base.py
+    │       └── apptainer.py
+    │
+    ├── config/
+    │   ├── experiments.py
+    │   └── targets.py
+    │
+    ├── persistence/
+    │   └── runs.py
+    │
+    └── cli/
+        ├── main.py
+        └── output.py
+
+tests/
+├── unit/
+├── integration/
+└── system/
+
+examples/
+└── minimal/
+
+docs/
+└── project_specs.md
+```
+
+This structure is guidance, not an immutable API.
+
+If implementation experience reveals a simpler decomposition with equally clear boundaries, prefer the simpler design.
+
+---
+
+## 47. Development milestones
+
+### M0 — repository skeleton and core models
+
+Deliver:
+
+- Python package;
+- `uv` project setup;
+- CLI entry point;
+- test/lint/type-check tooling;
+- core domain models;
+- schema loading/validation;
+- target configuration;
+- fake test adapters.
+
+Repository must remain runnable and tested.
+
+---
+
+### M1 — local experiment execution
+
+Deliver:
+
+- local target;
+- local staging;
+- config + explicit seed;
+- command construction;
+- Apptainer runtime;
+- local Run lifecycle;
+- isolated Run directory;
+- RunRecord;
+- artifact manifest;
+- JSON CLI output.
+
+Acceptance:
+
+```bash
+shoal-run run ... --target local
+```
+
+works for the minimal example.
+
+---
+
+### M2 — remote transport and staging
+
+Deliver:
+
+- SSH transport;
+- rsync staging;
+- remote workspace creation;
+- immutable remote source snapshot;
+- remote command execution;
+- result retrieval.
+
+Do not require Slurm yet for the transport tests.
+
+---
+
+### M3 — Slurm backend
+
+Deliver:
+
+- `sbatch` submission;
+- scheduler job ID capture;
+- state querying;
+- waiting;
+- state mapping;
+- cancellation;
+- logs;
+- scheduler metadata;
+- error handling.
+
+Unit tests must cover command/script generation without using a real Slurm installation.
+
+---
+
+### M4 — shoal vertical slice
+
+Deliver and validate on shoal:
+
+- CPU job;
+- GPU job;
+- Apptainer execution;
+- source staging;
+- config and seed propagation;
+- stdout/stderr;
+- result collection;
+- source provenance;
+- container provenance where practical;
+- remote failure handling.
+
+At the end of M4, the framework should already be useful for real development.
+
+---
+
+### M5 — replicated experiments
+
+Deliver:
+
+- logical multi-seed Task sets;
+- Slurm job-array optimization;
+- task-to-array-index mapping;
+- per-task states;
+- per-task logs;
+- aggregated Run status;
+- partial failure handling.
+
+---
+
+### M6 — hardening and v0.1 release
+
+Deliver:
+
+- complete `plan`;
+- structured errors;
+- capability validation;
+- robust persistence;
+- documentation;
+- examples;
+- system-test documentation;
+- public CLI consistency;
+- JSON-interface tests;
+- security/quoting review;
+- cleanup of premature abstractions.
+
+Version 0.1 is reached after M6 acceptance tests pass.
+
+---
+
+## 48. Post-v0.1 roadmap
+
+The order should follow concrete use cases rather than speculative completeness.
+
+A plausible roadmap is:
+
+1. parameter sweeps;
+2. improved target capability discovery;
+3. Python API;
+4. resource-policy layer;
+5. second real scheduler backend;
+6. alternative staging mechanism;
+7. run lineage;
+8. structured metrics;
+9. MCP interface;
+10. adaptive/agent-driven experiment orchestration.
+
+A second scheduler implementation should be completed before claiming that the scheduler abstraction is stable.
+
+The second backend should preferably correspond to a real cluster used by project contributors rather than a synthetic compatibility exercise.
+
+---
+
+## 49. Public API stability
+
+Before v1.0, internal Python APIs may evolve significantly.
+
+However, the following should be treated with increasing stability once documented:
+
+- experiment schema;
+- target schema;
+- CLI command names;
+- CLI argument semantics;
+- Run state names;
+- JSON output;
+- persisted RunRecord format.
+
+Breaking changes should be explicit and versioned.
+
+Human-readable formatting is not a stable API.
+
+---
+
+## 50. Documentation policy
+
+The authoritative high-level architecture and scope live in:
+
+```text
+docs/project_specs.md
+```
+
+When implementation changes:
+
+- public CLI behavior;
+- experiment schema;
+- target schema;
+- state model;
+- backend contracts;
+- provenance semantics;
+- v0.1 scope;
+
+the specification must be updated as part of the same change.
+
+Do not document an unimplemented feature as if it already works.
+
+Future-looking sections must remain clearly labeled as future constraints or roadmap items.
+
+---
+
+## 51. Architectural invariants
+
+The following are intended as durable constraints.
+
+1. **Runs are not scheduler jobs.**
+2. **Tasks are not Slurm array indices.**
+3. **Experiment definitions do not contain mandatory Slurm semantics.**
+4. **Target/site configuration is separate from scientific project configuration.**
+5. **Every stochastic Task has an explicit seed.**
+6. **Each Run executes from an isolated source snapshot.**
+7. **Machine-readable interfaces do not depend on human scheduler output.**
+8. **Infrastructure backends depend on core abstractions, not the reverse.**
+9. **Agents and humans use the same execution semantics.**
+10. **Large speculative abstractions are avoided until supported by real backends.**
+11. **No persistent remote service is required for the v0.1 reference path.**
+12. **Secrets are never embedded in experiment/run records.**
+13. **A successful computation and a successful result transfer are distinct states/events.**
+14. **Backend-native options remain explicit and auditable.**
+15. **The scheduler remains authoritative for actual resource permissions and accounting.**
+
+---
+
+## 52. Decision rule for implementation trade-offs
+
+When choosing between:
+
+```text
+a quick implementation tightly coupled to shoal/Slurm
+```
+
+and:
+
+```text
+a slightly cleaner implementation preserving an already-documented backend boundary
+```
+
+prefer the latter.
+
+When choosing between:
+
+```text
+a simple concrete implementation sufficient for the current real backend
+```
+
+and:
+
+```text
+a generalized abstraction introduced only because an imagined future backend might need it
+```
+
+prefer the former.
+
+This balance is central to the project.
+
+---
+
+## 53. Definition of done for version 0.1
+
+Version 0.1 is done when:
+
+- the minimal local example works;
+- fixed-seed behavior is reproducible;
+- a remote client can stage uncommitted source to shoal;
+- a CPU experiment can run on shoal;
+- a GPU experiment can run on shoal;
+- multi-seed execution works;
+- Slurm arrays are used correctly where appropriate;
+- asynchronous Runs survive client-process termination;
+- status/log/fetch/cancel work by Run ID;
+- failed experiments remain inspectable;
+- results can be retrieved without manual rsync;
+- Run provenance is persisted;
+- machine-readable JSON interfaces are tested;
+- unit/integration tests run without a real cluster;
+- real shoal system tests are opt-in;
+- linting, formatting, type checking, and tests pass;
+- documentation accurately reflects implemented behavior.
+
+At that point, `shoal-run` should already be useful as a practical deployment and experiment-execution tool, while retaining a credible path toward a broader portable research-execution framework.
