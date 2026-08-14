@@ -241,7 +241,16 @@ def _parse_memory(
             message="Memory must be a positive integer followed by B, KiB, MiB, GiB, or TiB",
         )
     amount, unit = match.groups()
-    return int(amount) * _MEMORY_FACTORS[unit]
+    try:
+        normalized_amount = int(amount)
+    except ValueError:
+        fail(
+            source=source,
+            path=path,
+            code="INVALID_VALUE",
+            message="Memory amount exceeds the supported numeric range",
+        )
+    return normalized_amount * _MEMORY_FACTORS[unit]
 
 
 def _parse_walltime(
@@ -258,8 +267,16 @@ def _parse_walltime(
             code="INVALID_VALUE",
             message="Walltime must use HH:MM:SS with two-digit minutes and seconds",
         )
-    hours, minutes, seconds = (int(component) for component in match.groups())
-    duration = timedelta(hours=hours, minutes=minutes, seconds=seconds)
+    try:
+        hours, minutes, seconds = (int(component) for component in match.groups())
+        duration = timedelta(hours=hours, minutes=minutes, seconds=seconds)
+    except (OverflowError, ValueError):
+        fail(
+            source=source,
+            path=path,
+            code="INVALID_VALUE",
+            message="Walltime exceeds the supported duration range",
+        )
     if duration <= timedelta(0):
         fail(
             source=source,
@@ -279,6 +296,7 @@ def _native_options(
     result: dict[str, dict[str, NativeValue]] = {}
     for backend, raw_options in native.items():
         backend_path = (*path, backend)
+        expect_string(backend, source=source, path=backend_path, nonblank=True)
         options = expect_mapping(raw_options, source=source, path=backend_path)
         result[backend] = {}
         for field, item in options.items():

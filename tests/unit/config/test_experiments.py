@@ -376,6 +376,23 @@ def test_load_config_snapshot_preserves_exact_opaque_yaml(tmp_path: Path) -> Non
     assert snapshot.content == content
 
 
+@pytest.mark.parametrize(
+    "content",
+    [b"population:\r\n  size: 100\r\n", b"population:\n  size: 100"],
+)
+def test_load_config_snapshot_preserves_newlines_and_end_of_file_exactly(
+    tmp_path: Path,
+    content: bytes,
+) -> None:
+    """Catches universal-newline conversion or adding a final newline."""
+    from shoal_run.config.experiments import load_config_snapshot
+
+    source = tmp_path / "scientific.yaml"
+    source.write_bytes(content)
+
+    assert load_config_snapshot(source).content == content.decode("utf-8")
+
+
 def test_load_config_snapshot_rejects_invalid_yaml_without_interpreting_schema(
     tmp_path: Path,
 ) -> None:
@@ -391,3 +408,185 @@ def test_load_config_snapshot_rejects_invalid_yaml_without_interpreting_schema(
 
     assert caught.value.code == "INVALID_YAML"
     assert caught.value.path == ()
+
+
+def test_load_config_snapshot_translates_complex_mapping_key_errors(
+    tmp_path: Path,
+) -> None:
+    """Catches leaking an unhashable-key TypeError through the YAML boundary."""
+    from shoal_run.config.errors import ConfigError
+    from shoal_run.config.experiments import load_config_snapshot
+
+    source = tmp_path / "scientific.yaml"
+    source.write_text("? [a, b]\n: value\n", encoding="utf-8")
+
+    with pytest.raises(ConfigError) as caught:
+        load_config_snapshot(source)
+
+    assert caught.value.code == "INVALID_TYPE"
+    assert caught.value.path == ()
+
+
+def test_load_config_snapshot_reports_the_full_nested_duplicate_path(
+    tmp_path: Path,
+) -> None:
+    """Catches losing the containing path for duplicate nested fields."""
+    from shoal_run.config.errors import ConfigError
+    from shoal_run.config.experiments import load_config_snapshot
+
+    source = tmp_path / "scientific.yaml"
+    source.write_text("outer:\n  repeated: 1\n  repeated: 2\n", encoding="utf-8")
+
+    with pytest.raises(ConfigError) as caught:
+        load_config_snapshot(source)
+
+    assert caught.value.code == "DUPLICATE_FIELD"
+    assert caught.value.path == ("outer", "repeated")
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["API_KEY", "SECRET_KEY", "SSH_CREDENTIAL", "AUTHORIZATION"],
+)
+def test_load_experiment_rejects_common_credential_environment_names(
+    tmp_path: Path,
+    field: str,
+) -> None:
+    """Catches storing common credential fields in ExperimentSpec environment."""
+    from shoal_run.config.errors import ConfigError
+    from shoal_run.config.experiments import load_experiment
+
+    source = tmp_path / "experiment.yaml"
+    source.write_text(
+        "version: 1\nexperiment: {name: x}\n"
+        f"command: {{argv: [x], environment: {{{field}: forbidden}}}}\n"
+        "resources: {}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        load_experiment(source)
+
+    assert caught.value.code == "FORBIDDEN_FIELD"
+    assert caught.value.path == ("command", "environment", field)
+
+
+def test_load_experiment_translates_walltime_overflow(tmp_path: Path) -> None:
+    """Catches leaking OverflowError for syntactically valid extreme hours."""
+    from shoal_run.config.errors import ConfigError
+    from shoal_run.config.experiments import load_experiment
+
+    source = tmp_path / "experiment.yaml"
+    source.write_text(
+        "version: 1\nexperiment: {name: x}\ncommand: {argv: [x]}\n"
+        "resources: {walltime: '999999999999999999999999:00:00'}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        load_experiment(source)
+
+    assert caught.value.code == "INVALID_VALUE"
+    assert caught.value.path == ("resources", "walltime")
+
+
+@pytest.mark.parametrize("field", ["memory", "walltime"])
+def test_load_experiment_translates_integer_digit_limit_errors(
+    tmp_path: Path,
+    field: str,
+) -> None:
+    """Catches leaking Python's integer conversion limit for huge unit values."""
+    from shoal_run.config.errors import ConfigError
+    from shoal_run.config.experiments import load_experiment
+
+    value = "9" * 5000 + ("GiB" if field == "memory" else ":00:00")
+    source = tmp_path / "experiment.yaml"
+    source.write_text(
+        "version: 1\nexperiment: {name: x}\ncommand: {argv: [x]}\n"
+        f"resources: {{{field}: '{value}'}}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        load_experiment(source)
+
+    assert caught.value.code == "INVALID_VALUE"
+    assert caught.value.path == ("resources", field)
+
+
+def test_load_experiment_rejects_blank_native_namespaces(tmp_path: Path) -> None:
+    """Catches native options that are not explicitly namespaced to a backend."""
+    from shoal_run.config.errors import ConfigError
+    from shoal_run.config.experiments import load_experiment
+
+    source = tmp_path / "experiment.yaml"
+    source.write_text(
+        "version: 1\nexperiment: {name: x}\ncommand: {argv: [x]}\n"
+        "resources: {native: {'': {partition: gpu}}}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        load_experiment(source)
+
+    assert caught.value.code == "INVALID_VALUE"
+    assert caught.value.path == ("resources", "native", "")
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["loop: &loop [*loop]\n", "node: &node {self: *node}\n"],
+)
+def test_load_config_snapshot_accepts_safe_recursive_aliases(
+    tmp_path: Path,
+    content: str,
+) -> None:
+    """Catches duplicate-path validation changing SafeLoader YAML semantics."""
+    from shoal_run.config.experiments import load_config_snapshot
+
+    source = tmp_path / "scientific.yaml"
+    source.write_text(content, encoding="utf-8")
+
+    assert load_config_snapshot(source).content == content
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "defaults: &defaults {color: red}\nitem: {<<: *defaults, size: 1}\n",
+        (
+            "first: &first {color: red}\nsecond: &second {size: 1}\n"
+            "item: {<<: [*first, *second]}\n"
+        ),
+        "defaults: &defaults {color: red}\nitem: {<<: *defaults, color: blue}\n",
+    ],
+)
+def test_load_config_snapshot_preserves_safe_yaml_merge_semantics(
+    tmp_path: Path,
+    content: str,
+) -> None:
+    """Catches duplicate validation preempting SafeLoader merge flattening."""
+    from shoal_run.config.experiments import load_config_snapshot
+
+    source = tmp_path / "scientific.yaml"
+    source.write_text(content, encoding="utf-8")
+
+    assert load_config_snapshot(source).content == content
+
+
+def test_load_config_snapshot_rejects_duplicate_merge_keys(tmp_path: Path) -> None:
+    """Catches merge tags bypassing the strict duplicate-key rule."""
+    from shoal_run.config.errors import ConfigError
+    from shoal_run.config.experiments import load_config_snapshot
+
+    source = tmp_path / "scientific.yaml"
+    source.write_text(
+        "item:\n  <<: {color: red}\n  <<: {size: 1}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        load_config_snapshot(source)
+
+    assert caught.value.code == "DUPLICATE_FIELD"
+    assert caught.value.path == ("item", "<<")

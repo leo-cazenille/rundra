@@ -188,7 +188,25 @@ def is_credential_field(field: str) -> bool:
     return normalized in {
         "password",
         "passphrase",
+        "api_key",
+        "access_key",
+        "authorization",
+        "auth_header",
         "private_key",
         "secret",
+        "secret_key",
         "token",
-    } or normalized.endswith(("_password", "_secret", "_token"))
+        "credential",
+        "credentials",
+    } or normalized.endswith(
+        (
+            "_password",
+            "_secret",
+            "_token",
+            "_api_key",
+            "_access_key",
+            "_secret_key",
+            "_credential",
+            "_credentials",
+        )
+    )
