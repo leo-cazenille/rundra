@@ -7,9 +7,10 @@ product and architecture specification is in
 
 ## Development status
 
-The repository currently contains only the M0.1 Python package and tooling
-scaffold. The CLI exposes a help screen, but experiment validation, planning,
-execution, persistence, and infrastructure backends are not implemented yet.
+The repository currently contains the M0.1 Python/tooling scaffold and the M0.2
+portable domain values. The CLI exposes a help screen, but YAML configuration
+loading, experiment planning and execution, persistence, and infrastructure
+backends are not implemented yet.
 
 Implementation progress is tracked in
 [`.agent/plans/v0.1.md`](.agent/plans/v0.1.md).
