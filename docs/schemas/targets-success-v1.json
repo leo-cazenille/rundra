@@ -1,0 +1,16 @@
+{
+  "format_version": 1,
+  "ok": true,
+  "operation": "targets",
+  "source": "examples/minimal/targets.yaml",
+  "targets": [
+    {
+      "container": {"options": {}, "type": "apptainer"},
+      "name": "local",
+      "scheduler": {"options": {}, "type": "local"},
+      "staging": {"options": {}, "type": "local"},
+      "transport": {"options": {}, "type": "local"},
+      "workspace": ".shoal-run"
+    }
+  ]
+}

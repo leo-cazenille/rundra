@@ -1,0 +1,59 @@
+{
+  "format_version": 1,
+  "ok": true,
+  "operation": "plan",
+  "plan": {
+    "experiment": "minimal",
+    "staging_backend": "local",
+    "strategy": "one_unit_per_task",
+    "target": {
+      "container": {"options": {}, "type": "apptainer"},
+      "name": "local",
+      "scheduler": {"options": {}, "type": "local"},
+      "staging": {"options": {}, "type": "local"},
+      "transport": {"options": {}, "type": "local"},
+      "workspace": ".shoal-run"
+    },
+    "units": [
+      {
+        "command": {
+          "argv": ["python", "main.py", "--config", "examples/minimal/config.yaml", "--seed", "0"],
+          "environment": {},
+          "working_directory": null
+        },
+        "config": "examples/minimal/config.yaml",
+        "resources": {
+          "cpus_per_task": 1,
+          "gpus_per_task": 0,
+          "memory_bytes": 1073741824,
+          "native": {},
+          "nodes": 1,
+          "tasks": 1,
+          "walltime_seconds": 300
+        },
+        "seed": 0,
+        "task_id": "task_000000"
+      },
+      {
+        "command": {
+          "argv": ["python", "main.py", "--config", "examples/minimal/config.yaml", "--seed", "1"],
+          "environment": {},
+          "working_directory": null
+        },
+        "config": "examples/minimal/config.yaml",
+        "resources": {
+          "cpus_per_task": 1,
+          "gpus_per_task": 0,
+          "memory_bytes": 1073741824,
+          "native": {},
+          "nodes": 1,
+          "tasks": 1,
+          "walltime_seconds": 300
+        },
+        "seed": 1,
+        "task_id": "task_000001"
+      }
+    ],
+    "version": 1
+  }
+}

@@ -189,6 +189,15 @@ def test_resource_request_rejects_invalid_native_options(native: object) -> None
         ResourceRequest(native=native)
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_resource_request_rejects_nonfinite_native_numbers(value: float) -> None:
+    """Keeps portable resource values representable in strict JSON."""
+    from shoal_run.domain.models import ResourceRequest
+
+    with pytest.raises(ValueError, match="finite"):
+        ResourceRequest(native={"slurm": {"priority": value}})
+
+
 def test_artifact_represents_only_raw_execution_categories() -> None:
     try:
         from shoal_run.domain.models import Artifact, ArtifactKind

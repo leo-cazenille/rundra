@@ -533,6 +533,28 @@ def test_load_experiment_rejects_blank_native_namespaces(tmp_path: Path) -> None
     assert caught.value.path == ("resources", "native", "")
 
 
+@pytest.mark.parametrize("value", [".nan", ".inf", "-.inf"])
+def test_load_experiment_rejects_nonfinite_native_numbers(
+    tmp_path: Path, value: str
+) -> None:
+    """Keeps every accepted native option representable in strict JSON."""
+    from shoal_run.config.errors import ConfigError
+    from shoal_run.config.experiments import load_experiment
+
+    source = tmp_path / "experiment.yaml"
+    source.write_text(
+        "version: 1\nexperiment: {name: x}\ncommand: {argv: [x]}\n"
+        f"resources: {{native: {{slurm: {{priority: {value}}}}}}}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        load_experiment(source)
+
+    assert caught.value.code == "INVALID_VALUE"
+    assert caught.value.path == ("resources", "native", "slurm", "priority")
+
+
 @pytest.mark.parametrize(
     "content",
     ["loop: &loop [*loop]\n", "node: &node {self: *node}\n"],

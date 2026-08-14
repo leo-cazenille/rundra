@@ -1,0 +1,13 @@
+{
+  "error": {
+    "code": "CONFIG_NOT_FOUND",
+    "details": {
+      "path": [],
+      "source": "missing-experiment.yaml"
+    },
+    "message": "Configuration file does not exist"
+  },
+  "format_version": 1,
+  "ok": false,
+  "operation": "validate"
+}

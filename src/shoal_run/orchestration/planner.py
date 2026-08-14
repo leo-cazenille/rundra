@@ -1,0 +1,163 @@
+from __future__ import annotations
+
+import re
+from collections.abc import Sequence
+from typing import cast
+
+from shoal_run.domain.models import (
+    Command,
+    ConfigSnapshot,
+    ExperimentSpec,
+    RunId,
+    Target,
+    Task,
+    TaskId,
+)
+from shoal_run.orchestration.models import ExecutionPlan, ExecutionUnit, PlanningError
+
+_PLACEHOLDER_PATTERN = re.compile(r"\{[^{}]+\}")
+_REQUIRED_PLACEHOLDERS = frozenset({"{config}", "{seed}"})
+
+
+def expand_seeds(*, seed: object = None, seeds: object = None) -> tuple[int, ...]:
+    """Expand one explicit seed or an inclusive ``START:STOP`` expression."""
+    if seed is None and seeds is None:
+        raise PlanningError(
+            code="SEED_REQUIRED",
+            message="Provide exactly one of seed or seeds",
+        )
+    if seed is not None and seeds is not None:
+        raise PlanningError(
+            code="SEED_CONFLICT",
+            message="seed and seeds are mutually exclusive",
+        )
+    if seed is not None:
+        if type(seed) is not int:
+            raise PlanningError(code="INVALID_SEED", message="seed must be an integer")
+        return (seed,)
+    if type(seeds) is not str:
+        raise PlanningError(
+            code="INVALID_SEED_RANGE",
+            message="seeds must use inclusive START:STOP syntax",
+        )
+    parts = seeds.split(":")
+    if len(parts) != 2:
+        raise PlanningError(
+            code="INVALID_SEED_RANGE",
+            message="seeds must use inclusive START:STOP syntax",
+        )
+    try:
+        start, stop = (int(part) for part in parts)
+    except ValueError as error:
+        raise PlanningError(
+            code="INVALID_SEED_RANGE",
+            message="seed range endpoints must be integers",
+        ) from error
+    if stop < start:
+        raise PlanningError(
+            code="INVALID_SEED_RANGE",
+            message="seed range stop must not precede start",
+        )
+    return tuple(range(start, stop + 1))
+
+
+def create_plan(
+    spec: ExperimentSpec,
+    config: ConfigSnapshot,
+    target: Target,
+    *,
+    seeds: Sequence[object],
+) -> ExecutionPlan:
+    """Create a deterministic plan without creating a Run or calling adapters."""
+    normalized_seeds = _validate_seed_set(seeds)
+    _validate_placeholders(spec.command)
+    units = tuple(
+        ExecutionUnit(
+            task_id=TaskId.from_ordinal(index),
+            seed=seed,
+            config=config,
+            command=_render_command(spec.command, config, seed),
+            resources=spec.resources,
+        )
+        for index, seed in enumerate(normalized_seeds)
+    )
+    return ExecutionPlan(
+        version=1,
+        experiment_name=spec.name,
+        target=target,
+        units=units,
+    )
+
+
+def construct_tasks(
+    run_id: RunId,
+    spec: ExperimentSpec,
+    config: ConfigSnapshot,
+    *,
+    seeds: Sequence[object],
+) -> tuple[Task, ...]:
+    """Construct logical Tasks for a caller-owned Run identifier."""
+    normalized_seeds = _validate_seed_set(seeds)
+    return tuple(
+        Task(
+            id=TaskId.from_ordinal(index),
+            run_id=run_id,
+            experiment_name=spec.name,
+            config=config,
+            seed=seed,
+            resources=spec.resources,
+        )
+        for index, seed in enumerate(normalized_seeds)
+    )
+
+
+def _validate_seed_set(seeds: Sequence[object]) -> tuple[int, ...]:
+    normalized = tuple(seeds)
+    if not normalized:
+        raise PlanningError(code="INVALID_SEEDS", message="seed set must not be empty")
+    if any(type(seed) is not int for seed in normalized):
+        raise PlanningError(
+            code="INVALID_SEEDS",
+            message="every seed must be an integer",
+        )
+    integer_seeds = cast(tuple[int, ...], normalized)
+    if len(set(integer_seeds)) != len(integer_seeds):
+        raise PlanningError(
+            code="INVALID_SEEDS",
+            message="duplicate seeds are not supported in version 0.1",
+        )
+    return integer_seeds
+
+
+def _validate_placeholders(command: Command) -> None:
+    joined = "\0".join(command.argv)
+    placeholders = frozenset(_PLACEHOLDER_PATTERN.findall(joined))
+    unknown = placeholders - _REQUIRED_PLACEHOLDERS
+    if unknown or "{" in joined.replace("{config}", "").replace("{seed}", ""):
+        raise PlanningError(
+            code="UNKNOWN_PLACEHOLDER",
+            message="command contains an unsupported placeholder",
+        )
+    missing = _REQUIRED_PLACEHOLDERS - placeholders
+    if missing:
+        raise PlanningError(
+            code="MISSING_PLACEHOLDER",
+            message="command must contain {config} and {seed} placeholders",
+        )
+
+
+def _render_command(
+    command: Command,
+    config: ConfigSnapshot,
+    seed: int,
+) -> Command:
+    return Command(
+        argv=tuple(
+            argument.replace("{config}", str(config.source)).replace(
+                "{seed}", str(seed)
+            )
+            for argument in command.argv
+        ),
+        environment=command.environment,
+        working_directory=command.working_directory,
+    )

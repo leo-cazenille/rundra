@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import StrEnum
+from math import isfinite
 from pathlib import PurePath
 from types import MappingProxyType
 from uuid import uuid4
@@ -39,6 +40,8 @@ def _freeze_scalar_options(
     for key, value in options.items():
         if type(key) is not str or type(value) not in _NATIVE_VALUE_TYPES:
             raise TypeError(f"{field_name} must map strings to scalar native values")
+        if type(value) is float and not isfinite(value):
+            raise ValueError(f"{field_name} float values must be finite")
         frozen[key] = value
     return MappingProxyType(frozen)
 

@@ -1,0 +1,13 @@
+version: 1
+
+targets:
+  local:
+    transport:
+      type: local
+    scheduler:
+      type: local
+    staging:
+      type: local
+    container:
+      type: apptainer
+    workspace: .shoal-run

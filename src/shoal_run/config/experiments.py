@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from datetime import timedelta
+from math import isfinite
 from pathlib import Path, PurePath
 
 from shoal_run.config._schema import (
@@ -314,6 +315,13 @@ def _native_options(
                     path=field_path,
                     code="INVALID_TYPE",
                     message="Native options must be scalar values",
+                )
+            if type(item) is float and not isfinite(item):
+                fail(
+                    source=source,
+                    path=field_path,
+                    code="INVALID_VALUE",
+                    message="Native numeric options must be finite",
                 )
             result[backend][field] = item
     return result

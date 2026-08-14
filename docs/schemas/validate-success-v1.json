@@ -1,0 +1,10 @@
+{
+  "experiment": {
+    "name": "minimal",
+    "schema_version": 1,
+    "source": "examples/minimal/experiment.yaml"
+  },
+  "format_version": 1,
+  "ok": true,
+  "operation": "validate"
+}

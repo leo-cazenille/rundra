@@ -641,6 +641,8 @@ Site-specific configuration must live outside project experiment configuration.
 A possible target configuration is:
 
 ```yaml
+version: 1
+
 targets:
 
   local:
@@ -1347,6 +1349,12 @@ Human output may evolve more freely.
 Documented JSON structures are public interfaces and require greater stability.
 
 Human and JSON output must be generated from the same internal result object, not through independent execution paths.
+
+The v0.1 CLI envelope has `format_version: 1`, `operation`, and `ok` at its
+root. Successful results carry an operation-specific value; failures carry an
+`error` object with `code`, `message`, and structured `details`. Normative M0
+examples are checked in under `docs/schemas/`. Backward-incompatible changes to
+those documented fields require a new format version.
 
 ---
 

@@ -7,10 +7,11 @@ product and architecture specification is in
 
 ## Development status
 
-The repository currently contains the M0.1 Python/tooling scaffold, the M0.2
-portable domain values, and strict version-1 YAML loaders from M0.3. The CLI
-exposes a help screen, but experiment planning and execution, persistence, and
-infrastructure backends are not implemented yet.
+The repository contains the M0 foundation: portable domain values, strict
+version-1 YAML loaders, pure deterministic planning, narrow backend contracts,
+and fake-driven contract tests. The CLI can validate configuration, inspect a
+non-submitting plan, and list configured targets. Experiment execution,
+persistence, and concrete infrastructure backends are not implemented yet.
 
 Implementation progress is tracked in
 [`.agent/plans/v0.1.md`](.agent/plans/v0.1.md).
@@ -36,3 +37,22 @@ uv run mypy src
 
 Do not install project dependencies globally or use a different package
 manager.
+
+## Non-executing CLI
+
+The checked example can be inspected without executing an experiment:
+
+```bash
+uv run shoal-run validate examples/minimal/experiment.yaml
+uv run shoal-run plan examples/minimal/experiment.yaml \
+  --config examples/minimal/config.yaml \
+  --seeds 0:1 \
+  --target local \
+  --targets-file examples/minimal/targets.yaml
+uv run shoal-run targets --targets-file examples/minimal/targets.yaml
+```
+
+Add `--json` to obtain the version-1 machine-readable contracts documented in
+[`docs/schemas/`](docs/schemas/). Authentication comes only from external
+transport mechanisms: credentials must never be placed in experiment files,
+target files, opaque scientific configuration, command arguments, or run data.
