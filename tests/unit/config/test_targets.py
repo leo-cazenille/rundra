@@ -1,0 +1,146 @@
+from pathlib import Path, PurePosixPath
+
+import pytest
+
+
+def test_load_targets_builds_immutable_site_configuration(tmp_path: Path) -> None:
+    """Catches mixing target selections/options into scientific configuration."""
+    from shoal_run.config.targets import load_targets
+
+    source = tmp_path / "targets.yaml"
+    source.write_text(
+        """\
+version: 1
+targets:
+  local:
+    transport: {type: local}
+    scheduler: {type: local}
+    staging: {type: local}
+    container: {type: apptainer}
+    workspace: ~/.local/share/shoal-run
+  shoal:
+    transport:
+      type: ssh
+      host: fishvision
+    scheduler: {type: slurm}
+    staging: {type: rsync}
+    container: {type: apptainer}
+    workspace: /shoalhome/{user}/.shoal-run
+""",
+        encoding="utf-8",
+    )
+
+    targets = load_targets(source)
+
+    assert tuple(targets) == ("local", "shoal")
+    assert targets["local"].workspace == PurePosixPath("~/.local/share/shoal-run")
+    assert targets["shoal"].transport.kind == "ssh"
+    assert targets["shoal"].transport.options == {"host": "fishvision"}
+    assert targets["shoal"].scheduler.kind == "slurm"
+    assert targets["shoal"].workspace == PurePosixPath("/shoalhome/{user}/.shoal-run")
+    with pytest.raises(TypeError):
+        targets["other"] = targets["local"]
+
+
+@pytest.mark.parametrize(
+    "content, code, path",
+    [
+        ("version: 2\ntargets: {}\n", "UNSUPPORTED_VERSION", ("version",)),
+        ("version: 1\n", "MISSING_FIELD", ("targets",)),
+        (
+            "version: 1\ntargets: []\n",
+            "INVALID_TYPE",
+            ("targets",),
+        ),
+        (
+            "version: 1\ntargets:\n  local:\n    transport: {type: local}\n"
+            "    scheduler: {type: local}\n    staging: {type: local}\n"
+            "    container: {type: apptainer}\n    workspace: /tmp\n"
+            "    partition: cpu\n",
+            "UNKNOWN_FIELD",
+            ("targets", "local", "partition"),
+        ),
+        (
+            "version: 1\ntargets:\n  bad:\n    transport: {type: telnet}\n"
+            "    scheduler: {type: local}\n    staging: {type: local}\n"
+            "    container: {type: apptainer}\n    workspace: /tmp\n",
+            "UNKNOWN_BACKEND",
+            ("targets", "bad", "transport", "type"),
+        ),
+        (
+            "version: 1\ntargets:\n  bad:\n    transport: {type: ssh}\n"
+            "    scheduler: {type: local}\n    staging: {type: local}\n"
+            "    container: {type: apptainer}\n    workspace: /tmp\n",
+            "MISSING_FIELD",
+            ("targets", "bad", "transport", "host"),
+        ),
+        (
+            "version: 1\ntargets:\n  bad:\n"
+            "    transport: {type: ssh, host: x, password: no}\n"
+            "    scheduler: {type: local}\n    staging: {type: local}\n"
+            "    container: {type: apptainer}\n    workspace: /tmp\n",
+            "FORBIDDEN_FIELD",
+            ("targets", "bad", "transport", "password"),
+        ),
+    ],
+)
+def test_load_targets_reports_strict_actionable_schema_errors(
+    tmp_path: Path,
+    content: str,
+    code: str,
+    path: tuple[str | int, ...],
+) -> None:
+    """Catches permissive site schemas or backend errors without field paths."""
+    from shoal_run.config.errors import ConfigError
+    from shoal_run.config.targets import load_targets
+
+    source = tmp_path / "targets.yaml"
+    source.write_text(content, encoding="utf-8")
+
+    with pytest.raises(ConfigError) as caught:
+        load_targets(source)
+
+    assert caught.value.code == code
+    assert caught.value.path == path
+
+
+@pytest.mark.parametrize(
+    "role, kind",
+    [
+        ("transport", "slurm"),
+        ("scheduler", "ssh"),
+        ("staging", "apptainer"),
+        ("container", "local"),
+    ],
+)
+def test_load_targets_rejects_known_backend_in_the_wrong_role(
+    tmp_path: Path,
+    role: str,
+    kind: str,
+) -> None:
+    """Catches treating backend names as interchangeable plugin identifiers."""
+    from shoal_run.config.errors import ConfigError
+    from shoal_run.config.targets import load_targets
+
+    sections = {
+        "transport": "local",
+        "scheduler": "local",
+        "staging": "local",
+        "container": "apptainer",
+    }
+    sections[role] = kind
+    source = tmp_path / "targets.yaml"
+    source.write_text(
+        "version: 1\ntargets:\n  bad:\n"
+        + "".join(
+            f"    {name}: {{type: {value}}}\n" for name, value in sections.items()
+        )
+        + "    workspace: /tmp\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        load_targets(source)
+
+    assert caught.value.code == "UNKNOWN_BACKEND"
+    assert caught.value.path == ("targets", "bad", role, "type")

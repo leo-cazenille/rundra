@@ -8,7 +8,9 @@ version = "0.1.0.dev0"
 description = "Portable experiment execution for scientific computing"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+    "pyyaml>=6.0.2,<7",
+]
 
 [project.scripts]
 shoal-run = "shoal_run.cli.main:main"
@@ -21,6 +23,7 @@ dev = [
   "mypy>=1.14",
   "pytest>=8.3",
   "ruff>=0.9",
+  "types-pyyaml>=6.0.12",
 ]
 
 [tool.pytest.ini_options]
