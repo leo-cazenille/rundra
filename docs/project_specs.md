@@ -709,6 +709,13 @@ Target configuration may later include:
 - site-specific environment setup;
 - staging constraints.
 
+Version-1 target files accept only executable backend stacks: all-local
+transport/scheduler/staging with either native or Apptainer execution, or the
+SSH/Slurm/rsync/Apptainer reference path. SSH workspaces must be absolute,
+non-root paths. This is static configuration validation; executable discovery,
+connectivity, authentication, and site availability remain execution preflight
+concerns and are never contacted by `plan`.
+
 ---
 
 ### 10.1 Configuration location
@@ -1262,6 +1269,20 @@ It should expose:
 - policy result when policy support exists.
 
 For an agent, `plan` is a key safety boundary.
+
+The version-1 plan result exposes normalized plan-level resources and
+backend-native options, the selected execution strategy and Task grouping,
+explicit array mapping when applicable, and expected staging transfers,
+workspace root, input sealing, and result retrieval. A successful plan has
+statically validated the configured backend stack, container/resource
+compatibility, GPU allocation versus device passthrough, native scheduler
+namespace, and Slurm's v0.1 native-option allowlist.
+
+Planning reads and validates its experiment, effective config, target, and
+launch inputs only. It does not contact the target, discover executables, run
+preflight, allocate a Run ID or RunRecord, create a local or remote workspace,
+stage data, or submit work. The JSON `validation` and `safety` objects state
+these guarantees explicitly; the human renderer reports the same boundary.
 
 ---
 

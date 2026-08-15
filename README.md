@@ -15,7 +15,9 @@ M0 through M5 are complete; M6 release hardening is in progress. The checked
 Shoal path has passed separately gated CPU, GPU, controlled-failure, and
 three-element Slurm-array system tests. M6.1 audits every public CLI operation,
 common `--json` placement, deterministic output, structured usage errors, and
-process exit semantics.
+process exit semantics. M6.2 statically validates executable target stacks,
+container/GPU/resource compatibility, and scheduler-native options before
+execution, while making `plan` safety and staging behavior explicit.
 
 Rundra has
 portable domain and configuration models,
@@ -193,6 +195,14 @@ uv run rundr plan examples/minimal/experiment.yaml \
   --targets-file examples/minimal/targets.yaml
 uv run rundr targets --targets-file examples/minimal/targets.yaml
 ```
+
+Human plans summarize resources, native options, execution strategy, staging,
+and the offline safety boundary. With `--json`, the plan additionally exposes
+normalized `resources` and `native_options`, structured `staging` and
+`validation`, and a `safety` object confirming that planning contacts no target,
+creates no workspace or Run, and submits nothing. Capability validation here is
+static: live SSH, scheduler, rsync, and Apptainer availability is checked only
+when execution or an explicit preflight is requested.
 
 Lifecycle commands use `~/.local/share/rundra/runs` by default; pass
 `--data-dir` to select another record store. Synchronous `run` executes one
