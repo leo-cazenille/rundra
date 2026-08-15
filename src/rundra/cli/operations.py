@@ -864,7 +864,11 @@ def logs_operation(
     if error is not None:
         return OperationResult.failure("logs", error)
     assert record is not None
-    if record.run.target.scheduler.kind == "slurm":
+    if record.run.target.scheduler.kind == "slurm" and record.run.state not in {
+        ExecutionState.SUCCEEDED,
+        ExecutionState.FAILED,
+        ExecutionState.CANCELLED,
+    }:
         try:
             active_scheduler = scheduler or _record_slurm_scheduler(record)
             record = SchedulerLifecycleService(

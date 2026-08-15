@@ -15,6 +15,8 @@ from rundra.cli.operations import (
 )
 from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import (
+    Artifact,
+    ArtifactKind,
     BackendConfig,
     Command,
     ConfigSnapshot,
@@ -402,6 +404,48 @@ def test_logs_use_normalized_artifacts_without_exposing_slurm_filenames(
     ]
     persisted = store.load(_RUN_ID)
     assert persisted.scheduler_metadata["source"] == "sacct"
+
+
+def test_terminal_array_logs_select_stable_task_without_scheduler_query(
+    tmp_path: Path,
+) -> None:
+    record = _array_record()
+    tasks = tuple(
+        replace(task, state=ExecutionState.SUCCEEDED) for task in record.run.tasks
+    )
+    artifacts = tuple(
+        Artifact(
+            kind,
+            PurePosixPath(f"/remote/logs/777_{index}.{suffix}"),
+            task_id=task.id,
+        )
+        for index, task in enumerate(tasks)
+        for kind, suffix in (
+            (ArtifactKind.STDOUT, "stdout"),
+            (ArtifactKind.STDERR, "stderr"),
+        )
+    )
+    terminal = replace(
+        record,
+        run=replace(record.run, tasks=tasks, state=ExecutionState.SUCCEEDED),
+        artifacts=artifacts,
+    )
+    store = JsonRunStore(tmp_path / "records")
+    store.create(terminal)
+    transport = LogTransport()
+
+    by_ordinal = logs_operation(str(_RUN_ID), store, task="1", transport=transport)
+    by_id = logs_operation(str(_RUN_ID), store, task="task_000002", transport=transport)
+    unspecified = logs_operation(str(_RUN_ID), store, transport=transport)
+
+    assert by_ordinal.ok and isinstance(by_ordinal.value, LogsValue)
+    assert by_ordinal.value.task_id == TaskId.from_ordinal(1)
+    assert str(by_ordinal.value.stdout_path).endswith("777_1.stdout")
+    assert by_id.ok and isinstance(by_id.value, LogsValue)
+    assert by_id.value.task_id == TaskId.from_ordinal(2)
+    assert str(by_id.value.stderr_path).endswith("777_2.stderr")
+    assert unspecified.error is not None
+    assert unspecified.error.code == "TASK_REQUIRED"
 
 
 def test_cancel_operation_reconciles_by_run_id(tmp_path: Path) -> None:

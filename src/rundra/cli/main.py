@@ -89,7 +89,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     logs = subparsers.add_parser("logs", help="read framework-managed Task logs")
     logs.add_argument("run_id")
-    logs.add_argument("--task")
+    logs.add_argument(
+        "--task",
+        metavar="TASK_ID_OR_INDEX",
+        help="select one Task by stable ID or zero-based ordinal",
+    )
     _add_store_option(logs)
     _add_json_option(logs)
 
