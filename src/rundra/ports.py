@@ -168,12 +168,25 @@ class StagedWorkspace:
 
     root: PurePath
     source: PurePath
+    inputs: PurePath
     config: PurePath
+    runtime: PurePath
     outputs: PurePath
+    logs: PurePath
+    metadata: PurePath
     artifacts: tuple[Artifact, ...] = ()
 
     def __post_init__(self) -> None:
-        for name in ("root", "source", "config", "outputs"):
+        for name in (
+            "root",
+            "source",
+            "inputs",
+            "config",
+            "runtime",
+            "outputs",
+            "logs",
+            "metadata",
+        ):
             if not isinstance(getattr(self, name), PurePath):
                 raise TypeError(f"StagedWorkspace {name} must be a PurePath")
         object.__setattr__(self, "artifacts", _freeze_artifacts(self.artifacts))
@@ -197,6 +210,11 @@ class FetchRequest:
         patterns = tuple(self.patterns)
         if any(type(pattern) is not str or not pattern for pattern in patterns):
             raise ValueError("FetchRequest patterns must be nonempty strings")
+        if any(
+            PurePath(pattern).is_absolute() or ".." in PurePath(pattern).parts
+            for pattern in patterns
+        ):
+            raise ValueError("FetchRequest patterns must be safe relative patterns")
         object.__setattr__(self, "patterns", patterns)
 
 

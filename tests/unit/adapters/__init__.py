@@ -1,0 +1,1 @@
+"""Concrete adapter unit tests."""

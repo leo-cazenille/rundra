@@ -92,10 +92,14 @@ def test_fake_stager_and_recording_runtime_are_structural_ports() -> None:
         RunId.new(), spec, config, target, PurePosixPath("project")
     )
     workspace = StagedWorkspace(
-        PurePosixPath("run"),
-        PurePosixPath("run/source"),
-        PurePosixPath("run/config.yaml"),
-        PurePosixPath("run/outputs"),
+        root=PurePosixPath("run"),
+        source=PurePosixPath("run/source"),
+        inputs=PurePosixPath("run/input"),
+        config=PurePosixPath("run/input/config.yaml"),
+        runtime=PurePosixPath("run/runtime"),
+        outputs=PurePosixPath("run/output"),
+        logs=PurePosixPath("run/logs"),
+        metadata=PurePosixPath("run/metadata"),
     )
     fetch_request = FetchRequest(workspace, ("results/**",), PurePosixPath("retrieved"))
     fetch_result = FetchResult(())

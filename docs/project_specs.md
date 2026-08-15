@@ -891,6 +891,26 @@ runs/<run-id>/
 
 The physical directory layout is not a stable public API unless explicitly documented as such.
 
+The M1 local implementation follows this layout through backend-neutral
+`StagedWorkspace` paths. It copies the source tree and exact effective config,
+then removes all write bits from `source/` and `input/` before returning the
+workspace. `runtime/`, `output/`, `logs/`, and `metadata/` remain explicitly
+writable. This permission sealing enforces the orchestration invariant during
+normal execution; it is not a security boundary against the owning user, who
+can deliberately change permissions.
+
+Local source symlinks are dereferenced into the snapshot so later changes to a
+link target cannot alter an existing Run. Common transient directories are
+excluded by default, including version-control metadata, virtual environments,
+Python caches, test/type/lint caches, and Rundra's own `.rundra` workspace.
+Experiment `sync.exclude` patterns add to those defaults. Unsafe absolute or
+parent-traversing patterns are rejected.
+
+Local fetch treats patterns as relative to `output/`, rejects symlink results
+and destinations inside the Run workspace, and atomically replaces each copied
+destination file. Repeating the same fetch is therefore safe and updates an
+existing retrieved file without partially overwriting it.
+
 ---
 
 ### 12.3 Staging current working trees
