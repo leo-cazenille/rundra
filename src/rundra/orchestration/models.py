@@ -12,6 +12,10 @@ from rundra.domain.models import (
     TaskId,
 )
 
+ONE_UNIT_PER_TASK = "one_unit_per_task"
+SLURM_ARRAY = "slurm_array"
+_EXECUTION_STRATEGIES = frozenset({ONE_UNIT_PER_TASK, SLURM_ARRAY})
+
 
 class PlanningError(Exception):
     """A deterministic, structured failure to construct an execution plan."""
@@ -53,6 +57,23 @@ class ExecutionUnit:
 
 
 @dataclass(frozen=True, slots=True)
+class ExecutionGroup:
+    """An ordered group of logical Tasks sharing one submission strategy."""
+
+    task_ids: tuple[TaskId, ...]
+
+    def __post_init__(self) -> None:
+        task_ids = tuple(self.task_ids)
+        if any(type(task_id) is not TaskId for task_id in task_ids):
+            raise TypeError("ExecutionGroup task_ids must contain only TaskIds")
+        if not task_ids:
+            raise ValueError("ExecutionGroup must contain at least one Task ID")
+        if len(set(task_ids)) != len(task_ids):
+            raise ValueError("ExecutionGroup Task IDs must be unique")
+        object.__setattr__(self, "task_ids", task_ids)
+
+
+@dataclass(frozen=True, slots=True)
 class ExecutionPlan:
     """A pure prospective plan; it is not a Run and submits nothing."""
 
@@ -60,7 +81,8 @@ class ExecutionPlan:
     experiment_name: str
     target: Target
     units: tuple[ExecutionUnit, ...]
-    strategy: str = "one_unit_per_task"
+    groups: tuple[ExecutionGroup, ...]
+    strategy: str = ONE_UNIT_PER_TASK
     staging_backend: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -70,8 +92,8 @@ class ExecutionPlan:
             raise ValueError("ExecutionPlan experiment_name must be nonblank")
         if type(self.target) is not Target:
             raise TypeError("ExecutionPlan target must be a Target")
-        if type(self.strategy) is not str or not self.strategy.strip():
-            raise ValueError("ExecutionPlan strategy must be nonblank")
+        if self.strategy not in _EXECUTION_STRATEGIES:
+            raise ValueError("ExecutionPlan strategy is unsupported")
         units = tuple(self.units)
         if any(type(unit) is not ExecutionUnit for unit in units):
             raise TypeError("ExecutionPlan units must contain only ExecutionUnits")
@@ -87,5 +109,28 @@ class ExecutionPlan:
         effective_config = units[0].config
         if any(unit.config != effective_config for unit in units[1:]):
             raise ValueError("ExecutionPlan units must share one effective config")
+        groups = tuple(self.groups)
+        if any(type(group) is not ExecutionGroup for group in groups):
+            raise TypeError("ExecutionPlan groups must contain ExecutionGroups")
+        grouped_ids = tuple(task_id for group in groups for task_id in group.task_ids)
+        unit_ids = tuple(unit.task_id for unit in units)
+        if grouped_ids != unit_ids:
+            raise ValueError(
+                "ExecutionPlan groups must partition Task IDs in plan order"
+            )
+        if self.strategy == ONE_UNIT_PER_TASK and any(
+            len(group.task_ids) != 1 for group in groups
+        ):
+            raise ValueError(
+                "one_unit_per_task strategy requires singleton execution groups"
+            )
+        if self.strategy == SLURM_ARRAY:
+            if self.target.scheduler.kind != "slurm":
+                raise ValueError("slurm_array strategy requires a Slurm target")
+            if len(units) < 2 or len(groups) != 1:
+                raise ValueError(
+                    "slurm_array strategy requires one multi-Task execution group"
+                )
         object.__setattr__(self, "units", units)
+        object.__setattr__(self, "groups", groups)
         object.__setattr__(self, "staging_backend", self.target.staging.kind)

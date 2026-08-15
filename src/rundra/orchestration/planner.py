@@ -13,7 +13,14 @@ from rundra.domain.models import (
     Task,
     TaskId,
 )
-from rundra.orchestration.models import ExecutionPlan, ExecutionUnit, PlanningError
+from rundra.orchestration.models import (
+    ONE_UNIT_PER_TASK,
+    SLURM_ARRAY,
+    ExecutionGroup,
+    ExecutionPlan,
+    ExecutionUnit,
+    PlanningError,
+)
 
 _PLACEHOLDER_PATTERN = re.compile(r"\{[^{}]+\}")
 _REQUIRED_PLACEHOLDERS = frozenset({"{config}", "{seed}"})
@@ -82,6 +89,12 @@ def create_plan(
         experiment_name=spec.name,
         target=target,
         units=units,
+        groups=_execution_groups(target, units),
+        strategy=(
+            SLURM_ARRAY
+            if target.scheduler.kind == "slurm" and len(units) > 1
+            else ONE_UNIT_PER_TASK
+        ),
     )
 
 
@@ -123,6 +136,14 @@ def _validate_seed_set(seeds: Sequence[object]) -> tuple[int, ...]:
             message="duplicate seeds are not supported in version 0.1",
         )
     return integer_seeds
+
+
+def _execution_groups(
+    target: Target, units: tuple[ExecutionUnit, ...]
+) -> tuple[ExecutionGroup, ...]:
+    if target.scheduler.kind == "slurm" and len(units) > 1:
+        return (ExecutionGroup(tuple(unit.task_id for unit in units)),)
+    return tuple(ExecutionGroup((unit.task_id,)) for unit in units)
 
 
 def _validate_placeholders(command: Command) -> None:

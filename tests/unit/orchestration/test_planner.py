@@ -103,6 +103,10 @@ def test_create_plan_is_deterministic_inspectable_and_does_not_create_a_run() ->
     assert first.experiment_name == "example"
     assert first.target == _target()
     assert first.strategy == "one_unit_per_task"
+    assert [group.task_ids for group in first.groups] == [
+        (first.units[0].task_id,),
+        (first.units[1].task_id,),
+    ]
     assert first.staging_backend == "local"
     assert [str(unit.task_id) for unit in first.units] == [
         "task_000000",
@@ -204,6 +208,7 @@ def test_execution_plan_rejects_unstable_ids_duplicate_seeds_and_configs() -> No
         "version": plan.version,
         "experiment_name": plan.experiment_name,
         "target": plan.target,
+        "groups": plan.groups,
     }
 
     with pytest.raises(ValueError, match="contiguous ordinal Task IDs"):
@@ -221,3 +226,70 @@ def test_execution_plan_rejects_unstable_ids_duplicate_seeds_and_configs() -> No
             ),
             **common,
         )
+
+
+def test_slurm_multi_task_plan_selects_one_array_group() -> None:
+    from dataclasses import replace
+
+    from rundra.domain.models import BackendConfig
+    from rundra.orchestration.planner import create_plan
+
+    target = replace(_target(), scheduler=BackendConfig("slurm"))
+    plan = create_plan(_spec(), _config(), target, seeds=(4, 9, 12))
+
+    assert plan.strategy == "slurm_array"
+    assert len(plan.groups) == 1
+    assert plan.groups[0].task_ids == tuple(unit.task_id for unit in plan.units)
+    assert [unit.seed for unit in plan.units] == [4, 9, 12]
+
+
+def test_single_task_slurm_plan_does_not_select_an_array() -> None:
+    from dataclasses import replace
+
+    from rundra.domain.models import BackendConfig
+    from rundra.orchestration.planner import create_plan
+
+    target = replace(_target(), scheduler=BackendConfig("slurm"))
+    plan = create_plan(_spec(), _config(), target, seeds=(4,))
+
+    assert plan.strategy == "one_unit_per_task"
+    assert plan.groups[0].task_ids == (plan.units[0].task_id,)
+
+
+def test_execution_plan_rejects_invalid_group_partitions_and_strategies() -> None:
+    from dataclasses import replace
+
+    from rundra.domain.models import BackendConfig, TaskId
+    from rundra.orchestration.models import ExecutionGroup, ExecutionPlan
+    from rundra.orchestration.planner import create_plan
+
+    local = create_plan(_spec(), _config(), _target(), seeds=(4, 9))
+    common = {
+        "version": local.version,
+        "experiment_name": local.experiment_name,
+        "target": local.target,
+        "units": local.units,
+    }
+
+    with pytest.raises(ValueError, match="partition Task IDs in plan order"):
+        ExecutionPlan(groups=(ExecutionGroup((TaskId.from_ordinal(1),)),), **common)
+    with pytest.raises(ValueError, match="singleton execution groups"):
+        ExecutionPlan(
+            groups=(ExecutionGroup(tuple(unit.task_id for unit in local.units)),),
+            **common,
+        )
+    with pytest.raises(ValueError, match="requires a Slurm target"):
+        ExecutionPlan(groups=local.groups, strategy="slurm_array", **common)
+
+    slurm_target = replace(local.target, scheduler=BackendConfig("slurm"))
+    with pytest.raises(ValueError, match="one multi-Task execution group"):
+        ExecutionPlan(
+            version=local.version,
+            experiment_name=local.experiment_name,
+            target=slurm_target,
+            units=local.units,
+            groups=local.groups,
+            strategy="slurm_array",
+        )
+    with pytest.raises(ValueError, match="unsupported"):
+        ExecutionPlan(groups=local.groups, strategy="future", **common)
