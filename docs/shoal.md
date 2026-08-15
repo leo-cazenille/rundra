@@ -216,3 +216,55 @@ accounting is absent.
 As with M4.3, retained evidence is isolated by Run ID. Inspect the terminal
 record before removing only its exact remote Run directory and scheduler log
 paths; never recursively clean the workspace root.
+
+## M4.5 bounded failure scenarios
+
+M4.5 has another independent opt-in. The checked
+`examples/shoal/failure` experiment requests one node/task/CPU, no GPU, 1 GiB,
+and five minutes. It writes a partial raw result and both log streams before
+deliberately exiting 23. The same module also exercises a non-submitting remote
+staging failure:
+
+```bash
+RUNDRA_SHOAL_TARGETS_FILE=/tmp/rundra-shoal-targets.yaml \
+RUNDRA_SHOAL_CPU_IMAGE=/absolute/path/to/cpu-image.sif \
+  uv run pytest tests/system/test_shoal_failures.py \
+    -m 'shoal_system and shoal_failure' \
+    --run-shoal-system-tests \
+    --run-shoal-failure-tests \
+    -vv
+```
+
+The experiment-failure test plans and preflights the exact bounded request
+before submitting its single job. It expects CLI exit 2 with a successful
+structured operation containing a failed Run, then verifies native/portable
+state, exit 23, normalized stdout/stderr, and successful retrieval of the
+partial output.
+
+The infrastructure test copies the operator target to a temporary file and
+uses the existing CPU image regular file as an intentionally impossible
+workspace root. It performs a pure plan but intentionally does not preflight
+that invalid target: the purpose is to validate the durable orchestration
+failure that preflight would normally prevent. Remote `stat` output must be
+identical before and after. The structured operation must fail with CLI exit 1
+and `STAGING_FAILED`; retrieval remains `NOT_REQUESTED`, and no Slurm job,
+allocated node, task exit, or artifact may appear.
+
+### Recorded M4.5 observation
+
+On 2026-08-15, the deliberate experiment failure passed all assertions in
+15.86 seconds. Its durable scheduler and portable states were `FAILED`, exit 23
+was exact, and retrieval was `SUCCEEDED`. The retrieved partial file contained
+seed 29, the exact `label: shoal-failure` configuration, and its pre-exit marker;
+both normalized log streams remained available by Run ID.
+
+The safe staging scenario passed in 2.47 seconds without submitting a job. The
+remote allocator could not create `runs/` below the regular image file, and
+Rundra recorded `STAGING_FAILED` without fabricating downstream state. The
+remote image's reported file type and size were unchanged. No production
+adapter correction was required by either scenario.
+
+Retain the failed experiment's exact Run directory and scheduler logs only as
+long as the evidence is useful, then remove those precise paths after checking
+the terminal record. The staging-failure scenario creates no remote Run
+directory or scheduler logs.

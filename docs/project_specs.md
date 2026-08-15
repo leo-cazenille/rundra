@@ -2376,6 +2376,18 @@ state, and the durable requested resources. GPU-related environment variables
 inside an Apptainer `--cleanenv` process are diagnostic only and are not treated
 as authoritative allocation evidence.
 
+M4.5 uses a separate opt-in for two bounded real-backend failure scenarios. A
+one-CPU experiment writes a partial raw result and both log streams before a
+deliberate non-zero exit; Rundra must preserve failed computation and the exact
+exit while independently completing retrieval. A safe staging scenario points
+a temporary target workspace at an existing regular image file, verifies that
+file before and after, and expects remote workspace allocation to fail before
+submission. The durable failure must remain `STAGING_FAILED` with retrieval
+`NOT_REQUESTED` and no invented scheduler reference, node, exit, or artifact.
+The intentional staging failure performs a pure plan but not the normal remote
+preflight, because preflight would prevent creation of the RunRecord whose
+failure semantics the scenario validates.
+
 Shoal system tests should eventually cover:
 
 - SSH connectivity;
