@@ -2,6 +2,51 @@ from __future__ import annotations
 
 import pytest
 
+from rundra.domain.states import ExecutionState, aggregate_execution_state
+
+
+@pytest.mark.parametrize(
+    ("states", "expected"),
+    [
+        ((ExecutionState.SUCCEEDED,) * 2, ExecutionState.SUCCEEDED),
+        (
+            (ExecutionState.SUCCEEDED, ExecutionState.CANCELLED),
+            ExecutionState.CANCELLED,
+        ),
+        (
+            (ExecutionState.CANCELLED, ExecutionState.FAILED),
+            ExecutionState.FAILED,
+        ),
+        (
+            (ExecutionState.FAILED, ExecutionState.RUNNING),
+            ExecutionState.RUNNING,
+        ),
+        (
+            (ExecutionState.SUCCEEDED, ExecutionState.QUEUED),
+            ExecutionState.QUEUED,
+        ),
+        (
+            (ExecutionState.SUCCEEDED, ExecutionState.SUBMITTED),
+            ExecutionState.SUBMITTED,
+        ),
+        (
+            (ExecutionState.SUCCEEDED, ExecutionState.UNKNOWN),
+            ExecutionState.UNKNOWN,
+        ),
+    ],
+)
+def test_aggregate_execution_state_has_deterministic_mixed_task_precedence(
+    states: tuple[ExecutionState, ...], expected: ExecutionState
+) -> None:
+    assert aggregate_execution_state(states) is expected
+
+
+def test_aggregate_execution_state_rejects_empty_or_nonportable_values() -> None:
+    with pytest.raises(ValueError, match="must not be empty"):
+        aggregate_execution_state(())
+    with pytest.raises(TypeError, match="ExecutionState"):
+        aggregate_execution_state(("RUNNING",))  # type: ignore[arg-type]
+
 
 def test_execution_transition_table_is_explicit_and_complete() -> None:
     from rundra.domain.states import ExecutionState, validate_execution_transition

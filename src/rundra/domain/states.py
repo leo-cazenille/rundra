@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from enum import StrEnum
 
 
@@ -22,6 +23,46 @@ class RetrievalState(StrEnum):
     PENDING = "PENDING"
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
+
+
+def aggregate_execution_state(states: Sequence[ExecutionState]) -> ExecutionState:
+    """Derive one Run state without hiding active Tasks behind terminal outcomes.
+
+    A Run becomes terminal only after every Task is terminal. Mixed terminal
+    outcomes then use FAILED > CANCELLED > SUCCEEDED precedence. While work is
+    active, RUNNING > QUEUED > SUBMITTED > STAGING > CREATED; UNKNOWN is used
+    when no active state can describe the incomplete Task set.
+    """
+    if not isinstance(states, Sequence) or isinstance(states, (str, bytes)):
+        raise TypeError("Aggregate execution states must be a sequence")
+    normalized = tuple(states)
+    if not normalized:
+        raise ValueError("Aggregate execution states must not be empty")
+    if any(type(state) is not ExecutionState for state in normalized):
+        raise TypeError("Aggregate execution states must contain ExecutionState values")
+    terminal = frozenset(
+        {
+            ExecutionState.SUCCEEDED,
+            ExecutionState.FAILED,
+            ExecutionState.CANCELLED,
+        }
+    )
+    if all(state in terminal for state in normalized):
+        if ExecutionState.FAILED in normalized:
+            return ExecutionState.FAILED
+        if ExecutionState.CANCELLED in normalized:
+            return ExecutionState.CANCELLED
+        return ExecutionState.SUCCEEDED
+    for state in (
+        ExecutionState.RUNNING,
+        ExecutionState.QUEUED,
+        ExecutionState.SUBMITTED,
+        ExecutionState.STAGING,
+        ExecutionState.CREATED,
+    ):
+        if state in normalized:
+            return state
+    return ExecutionState.UNKNOWN
 
 
 _ALLOWED_EXECUTION_TRANSITIONS: dict[ExecutionState, frozenset[ExecutionState]] = {

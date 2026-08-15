@@ -51,6 +51,8 @@ _RECORD_FIELDS = frozenset(
         "native_state",
         "scheduler_metadata",
         "task_array_mapping",
+        "task_scheduler_ids",
+        "task_native_states",
         "task_exit_codes",
         "artifacts",
     }
@@ -89,6 +91,8 @@ def record_to_dict(record: RunRecord) -> JsonObject:
             }
             for item in record.task_array_mapping
         ],
+        "task_scheduler_ids": _task_string_mapping(record.task_scheduler_ids),
+        "task_native_states": _task_string_mapping(record.task_native_states),
         "task_exit_codes": {
             str(task_id): exit_code
             for task_id, exit_code in sorted(
@@ -108,6 +112,8 @@ def record_from_dict(value: object) -> RunRecord:
     if version != 1:
         raise RunRecordFormatError(f"unsupported format_version {version}")
     document.setdefault("task_array_mapping", [])
+    document.setdefault("task_scheduler_ids", {})
+    document.setdefault("task_native_states", {})
     _exact_fields(document, _RECORD_FIELDS, path="record")
     run = _parse_run(document["run"], path="run")
     try:
@@ -152,6 +158,12 @@ def record_from_dict(value: object) -> RunRecord:
             task_array_mapping=_parse_task_array_mapping(
                 document["task_array_mapping"]
             ),
+            task_scheduler_ids=_parse_task_string_mapping(
+                document["task_scheduler_ids"], path="task_scheduler_ids"
+            ),
+            task_native_states=_parse_task_string_mapping(
+                document["task_native_states"], path="task_native_states"
+            ),
             task_exit_codes=_parse_exit_codes(document["task_exit_codes"]),
             artifacts=_parse_artifacts(document["artifacts"]),
         )
@@ -167,6 +179,15 @@ def _path_or_none(value: object) -> str | None:
 
 def _datetime_or_none(value: datetime | None) -> str | None:
     return None if value is None else value.isoformat()
+
+
+def _task_string_mapping(value: Mapping[TaskId, str]) -> JsonObject:
+    return {
+        str(task_id): native_value
+        for task_id, native_value in sorted(
+            value.items(), key=lambda item: item[0].value
+        )
+    }
 
 
 def _command_to_dict(command: Command) -> JsonObject:
@@ -560,6 +581,20 @@ def _parse_exit_codes(value: object) -> dict[TaskId, int]:
         except (TypeError, ValueError) as error:
             _invalid(f"task_exit_codes.{task_id}", error)
         result[parsed_task_id] = _integer(exit_code, path=f"task_exit_codes.{task_id}")
+    return result
+
+
+def _parse_task_string_mapping(
+    value: object, *, path: str
+) -> dict[TaskId, str]:
+    document = _object(value, path=path)
+    result: dict[TaskId, str] = {}
+    for task_id, native_value in document.items():
+        try:
+            parsed_task_id = TaskId(task_id)
+        except (TypeError, ValueError) as error:
+            _invalid(f"{path}.{task_id}", error)
+        result[parsed_task_id] = _string(native_value, path=f"{path}.{task_id}")
     return result
 
 

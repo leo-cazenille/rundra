@@ -64,6 +64,8 @@ class RunRecord:
     native_state: str | None = None
     scheduler_metadata: Mapping[str, NativeValue] = field(default_factory=dict)
     task_array_mapping: tuple[ArrayTaskMapping, ...] = ()
+    task_scheduler_ids: Mapping[TaskId, str] = field(default_factory=dict)
+    task_native_states: Mapping[TaskId, str] = field(default_factory=dict)
     task_exit_codes: Mapping[TaskId, int] = field(default_factory=dict)
     artifacts: tuple[Artifact, ...] = ()
 
@@ -156,6 +158,33 @@ class RunRecord:
                     "RunRecord task_array_mapping must match Task order and seeds"
                 )
         object.__setattr__(self, "task_array_mapping", task_array_mapping)
+        for field_name in ("task_scheduler_ids", "task_native_states"):
+            value = getattr(self, field_name)
+            if not isinstance(value, Mapping):
+                raise TypeError(f"RunRecord {field_name} must be a mapping")
+            mapping = dict(value)
+            if any(
+                type(task_id) is not TaskId
+                or type(native_value) is not str
+                or not native_value.strip()
+                or "\x00" in native_value
+                for task_id, native_value in mapping.items()
+            ):
+                raise TypeError(
+                    f"RunRecord {field_name} must map TaskIds to safe strings"
+                )
+            if not set(mapping).issubset(task_ids):
+                raise ValueError(f"RunRecord {field_name} contains an unknown TaskId")
+            if field_name == "task_scheduler_ids" and mapping:
+                if set(mapping) != task_ids:
+                    raise ValueError(
+                        "RunRecord task_scheduler_ids must identify every Task"
+                    )
+                if len(set(mapping.values())) != len(mapping):
+                    raise ValueError(
+                        "RunRecord task_scheduler_ids must contain unique identities"
+                    )
+            object.__setattr__(self, field_name, MappingProxyType(mapping))
         if not isinstance(self.task_exit_codes, Mapping):
             raise TypeError("RunRecord task_exit_codes must be a mapping")
         exit_codes = dict(self.task_exit_codes)
