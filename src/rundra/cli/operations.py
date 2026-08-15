@@ -16,7 +16,9 @@ from rundra.adapters import (
     RemoteApptainerRuntime,
     RsyncStager,
     SlurmScheduler,
+    SlurmScriptError,
     SSHTransport,
+    validate_slurm_resources,
 )
 from rundra.config.errors import ConfigError
 from rundra.config.experiments import load_config_snapshot, load_experiment
@@ -405,10 +407,14 @@ def plan_operation(
                     {"source": str(targets_source), "target": target_name},
                 ),
             )
+        target = targets[target_name]
+        unsupported = _unsupported_execution_target(target, experiment)
+        if unsupported is not None:
+            return OperationResult.failure("plan", unsupported)
         plan = create_plan(
             experiment,
             config,
-            targets[target_name],
+            target,
             seeds=expand_seeds(seed=seed, seeds=seeds),
         )
         return OperationResult.success("plan", PlanValue(plan, launch))
@@ -1430,20 +1436,54 @@ def _unsupported_execution_target(
                 "Apptainer target requires an experiment container image",
                 {"target": target.name},
             )
-        return None
-    if actual == ("ssh", "slurm", "rsync", "apptainer"):
+    elif actual == ("ssh", "slurm", "rsync", "apptainer"):
         if experiment.container is None:
             return OperationError(
                 "CONTAINER_REQUIRED",
                 "The remote Slurm path requires an experiment container image",
                 {"target": target.name},
             )
-        return None
-    return OperationError(
-        "TARGET_UNSUPPORTED",
-        f"Execution does not support target '{target.name}'",
-        {"target": target.name},
+    else:
+        return OperationError(
+            "TARGET_UNSUPPORTED",
+            f"Execution does not support target '{target.name}'",
+            {"target": target.name},
+        )
+
+    resources = experiment.resources
+    if target.scheduler.kind == "local" and resources.native:
+        return OperationError(
+            "NATIVE_OPTIONS_UNSUPPORTED",
+            "Local execution does not accept backend-native resource options",
+            {"target": target.name},
+        )
+    if target.scheduler.kind == "slurm":
+        try:
+            validate_slurm_resources(resources)
+        except SlurmScriptError as error:
+            return OperationError(
+                "NATIVE_OPTIONS_UNSUPPORTED",
+                str(error),
+                {"target": target.name, "scheduler": "slurm"},
+            )
+
+    container_gpu = (
+        experiment.container.gpu if experiment.container is not None else False
     )
+    requested_gpus = resources.gpus_per_task
+    if requested_gpus > 0 and not container_gpu:
+        return OperationError(
+            "GPU_CONFIGURATION_MISMATCH",
+            "GPU resources require container.gpu: true for device passthrough",
+            {"gpus_per_task": requested_gpus, "target": target.name},
+        )
+    if container_gpu and requested_gpus == 0:
+        return OperationError(
+            "GPU_CONFIGURATION_MISMATCH",
+            "container.gpu: true requires a positive resources.gpus_per_task request",
+            {"gpus_per_task": requested_gpus, "target": target.name},
+        )
+    return None
 
 
 def _execution_adapters(

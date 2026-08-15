@@ -564,6 +564,7 @@ def _sbatch_directives(
     stderr_path: PurePath | None,
     array_stop: int | None = None,
 ) -> tuple[str, ...]:
+    validate_slurm_resources(resources)
     directives = [f"#SBATCH --job-name={job_name}"]
     if array_stop is not None:
         directives.append(f"#SBATCH --array=0-{array_stop}")
@@ -621,6 +622,19 @@ def _native_directives(resources: ResourceRequest) -> tuple[str, ...]:
             if value:
                 directives.append(f"#SBATCH --{name}")
     return tuple(directives)
+
+
+def validate_slurm_resources(resources: ResourceRequest) -> None:
+    """Validate that a portable request is representable by this Slurm adapter."""
+    if type(resources) is not ResourceRequest:
+        raise TypeError("Slurm resources must be a ResourceRequest")
+    unsupported_backends = sorted(set(resources.native) - {"slurm"})
+    if unsupported_backends:
+        names = ", ".join(unsupported_backends)
+        raise SlurmScriptError(
+            f"Unsupported resources.native backend namespaces for Slurm: {names}"
+        )
+    _native_directives(resources)
 
 
 def _directive_path(value: PurePath, *, name: str) -> str:

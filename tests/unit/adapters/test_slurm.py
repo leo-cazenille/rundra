@@ -692,6 +692,13 @@ def test_native_slurm_options_are_explicitly_allowlisted(
         render_sbatch_script(_group(resources=resources))
 
 
+def test_slurm_rejects_native_options_for_a_different_scheduler() -> None:
+    resources = ResourceRequest(native={"pbs": {"queue": "batch"}})
+
+    with pytest.raises(SlurmScriptError, match="backend namespaces.*pbs"):
+        render_sbatch_script(_group(resources=resources))
+
+
 def test_m3_renderer_rejects_multi_task_groups_and_non_groups() -> None:
     first = _group().units[0]
     second = _group(ordinal=1).units[0]

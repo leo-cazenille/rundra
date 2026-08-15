@@ -105,9 +105,9 @@ targets:
 
     completed = _run(
         "plan",
-        "examples/minimal/experiment.yaml",
+        "examples/shoal/cpu/experiment.yaml",
         "--config",
-        "examples/minimal/config.yaml",
+        "examples/shoal/cpu/config.yaml",
         "--seeds",
         "7:9",
         "--target",
