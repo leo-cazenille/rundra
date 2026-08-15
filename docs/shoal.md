@@ -113,3 +113,32 @@ The follow-up regression used the deliberately absent
 `/shoalhome/shoal/.rundra-preflight-absent-m42` target. All three opt-in checks
 passed, and the path was still absent afterward, confirming that preflight does
 not require or create a per-host `.rundra` directory.
+
+## M4.3 bounded CPU vertical slice
+
+CPU execution has an additional opt-in so that the preflight command cannot
+accidentally submit work. The checked `examples/shoal/cpu` experiment uses only
+`/bin/sh`, requests one node/task/CPU, no GPU, 1 GiB, and five minutes. Supply a
+readable absolute CPU image path and run only its system-test module:
+
+```bash
+RUNDRA_SHOAL_TARGETS_FILE=/tmp/rundra-shoal-targets.yaml \
+RUNDRA_SHOAL_CPU_IMAGE=/absolute/path/to/cpu-image.sif \
+  uv run pytest tests/system/test_shoal_cpu.py \
+    -m 'shoal_system and shoal_cpu' \
+    --run-shoal-system-tests \
+    --run-shoal-cpu-test \
+    -vv
+```
+
+The test constructs and preflights the exact plan before submission. It then
+creates a temporary Git repository, commits the checked baseline, modifies a
+tracked payload and experiment, adds an untracked payload, and executes one
+synchronous CLI Run. Assertions cover the concrete seed/config, execution of
+both dirty source files, persisted Git commit/branch/diff, Slurm reference and
+allocated node, terminal state and timestamps, sealed remote source, normalized
+stdout/stderr, raw result retrieval, and the artifact manifest.
+
+Ordinary system-test opt-in without `--run-shoal-cpu-test` still skips this
+resource-consuming test. A successful M4.3 Run is not claimed until its live
+evidence is recorded below.

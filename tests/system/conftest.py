@@ -71,6 +71,14 @@ def shoal_config_source() -> Path:
 
 
 @pytest.fixture(scope="session")
+def shoal_cpu_image() -> Path:
+    image = _required_file("RUNDRA_SHOAL_CPU_IMAGE")
+    if not image.is_absolute():
+        pytest.fail("RUNDRA_SHOAL_CPU_IMAGE must be an absolute path")
+    return image
+
+
+@pytest.fixture(scope="session")
 def shoal_experiment(shoal_experiment_source: Path) -> ExperimentSpec:
     try:
         return load_experiment(shoal_experiment_source)
