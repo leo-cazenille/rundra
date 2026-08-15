@@ -2057,6 +2057,19 @@ environment data supplied to the subprocess boundary.
 
 The transport should not require inbound connectivity from the cluster to the client.
 
+### 36.1 Remote workspace allocation
+
+Remote Run workspaces are allocated beneath an absolute, non-root POSIX
+workspace path as `WORKSPACE/runs/RUN_ID`. The allocator accepts only validated
+framework `RunId` values, rejects relative roots, traversal, NUL, and filesystem
+root, and verifies every semantic child path remains contained beneath the
+configured root before issuing a command.
+
+Allocation creates a unique Run directory without overwriting an existing path,
+then creates separate `source`, `input`, `runtime`, `output`, `logs`, and
+`metadata` children. A collision is distinct from a connectivity, permission,
+or directory-creation failure. This step does not upload or seal source data.
+
 ---
 
 ## 37. Rsync staging
