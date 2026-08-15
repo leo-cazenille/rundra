@@ -687,6 +687,60 @@ def test_run_rejects_duplicate_task_ids() -> None:
         )
 
 
+def test_run_preserves_requested_seed_order_with_canonical_task_ids() -> None:
+    from dataclasses import replace
+
+    from rundra.domain.models import Run, RunId, TaskId
+
+    run_id = RunId.new()
+    first = replace(_task_for_run_tests(run_id, 0), seed=9)
+    second = replace(_task_for_run_tests(run_id, 1), seed=-2, config=first.config)
+    run = Run(
+        id=run_id,
+        experiment_name="experiment",
+        target=_target_for_run_tests(),
+        tasks=(first, second),
+        created_at=datetime(2026, 8, 15, tzinfo=UTC),
+    )
+
+    assert [(task.id, task.seed) for task in run.tasks] == [
+        (TaskId.from_ordinal(0), 9),
+        (TaskId.from_ordinal(1), -2),
+    ]
+
+
+def test_run_rejects_noncanonical_task_order_duplicate_seeds_and_configs() -> None:
+    from dataclasses import replace
+
+    from rundra.domain.models import ConfigSnapshot, Run, RunId
+
+    run_id = RunId.new()
+    first = _task_for_run_tests(run_id, 0)
+    second = replace(_task_for_run_tests(run_id, 1), config=first.config)
+    common = {
+        "id": run_id,
+        "experiment_name": "experiment",
+        "target": _target_for_run_tests(),
+        "created_at": datetime(2026, 8, 15, tzinfo=UTC),
+    }
+
+    with pytest.raises(ValueError, match="contiguous ordinal IDs"):
+        Run(tasks=(second, first), **common)
+    with pytest.raises(ValueError, match="unique Task seeds"):
+        Run(tasks=(first, replace(second, seed=first.seed)), **common)
+    with pytest.raises(ValueError, match="one effective config"):
+        Run(
+            tasks=(
+                first,
+                replace(
+                    second,
+                    config=ConfigSnapshot(PurePosixPath("other.yaml"), "value: 2\n"),
+                ),
+            ),
+            **common,
+        )
+
+
 def test_run_rejects_task_from_another_experiment() -> None:
     from dataclasses import replace
 

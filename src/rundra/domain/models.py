@@ -343,6 +343,16 @@ class Run:
             raise ValueError("Every Task must reference the same experiment as its Run")
         if len({task.id for task in tasks}) != len(tasks):
             raise ValueError("Run must contain unique Task IDs")
+        expected_ids = tuple(TaskId.from_ordinal(index) for index in range(len(tasks)))
+        if tuple(task.id for task in tasks) != expected_ids:
+            raise ValueError(
+                "Run Tasks must use contiguous ordinal IDs in requested seed order"
+            )
+        if len({task.seed for task in tasks}) != len(tasks):
+            raise ValueError("Run must contain unique Task seeds in version 0.1")
+        effective_config = tasks[0].config
+        if any(task.config != effective_config for task in tasks[1:]):
+            raise ValueError("Run Tasks must share one effective config in version 0.1")
         if not isinstance(self.created_at, datetime):
             raise TypeError("Run created_at must be a datetime")
         if self.created_at.utcoffset() is None:

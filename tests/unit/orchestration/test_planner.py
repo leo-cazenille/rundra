@@ -190,3 +190,34 @@ def test_create_plan_preserves_requested_seed_order() -> None:
         ("task_000001", -2),
         ("task_000002", 4),
     ]
+
+
+def test_execution_plan_rejects_unstable_ids_duplicate_seeds_and_configs() -> None:
+    from dataclasses import replace
+
+    from rundra.orchestration.models import ExecutionPlan
+    from rundra.orchestration.planner import create_plan
+
+    plan = create_plan(_spec(), _config(), _target(), seeds=(4, 9))
+    first, second = plan.units
+    common = {
+        "version": plan.version,
+        "experiment_name": plan.experiment_name,
+        "target": plan.target,
+    }
+
+    with pytest.raises(ValueError, match="contiguous ordinal Task IDs"):
+        ExecutionPlan(units=(second, first), **common)
+    with pytest.raises(ValueError, match="seeds must be unique"):
+        ExecutionPlan(units=(first, replace(second, seed=first.seed)), **common)
+    with pytest.raises(ValueError, match="one effective config"):
+        ExecutionPlan(
+            units=(
+                first,
+                replace(
+                    second,
+                    config=ConfigSnapshot(PurePosixPath("other.yaml"), "value: 2\n"),
+                ),
+            ),
+            **common,
+        )

@@ -79,5 +79,13 @@ class ExecutionPlan:
             raise ValueError("ExecutionPlan must contain at least one unit")
         if len({unit.task_id for unit in units}) != len(units):
             raise ValueError("ExecutionPlan unit Task IDs must be unique")
+        expected_ids = tuple(TaskId.from_ordinal(index) for index in range(len(units)))
+        if tuple(unit.task_id for unit in units) != expected_ids:
+            raise ValueError("ExecutionPlan units must use contiguous ordinal Task IDs")
+        if len({unit.seed for unit in units}) != len(units):
+            raise ValueError("ExecutionPlan unit seeds must be unique")
+        effective_config = units[0].config
+        if any(unit.config != effective_config for unit in units[1:]):
+            raise ValueError("ExecutionPlan units must share one effective config")
         object.__setattr__(self, "units", units)
         object.__setattr__(self, "staging_backend", self.target.staging.kind)
