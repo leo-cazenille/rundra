@@ -354,6 +354,40 @@ class SlurmScheduler:
         )
 
 
+def render_slurm_array_manifest(request: SlurmArrayRequest) -> str:
+    """Render a deterministic shell dispatcher with safely serialized commands."""
+    if type(request) is not SlurmArrayRequest:
+        raise TypeError("render_slurm_array_manifest requires a SlurmArrayRequest")
+    branches: list[str] = []
+    for unit, mapping in zip(request.group.units, request.mapping, strict=True):
+        branches.extend(
+            (
+                f"  {mapping.array_index})",
+                f"    # task_id={mapping.task_id} seed={mapping.seed}",
+                f"    {serialize_remote_command(unit.command)}",
+                "    ;;",
+            )
+        )
+    return "\n".join(
+        (
+            "#!/bin/sh",
+            "set -eu",
+            'if [ "$#" -ne 1 ]; then',
+            "  printf '%s\\n' 'invalid Rundra array index' >&2",
+            "  exit 64",
+            "fi",
+            'case "$1" in',
+            *branches,
+            "  *)",
+            "    printf '%s\\n' 'invalid Rundra array index' >&2",
+            "    exit 64",
+            "    ;;",
+            "esac",
+            "",
+        )
+    )
+
+
 def render_sbatch_script(
     group: SchedulerGroup,
     *,

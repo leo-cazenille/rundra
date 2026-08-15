@@ -15,6 +15,7 @@ from rundra.adapters import (
     SlurmScriptError,
     SlurmSubmissionError,
     render_sbatch_script,
+    render_slurm_array_manifest,
 )
 from rundra.adapters.slurm import _portable_state
 from rundra.domain.mappings import ArrayTaskMapping
@@ -182,6 +183,138 @@ def test_slurm_array_request_rejects_unsafe_manifest_paths(
 def test_slurm_array_request_requires_multiple_tasks() -> None:
     with pytest.raises(SlurmScriptError, match="at least two Tasks"):
         _array_request(count=1)
+
+
+def test_array_manifest_is_deterministic_and_maps_each_explicit_task() -> None:
+    request = _array_request(count=3)
+
+    first = render_slurm_array_manifest(request)
+    second = render_slurm_array_manifest(request)
+
+    assert first == second
+    assert first.startswith("#!/bin/sh\nset -eu\n")
+    assert 'case "$1" in' in first
+    for item in request.mapping:
+        assert f"  {item.array_index})" in first
+        assert f"# task_id={item.task_id} seed={item.seed}" in first
+    assert "eval" not in first
+    assert "sh -c" not in first
+
+
+def test_array_manifest_dispatches_only_the_selected_literal_command(
+    tmp_path: PurePosixPath,
+) -> None:
+    units = tuple(
+        SchedulerUnit(
+            TaskId.from_ordinal(index),
+            Command(("printf", "%s\n", f"task-{index}")),
+            ResourceRequest(),
+        )
+        for index in range(2)
+    )
+    request = SlurmArrayRequest(
+        SchedulerGroup(units),
+        tuple(
+            ArrayTaskMapping(unit.task_id, 10 + index, index)
+            for index, unit in enumerate(units)
+        ),
+        tmp_path / "tasks.sh",
+        2,
+    )
+    manifest = render_slurm_array_manifest(request)
+
+    first = subprocess.run(
+        ("/bin/sh", "-c", manifest, "rundra-array-manifest", "0"),
+        capture_output=True,
+        check=False,
+        encoding="utf-8",
+        shell=False,
+    )
+    second = subprocess.run(
+        ("/bin/sh", "-c", manifest, "rundra-array-manifest", "1"),
+        capture_output=True,
+        check=False,
+        encoding="utf-8",
+        shell=False,
+    )
+
+    assert (first.returncode, first.stdout, first.stderr) == (0, "task-0\n", "")
+    assert (second.returncode, second.stdout, second.stderr) == (0, "task-1\n", "")
+
+
+def test_array_manifest_safely_preserves_hostile_task_literals(
+    tmp_path: PurePosixPath,
+) -> None:
+    marker = tmp_path / "not-created"
+    literal = f"spaces; $(touch {marker}); 'quotes' * and $HOME"
+    units = tuple(
+        SchedulerUnit(
+            TaskId.from_ordinal(index),
+            Command(
+                ("printf", "%s\n", literal),
+                environment={"RUNDRA_LITERAL": literal},
+                working_directory=tmp_path,
+            ),
+            ResourceRequest(),
+        )
+        for index in range(2)
+    )
+    request = SlurmArrayRequest(
+        SchedulerGroup(units),
+        tuple(
+            ArrayTaskMapping(unit.task_id, index, index)
+            for index, unit in enumerate(units)
+        ),
+        tmp_path / "tasks.sh",
+        2,
+    )
+
+    completed = subprocess.run(
+        (
+            "/bin/sh",
+            "-c",
+            render_slurm_array_manifest(request),
+            "rundra-array-manifest",
+            "1",
+        ),
+        capture_output=True,
+        check=False,
+        encoding="utf-8",
+        shell=False,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout == f"{literal}\n"
+    assert completed.stderr == ""
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("arguments", [(), ("-1",), ("2",), ("text",), ("0", "1")])
+def test_array_manifest_rejects_missing_or_unknown_indices(
+    arguments: tuple[str, ...],
+) -> None:
+    completed = subprocess.run(
+        (
+            "/bin/sh",
+            "-c",
+            render_slurm_array_manifest(_array_request(count=2)),
+            "rundra-array-manifest",
+            *arguments,
+        ),
+        capture_output=True,
+        check=False,
+        encoding="utf-8",
+        shell=False,
+    )
+
+    assert completed.returncode == 64
+    assert completed.stdout == ""
+    assert completed.stderr == "invalid Rundra array index\n"
+
+
+def test_array_manifest_rejects_non_array_requests() -> None:
+    with pytest.raises(TypeError, match="SlurmArrayRequest"):
+        render_slurm_array_manifest(object())  # type: ignore[arg-type]
 
 
 def test_render_sbatch_script_translates_portable_and_allowed_native_resources() -> (

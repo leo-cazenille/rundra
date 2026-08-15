@@ -37,6 +37,7 @@ from rundra.adapters.slurm import (
     SlurmScriptError,
     SlurmSubmissionError,
     render_sbatch_script,
+    render_slurm_array_manifest,
 )
 from rundra.adapters.ssh import (
     SSHCommandError,
@@ -81,4 +82,5 @@ __all__ = [
     "SlurmSubmissionError",
     "WorkspaceCollisionError",
     "render_sbatch_script",
+    "render_slurm_array_manifest",
 ]
