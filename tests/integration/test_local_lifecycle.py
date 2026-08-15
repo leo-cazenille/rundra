@@ -103,6 +103,7 @@ class FailingStageStager:
 class QueryFailScheduler:
     def __init__(self, submission: SchedulerSubmission) -> None:
         self.submission = submission
+        self.query_calls = 0
 
     def submit(self, group: SchedulerGroup) -> SchedulerSubmission:
         return self.submission
@@ -110,6 +111,7 @@ class QueryFailScheduler:
     def query(
         self, references: tuple[SchedulerReference, ...]
     ) -> tuple[SchedulerObservation, ...]:
+        self.query_calls += 1
         raise RuntimeError("accounting unavailable")
 
     def cancel(
@@ -434,7 +436,25 @@ def test_scheduler_reference_is_durable_before_the_first_query(tmp_path: Path) -
     record = service.store.load(_RUN_ID)
     assert record.scheduler_job_ids == ("918273",)
     assert record.submitted_at is not None
-    assert record.run.state is ExecutionState.FAILED
+    assert record.run.state is ExecutionState.SUBMITTED
+
+
+def test_async_submit_returns_after_durable_submission_without_querying(
+    tmp_path: Path,
+) -> None:
+    runtime = HostMappedRuntime()
+    request, _ = _request(tmp_path, exit_code=0)
+    task_id = request.plan.units[0].task_id
+    reference = SchedulerReference("918274")
+    scheduler = QueryFailScheduler(SchedulerSubmission(reference, {task_id: "918274"}))
+    service = _service(tmp_path, runtime, scheduler=scheduler)
+
+    result = service.submit_one(request)
+
+    assert result.record.run.state is ExecutionState.SUBMITTED
+    assert result.record.scheduler_job_ids == ("918274",)
+    assert service.store.load(_RUN_ID) == result.record
+    assert scheduler.query_calls == 0
 
 
 def test_available_source_provenance_is_persisted_before_execution(

@@ -22,7 +22,6 @@ from rundra.cli.operations import (
     resolve_run_inputs_operation,
     run_operation,
     status_operation,
-    submit_unavailable_operation,
 )
 from rundra.cli.render import result_document
 from rundra.domain.models import ArtifactKind
@@ -150,16 +149,29 @@ def test_lifecycle_operations_return_structured_not_found_and_task_errors(
     assert bad_task.error is not None and bad_task.error.code == "TASK_NOT_FOUND"
 
 
-def test_run_value_exit_semantics_and_submit_capability_error(tmp_path: Path) -> None:
+def test_run_value_exit_semantics_include_successful_async_submission(
+    tmp_path: Path,
+) -> None:
     store, run_id = _stored_record(tmp_path)
     record = store.load(next(iter(store.list())).run.id)
     run_value = RunValue(record)
 
     assert run_value.exit_code == 0
     assert run_value.run_id.value == run_id
-    unavailable = submit_unavailable_operation()
-    assert unavailable.error is not None
-    assert unavailable.error.code == "ASYNC_UNAVAILABLE"
+    submitted = RunValue(
+        replace(
+            record,
+            run=replace(
+                record.run,
+                state=ExecutionState.SUBMITTED,
+                tasks=tuple(
+                    replace(task, state=ExecutionState.SUBMITTED)
+                    for task in record.run.tasks
+                ),
+            ),
+        )
+    )
+    assert submitted.exit_code == 0
 
 
 def test_run_operation_returns_a_durable_structured_capability_failure(

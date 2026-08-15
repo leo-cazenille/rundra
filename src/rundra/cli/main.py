@@ -8,6 +8,7 @@ from typing import Any
 
 from rundra.cli.operations import (
     RunValue,
+    cancel_operation,
     fetch_operation,
     inspect_operation,
     list_runs_operation,
@@ -17,7 +18,7 @@ from rundra.cli.operations import (
     resolve_run_inputs_operation,
     run_operation,
     status_operation,
-    submit_unavailable_operation,
+    submit_operation,
     targets_operation,
     validate_operation,
 )
@@ -66,12 +67,15 @@ def build_parser() -> argparse.ArgumentParser:
     _add_store_option(run, use_default=False)
     _add_json_option(run)
 
-    submit = subparsers.add_parser(
-        "submit", help="report asynchronous submission capability"
-    )
+    submit = subparsers.add_parser("submit", help="submit one Task asynchronously")
     _add_execution_arguments(
-        submit, allow_many=True, required=True, allow_random_seed=False
+        submit, allow_many=False, required=False, allow_random_seed=True
     )
+    submit.add_argument("--source-root", type=Path)
+    submit.add_argument("--destination", type=Path)
+    submit.add_argument("--project-file", type=Path)
+    submit.add_argument("--profile")
+    _add_store_option(submit, use_default=False)
     _add_json_option(submit)
 
     status = subparsers.add_parser("status", help="show persisted Run status")
@@ -99,6 +103,11 @@ def build_parser() -> argparse.ArgumentParser:
     inspect.add_argument("run_id")
     _add_store_option(inspect)
     _add_json_option(inspect)
+
+    cancel = subparsers.add_parser("cancel", help="cancel an active Slurm Run")
+    cancel.add_argument("run_id")
+    _add_store_option(cancel)
+    _add_json_option(cancel)
     return parser
 
 
@@ -218,7 +227,36 @@ def main(argv: Sequence[str] | None = None) -> int:
                 launch=run_inputs.launch,
             )
     elif arguments.command == "submit":
-        result = submit_unavailable_operation()
+        resolved = resolve_run_inputs_operation(
+            arguments.experiment,
+            config=arguments.config,
+            seed=arguments.seed,
+            target=arguments.target,
+            targets_file=arguments.targets_file,
+            source_root=arguments.source_root,
+            destination=arguments.destination,
+            data_dir=arguments.data_dir,
+            project_file=arguments.project_file,
+            profile=arguments.profile,
+            random_seed=arguments.random_seed,
+            operation="submit",
+        )
+        if not resolved.ok:
+            result = resolved
+        else:
+            assert resolved.value is not None
+            submit_inputs = resolved.value
+            result = submit_operation(
+                arguments.experiment,
+                submit_inputs.config,
+                submit_inputs.targets_file,
+                submit_inputs.target,
+                submit_inputs.source_root,
+                submit_inputs.destination,
+                JsonRunStore(submit_inputs.data_dir),
+                seed=submit_inputs.seed,
+                launch=submit_inputs.launch,
+            )
     elif arguments.command == "status":
         result = status_operation(arguments.run_id, JsonRunStore(arguments.data_dir))
     elif arguments.command == "list":
@@ -235,8 +273,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             JsonRunStore(arguments.data_dir),
             arguments.destination,
         )
-    else:
+    elif arguments.command == "inspect":
         result = inspect_operation(arguments.run_id, JsonRunStore(arguments.data_dir))
+    else:
+        result = cancel_operation(arguments.run_id, JsonRunStore(arguments.data_dir))
     output = render_json(result) if arguments.json else render_human(result)
     stream = sys.stdout if arguments.json or result.ok else sys.stderr
     print(output, file=stream)

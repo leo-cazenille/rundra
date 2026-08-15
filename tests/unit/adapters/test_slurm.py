@@ -8,6 +8,7 @@ from pathlib import PurePosixPath
 import pytest
 
 from rundra.adapters import (
+    SlurmCancellationError,
     SlurmQueryError,
     SlurmScheduler,
     SlurmScriptError,
@@ -390,3 +391,61 @@ def test_slurm_query_validates_reference_collection() -> None:
         scheduler.query((reference, reference))
     with pytest.raises(ValueError, match="numeric"):
         scheduler.query((SchedulerReference("local-1"),))
+
+
+def test_slurm_cancel_requests_then_reconciles_state() -> None:
+    reference = SchedulerReference("123")
+    transport = ScriptedTransport(
+        deque(
+            [
+                _command_result(Command(("unused",)), 0, ""),
+                _command_result(Command(("unused",)), 0, "123|CANCELLED|N/A|(null)\n"),
+            ]
+        )
+    )
+
+    observation = SlurmScheduler(transport).cancel((reference,))[0]
+
+    assert observation.state is ExecutionState.CANCELLED
+    assert transport.run_calls[0] == Command(("scancel", "--", "123"))
+
+
+def test_slurm_cancel_treats_terminal_invalid_job_race_as_success() -> None:
+    reference = SchedulerReference("123")
+    transport = ScriptedTransport(
+        deque(
+            [
+                _command_result(Command(("unused",)), 1, "", "invalid job id"),
+                _command_result(Command(("unused",)), 0, ""),
+                _command_result(
+                    Command(("unused",)),
+                    0,
+                    "123|COMPLETED|0:0|2026-08-15T10:00:00|"
+                    "2026-08-15T10:01:00|node01|\n",
+                ),
+            ]
+        )
+    )
+
+    observation = SlurmScheduler(transport).cancel((reference,))[0]
+
+    assert observation.state is ExecutionState.SUCCEEDED
+
+
+def test_slurm_cancel_reports_nonzero_when_job_remains_active() -> None:
+    reference = SchedulerReference("123")
+    transport = ScriptedTransport(
+        deque(
+            [
+                _command_result(Command(("unused",)), 1, "", "permission denied"),
+                _command_result(
+                    Command(("unused",)),
+                    0,
+                    "123|RUNNING|2026-08-15T10:00:00|node01\n",
+                ),
+            ]
+        )
+    )
+
+    with pytest.raises(SlurmCancellationError, match="permission denied"):
+        SlurmScheduler(transport).cancel((reference,))

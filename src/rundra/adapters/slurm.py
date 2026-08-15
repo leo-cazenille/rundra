@@ -41,6 +41,10 @@ class SlurmQueryError(RuntimeError):
     """Raised when Slurm state output cannot be queried or represented safely."""
 
 
+class SlurmCancellationError(RuntimeError):
+    """Raised when scancel fails and the job remains nonterminal."""
+
+
 class SlurmScheduler:
     """Submit normalized groups to Slurm through a configured Transport."""
 
@@ -51,6 +55,7 @@ class SlurmScheduler:
         sbatch: str = "sbatch",
         squeue: str = "squeue",
         sacct: str = "sacct",
+        scancel: str = "scancel",
         timezone: tzinfo = UTC,
     ) -> None:
         if not isinstance(transport, Transport):
@@ -59,6 +64,7 @@ class SlurmScheduler:
             ("sbatch", sbatch),
             ("squeue", squeue),
             ("sacct", sacct),
+            ("scancel", scancel),
         ):
             if (
                 type(executable) is not str
@@ -74,6 +80,7 @@ class SlurmScheduler:
         self._sbatch = sbatch
         self._squeue = squeue
         self._sacct = sacct
+        self._scancel = scancel
         self._timezone = timezone
 
     def submit(self, group: SchedulerGroup) -> SchedulerSubmission:
@@ -165,7 +172,31 @@ class SlurmScheduler:
     def cancel(
         self, references: tuple[SchedulerReference, ...]
     ) -> tuple[SchedulerObservation, ...]:
-        raise NotImplementedError("Slurm cancellation is implemented in M3.5")
+        """Request cancellation and reconcile the scheduler's resulting state."""
+        normalized = _references(references)
+        if not normalized:
+            return ()
+        command = Command(
+            (self._scancel, "--", *(reference.native_id for reference in normalized))
+        )
+        try:
+            result = self._transport.run(command)
+        except Exception as error:
+            raise SlurmCancellationError("Could not start scancel") from error
+        observations = self.query(normalized)
+        terminal = {
+            ExecutionState.SUCCEEDED,
+            ExecutionState.FAILED,
+            ExecutionState.CANCELLED,
+        }
+        if result.exit_code != 0 and any(
+            observation.state not in terminal for observation in observations
+        ):
+            detail = result.stderr.strip() or "no scheduler diagnostic"
+            raise SlurmCancellationError(
+                f"scancel failed with exit code {result.exit_code}: {detail}"
+            )
+        return observations
 
     def _run_query(self, command: Command, *, source: str) -> CommandResult:
         try:

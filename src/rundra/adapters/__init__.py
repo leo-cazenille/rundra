@@ -5,6 +5,7 @@ from rundra.adapters.apptainer import (
     ApptainerRuntime,
     ApptainerRuntimeError,
     ApptainerUnavailableError,
+    RemoteApptainerRuntime,
 )
 from rundra.adapters.local import (
     LocalScheduler,
@@ -29,6 +30,7 @@ from rundra.adapters.rsync import (
     RsyncUploadError,
 )
 from rundra.adapters.slurm import (
+    SlurmCancellationError,
     SlurmQueryError,
     SlurmScheduler,
     SlurmScriptError,
@@ -57,6 +59,7 @@ __all__ = [
     "NativeRuntime",
     "NativeRuntimeError",
     "RemoteWorkspaceAllocator",
+    "RemoteApptainerRuntime",
     "RemoteWorkspaceCollisionError",
     "RemoteWorkspaceError",
     "RsyncStager",
@@ -70,6 +73,7 @@ __all__ = [
     "SSHTransportError",
     "SSHUnavailableError",
     "SlurmScriptError",
+    "SlurmCancellationError",
     "SlurmQueryError",
     "SlurmScheduler",
     "SlurmSubmissionError",

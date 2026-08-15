@@ -5,6 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePath, PurePosixPath
+from time import monotonic, sleep
 
 from rundra.domain.models import (
     Artifact,
@@ -28,6 +29,7 @@ from rundra.ports import (
     Scheduler,
     SchedulerGroup,
     SchedulerObservation,
+    SchedulerReference,
     SchedulerUnit,
     StagedWorkspace,
     Stager,
@@ -41,6 +43,13 @@ _CONTAINER_INPUTS = PurePosixPath("/workspace/input")
 _CONTAINER_CONFIG = _CONTAINER_INPUTS / "config.yaml"
 _CONTAINER_OUTPUTS = PurePosixPath("/workspace/output")
 _CONTAINER_RUNTIME = PurePosixPath("/workspace/runtime")
+_TERMINAL_STATES = frozenset(
+    {
+        ExecutionState.SUCCEEDED,
+        ExecutionState.FAILED,
+        ExecutionState.CANCELLED,
+    }
+)
 
 
 class OrchestrationError(RuntimeError):
@@ -65,9 +74,116 @@ class OrchestrationError(RuntimeError):
         super().__init__(message)
 
 
+class SchedulerLifecycleService:
+    """Reconcile durable Run records with a scheduler without owning a daemon."""
+
+    def __init__(
+        self,
+        *,
+        store: RunStore,
+        scheduler: Scheduler,
+        clock: Callable[[], datetime] | None = None,
+        sleeper: Callable[[float], None] = sleep,
+        monotonic_clock: Callable[[], float] = monotonic,
+    ) -> None:
+        if not isinstance(store, RunStore):
+            raise TypeError("SchedulerLifecycleService store must implement RunStore")
+        if not isinstance(scheduler, Scheduler):
+            raise TypeError(
+                "SchedulerLifecycleService scheduler must implement Scheduler"
+            )
+        if clock is not None and not callable(clock):
+            raise TypeError("SchedulerLifecycleService clock must be callable")
+        if not callable(sleeper) or not callable(monotonic_clock):
+            raise TypeError("SchedulerLifecycleService timing hooks must be callable")
+        self._store = store
+        self._scheduler = scheduler
+        self._clock = clock or (lambda: datetime.now(UTC))
+        self._sleeper = sleeper
+        self._monotonic = monotonic_clock
+
+    def refresh(self, record: RunRecord) -> RunRecord:
+        """Query and durably apply one scheduler observation when active."""
+        _require_record(record)
+        if record.run.state in _TERMINAL_STATES:
+            return record
+        reference = _record_reference(record)
+        observation = _single_observation(
+            self._scheduler.query((reference,)), reference
+        )
+        updated = _observed_record(record, observation, self._clock())
+        self._store.update(updated)
+        return updated
+
+    def wait(
+        self,
+        record: RunRecord,
+        *,
+        timeout: float | None = None,
+        poll_interval: float = 2.0,
+    ) -> RunRecord:
+        """Poll until terminal, leaving an active Run intact on client timeout."""
+        _require_record(record)
+        if timeout is not None and (type(timeout) not in (int, float) or timeout < 0):
+            raise ValueError("Scheduler wait timeout must be non-negative or None")
+        if type(poll_interval) not in (int, float) or poll_interval <= 0:
+            raise ValueError("Scheduler poll interval must be positive")
+        deadline = None if timeout is None else self._monotonic() + float(timeout)
+        current = record
+        while current.run.state not in _TERMINAL_STATES:
+            try:
+                current = self.refresh(current)
+            except Exception as error:
+                raise OrchestrationError(
+                    code="SCHEDULER_QUERY_FAILED",
+                    message=f"Run {record.run.id} scheduler query failed: {error}",
+                    run_id=record.run.id,
+                ) from error
+            if current.run.state in _TERMINAL_STATES:
+                return current
+            now = self._monotonic()
+            if deadline is not None and now >= deadline:
+                raise OrchestrationError(
+                    code="SCHEDULER_TIMEOUT",
+                    message=f"Run {record.run.id} did not finish before the wait timeout",
+                    run_id=record.run.id,
+                )
+            delay = float(poll_interval)
+            if deadline is not None:
+                delay = min(delay, max(0.0, deadline - now))
+            self._sleeper(delay)
+        return current
+
+    def cancel(
+        self,
+        record: RunRecord,
+        *,
+        timeout: float | None = 30.0,
+        poll_interval: float = 1.0,
+    ) -> RunRecord:
+        """Cancel an active Run, treating an already terminal Run idempotently."""
+        _require_record(record)
+        if record.run.state in _TERMINAL_STATES:
+            return record
+        reference = _record_reference(record)
+        try:
+            observation = _single_observation(
+                self._scheduler.cancel((reference,)), reference
+            )
+        except Exception as error:
+            raise OrchestrationError(
+                code="SCHEDULER_CANCEL_FAILED",
+                message=f"Run {record.run.id} cancellation failed: {error}",
+                run_id=record.run.id,
+            ) from error
+        current = _observed_record(record, observation, self._clock())
+        self._store.update(current)
+        return self.wait(current, timeout=timeout, poll_interval=poll_interval)
+
+
 @dataclass(frozen=True, slots=True)
 class RunExecutionRequest:
-    """Inputs for the M1 single-Task synchronous execution lifecycle."""
+    """Inputs for one local or remote single-Task execution lifecycle."""
 
     plan: ExecutionPlan
     experiment: ExperimentSpec
@@ -113,7 +229,7 @@ class RunExecutionResult:
 
 
 class OrchestrationService:
-    """Coordinate one synchronous Task through portable infrastructure ports."""
+    """Coordinate one synchronous or asynchronous Task through portable ports."""
 
     def __init__(
         self,
@@ -161,6 +277,15 @@ class OrchestrationService:
 
     def execute_one(self, request: RunExecutionRequest) -> RunExecutionResult:
         """Execute and fetch one planned Task while durably recording each phase."""
+        return self._execute_one(request, wait=True)
+
+    def submit_one(self, request: RunExecutionRequest) -> RunExecutionResult:
+        """Stage and submit one Task, returning once its reference is durable."""
+        return self._execute_one(request, wait=False)
+
+    def _execute_one(
+        self, request: RunExecutionRequest, *, wait: bool
+    ) -> RunExecutionResult:
         self._validate_request(request)
         unit = request.plan.units[0]
         run_id = self._run_id_factory()
@@ -245,10 +370,10 @@ class OrchestrationService:
                     "Scheduler submission did not map the planned Task exactly"
                 )
         except Exception as error:
-            self._fail_before_completion(record, "EXECUTION_FAILED")
+            self._fail_before_completion(record, "SCHEDULER_SUBMISSION_FAILED")
             raise OrchestrationError(
-                code="EXECUTION_FAILED",
-                message=f"Run {run_id} execution failed before submission: {error}",
+                code="SCHEDULER_SUBMISSION_FAILED",
+                message=f"Run {run_id} scheduler submission failed: {error}",
                 run_id=run_id,
             ) from error
 
@@ -259,63 +384,58 @@ class OrchestrationService:
         )
         self.store.update(record)
 
+        if not wait:
+            return RunExecutionResult(record, workspace)
+
         try:
+            lifecycle = SchedulerLifecycleService(
+                store=self.store,
+                scheduler=self._scheduler,
+                clock=self._clock,
+            )
+            record = lifecycle.wait(record)
             observation = _single_observation(
                 self._scheduler.query((submission.reference,)),
                 submission.reference,
             )
             command_result = observation.result
-            if command_result is None or observation.exit_code is None:
-                raise ValueError(
-                    "Synchronous local scheduler observation lacks a command result"
-                )
-            if observation.state not in {
-                ExecutionState.SUCCEEDED,
-                ExecutionState.FAILED,
-            }:
-                raise ValueError(
-                    "Synchronous local scheduler did not return a terminal state"
-                )
-            expected_state = (
-                ExecutionState.SUCCEEDED
-                if observation.exit_code == 0
-                else ExecutionState.FAILED
-            )
-            if observation.state is not expected_state:
-                raise ValueError(
-                    "Synchronous local scheduler state conflicts with its exit code"
-                )
-            if command_result.command != scheduled_unit.command:
+            if observation.state not in _TERMINAL_STATES:
+                raise ValueError("Scheduler wait returned a nonterminal state")
+            if (
+                command_result is not None
+                and command_result.command != scheduled_unit.command
+            ):
                 raise ValueError(
                     "Synchronous local scheduler result describes another command"
                 )
+        except OrchestrationError:
+            raise
         except Exception as error:
-            self._fail_before_completion(record, "EXECUTION_FAILED")
             raise OrchestrationError(
-                code="EXECUTION_FAILED",
-                message=f"Run {run_id} execution failed before reconciliation: {error}",
+                code="SCHEDULER_QUERY_FAILED",
+                message=f"Run {run_id} scheduler reconciliation failed: {error}",
                 run_id=run_id,
             ) from error
 
-        try:
-            log_artifacts = _write_task_logs(
-                workspace,
-                unit,
-                stdout=command_result.stdout,
-                stderr=command_result.stderr,
-            )
-        except Exception as error:
-            record = _completed_record(record, observation, unit, artifacts=())
+        if command_result is not None:
+            try:
+                log_artifacts = _write_task_logs(
+                    workspace,
+                    unit,
+                    stdout=command_result.stdout,
+                    stderr=command_result.stderr,
+                )
+            except Exception as error:
+                self._record_retrieval_failure(record)
+                raise OrchestrationError(
+                    code="LOG_PERSISTENCE_FAILED",
+                    message=(
+                        f"Run {run_id} completed but logs could not be persisted: {error}"
+                    ),
+                    run_id=run_id,
+                ) from error
+            record = replace(record, artifacts=(*record.artifacts, *log_artifacts))
             self.store.update(record)
-            self._record_retrieval_failure(record)
-            raise OrchestrationError(
-                code="LOG_PERSISTENCE_FAILED",
-                message=f"Run {run_id} completed but logs could not be persisted: {error}",
-                run_id=run_id,
-            ) from error
-
-        record = _completed_record(record, observation, unit, artifacts=log_artifacts)
-        self.store.update(record)
         record = replace(
             record,
             run=replace(record.run, retrieval_state=RetrievalState.PENDING),
@@ -359,7 +479,7 @@ class OrchestrationService:
         if len(request.plan.units) != 1:
             raise OrchestrationError(
                 code="UNSUPPORTED_TASK_COUNT",
-                message="M1.4 execution requires exactly one Task",
+                message="M3 execution requires exactly one Task",
             )
         unit = request.plan.units[0]
         if request.plan.experiment_name != request.experiment.name:
@@ -447,6 +567,46 @@ class OrchestrationService:
 def _with_execution_state(record: RunRecord, state: ExecutionState) -> RunRecord:
     tasks = tuple(replace(task, state=state) for task in record.run.tasks)
     return replace(record, run=replace(record.run, tasks=tasks, state=state))
+
+
+def _require_record(record: RunRecord) -> None:
+    if type(record) is not RunRecord:
+        raise TypeError("Scheduler lifecycle requires a RunRecord")
+
+
+def _record_reference(record: RunRecord) -> SchedulerReference:
+    if len(record.scheduler_job_ids) != 1:
+        raise OrchestrationError(
+            code="SCHEDULER_REFERENCE_UNAVAILABLE",
+            message=f"Run {record.run.id} does not have exactly one scheduler reference",
+            run_id=record.run.id,
+        )
+    return SchedulerReference(record.scheduler_job_ids[0])
+
+
+def _observed_record(
+    record: RunRecord,
+    observation: SchedulerObservation,
+    observed_at: datetime,
+) -> RunRecord:
+    state = observation.state
+    updated = _with_execution_state(record, state)
+    task_id = record.run.tasks[0].id
+    exit_codes = dict(record.task_exit_codes)
+    if observation.exit_code is not None:
+        exit_codes[task_id] = observation.exit_code
+    terminal = state in _TERMINAL_STATES
+    nodes = observation.metadata.get("allocated_nodes")
+    return replace(
+        updated,
+        allocated_nodes=(str(nodes),) if nodes is not None else record.allocated_nodes,
+        started_at=record.started_at or observation.started_at,
+        completed_at=(
+            observation.finished_at or observed_at if terminal else record.completed_at
+        ),
+        native_state=observation.native_state,
+        task_exit_codes=exit_codes,
+    )
 
 
 def _container_request(
@@ -566,25 +726,4 @@ def _fetched_task_artifacts(
         if artifact.kind is ArtifactKind.RAW_RESULT and artifact.task_id is None
         else artifact
         for artifact in artifacts
-    )
-
-
-def _completed_record(
-    record: RunRecord,
-    observation: SchedulerObservation,
-    unit: ExecutionUnit,
-    *,
-    artifacts: tuple[Artifact, ...],
-) -> RunRecord:
-    result = observation.result
-    if result is None or observation.exit_code is None:
-        raise ValueError("Terminal observation requires a command result and exit code")
-    completed = _with_execution_state(record, observation.state)
-    return replace(
-        completed,
-        started_at=result.started_at,
-        completed_at=result.finished_at,
-        native_state=observation.native_state,
-        task_exit_codes={unit.task_id: observation.exit_code},
-        artifacts=(*record.artifacts, *artifacts),
     )

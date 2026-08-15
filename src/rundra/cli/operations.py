@@ -13,6 +13,10 @@ from rundra.adapters import (
     LocalStager,
     LocalTransport,
     NativeRuntime,
+    RemoteApptainerRuntime,
+    RsyncStager,
+    SlurmScheduler,
+    SSHTransport,
 )
 from rundra.config.errors import ConfigError
 from rundra.config.experiments import load_config_snapshot, load_experiment
@@ -41,9 +45,17 @@ from rundra.orchestration.service import (
     OrchestrationError,
     OrchestrationService,
     RunExecutionRequest,
+    SchedulerLifecycleService,
 )
 from rundra.persistence import RunNotFoundError, RunStore, RunStoreError
-from rundra.ports import FetchRequest, StagedWorkspace
+from rundra.ports import (
+    ContainerRuntime,
+    FetchRequest,
+    Scheduler,
+    StagedWorkspace,
+    Stager,
+    Transport,
+)
 from rundra.provenance import GitProvenanceCapture
 from rundra.results import OperationError, OperationResult
 
@@ -75,7 +87,12 @@ class RunValue:
 
     @property
     def exit_code(self) -> int:
-        return 0 if self.record.run.state is ExecutionState.SUCCEEDED else 2
+        return (
+            2
+            if self.record.run.state
+            in {ExecutionState.FAILED, ExecutionState.CANCELLED}
+            else 0
+        )
 
     @property
     def seed(self) -> int:
@@ -97,6 +114,15 @@ class StatusValue:
         object.__setattr__(
             self, "task_counts", MappingProxyType(dict(self.task_counts))
         )
+
+
+@dataclass(frozen=True, slots=True)
+class CancelValue:
+    status: StatusValue
+
+    def __post_init__(self) -> None:
+        if type(self.status) is not StatusValue:
+            raise TypeError("CancelValue status must be a StatusValue")
 
 
 @dataclass(frozen=True, slots=True)
@@ -453,8 +479,9 @@ def resolve_run_inputs_operation(
     user_config_source: Path | None = None,
     random_seed: bool = False,
     seed_factory: Callable[[], int] | None = None,
+    operation: str = "run",
 ) -> OperationResult[ResolvedRunInputs]:
-    """Resolve synchronous run inputs without planning or executing work."""
+    """Resolve run or submit inputs without planning or executing work."""
     if type(random_seed) is not bool:
         raise TypeError("random_seed must be a boolean")
     try:
@@ -501,12 +528,14 @@ def resolve_run_inputs_operation(
             profile=profile,
         )
     except ConfigError as error:
-        return OperationResult.failure("run", _config_error(error))
+        return OperationResult.failure(operation, _config_error(error))
     except LaunchResolutionError as error:
-        return OperationResult.failure("run", OperationError(error.code, error.message))
+        return OperationResult.failure(
+            operation, OperationError(error.code, error.message)
+        )
     if seed is not None and random_seed:
         return OperationResult.failure(
-            "run",
+            operation,
             OperationError(
                 "SEED_CONFLICT", "--seed and --random-seed are mutually exclusive"
             ),
@@ -516,7 +545,7 @@ def resolve_run_inputs_operation(
     )
     if missing:
         return OperationResult.failure(
-            "run",
+            operation,
             OperationError(
                 "LAUNCH_VALUE_REQUIRED",
                 f"Launch values could not resolve: {', '.join(missing)}",
@@ -533,7 +562,7 @@ def resolve_run_inputs_operation(
             or generated_seed >= 2**63
         ):
             return OperationResult.failure(
-                "run",
+                operation,
                 OperationError(
                     "SEED_GENERATION_FAILED",
                     "Seed generator did not return a non-negative 63-bit integer",
@@ -553,7 +582,7 @@ def resolve_run_inputs_operation(
     assert values.destination is not None
     assert values.data_dir is not None
     return OperationResult.success(
-        "run",
+        operation,
         ResolvedRunInputs(
             config=values.config,
             seed=values.seed,
@@ -593,7 +622,7 @@ def run_operation(
                 ),
             )
         target = targets[target_name]
-        unsupported = _unsupported_local_target(target, experiment)
+        unsupported = _unsupported_execution_target(target, experiment)
         if unsupported is not None:
             return OperationResult.failure("run", unsupported)
         plan = create_plan(
@@ -602,15 +631,12 @@ def run_operation(
             target,
             seeds=expand_seeds(seed=seed),
         )
-        transport = LocalTransport()
-        runtime = (
-            NativeRuntime() if target.container.kind == "native" else ApptainerRuntime()
-        )
+        transport, stager, runtime, scheduler = _execution_adapters(target)
         service = OrchestrationService(
             store=store,
-            stager=LocalStager(),
+            stager=stager,
             runtime=runtime,
-            scheduler=LocalScheduler(transport),
+            scheduler=scheduler,
             transport=transport,
             framework_version=version("rundra"),
             provenance=GitProvenanceCapture(),
@@ -642,25 +668,150 @@ def run_operation(
         )
 
 
-def submit_unavailable_operation() -> OperationResult[RunValue]:
-    return OperationResult.failure(
-        "submit",
-        OperationError(
-            "ASYNC_UNAVAILABLE",
-            "Asynchronous submit is unavailable until durable backend semantics exist",
-        ),
-    )
+def submit_operation(
+    experiment_source: Path,
+    config_source: Path,
+    targets_source: Path,
+    target_name: str,
+    source_root: Path,
+    destination: Path,
+    store: RunStore,
+    *,
+    seed: object,
+    launch: LaunchResolutionValue | None = None,
+) -> OperationResult[RunValue]:
+    try:
+        experiment = load_experiment(experiment_source)
+        config = load_config_snapshot(config_source)
+        targets = load_targets(targets_source)
+        if target_name not in targets:
+            return OperationResult.failure(
+                "submit",
+                OperationError(
+                    "TARGET_NOT_FOUND",
+                    f"Target '{target_name}' is not defined",
+                    {"source": str(targets_source), "target": target_name},
+                ),
+            )
+        target = targets[target_name]
+        unsupported = _unsupported_execution_target(
+            target, experiment, asynchronous=True
+        )
+        if unsupported is not None:
+            return OperationResult.failure("submit", unsupported)
+        plan = create_plan(
+            experiment,
+            config,
+            target,
+            seeds=expand_seeds(seed=seed),
+        )
+        transport, stager, runtime, scheduler = _execution_adapters(target)
+        service = OrchestrationService(
+            store=store,
+            stager=stager,
+            runtime=runtime,
+            scheduler=scheduler,
+            transport=transport,
+            framework_version=version("rundra"),
+            provenance=GitProvenanceCapture(),
+        )
+        result = service.submit_one(
+            RunExecutionRequest(
+                plan=plan,
+                experiment=experiment,
+                source_root=source_root,
+                fetch_destination=destination,
+                experiment_source=experiment_source,
+            )
+        )
+        return OperationResult.success("submit", RunValue(result.record, launch))
+    except ConfigError as error:
+        return OperationResult.failure("submit", _config_error(error))
+    except PlanningError as error:
+        return OperationResult.failure(
+            "submit", OperationError(error.code, error.message, error.details)
+        )
+    except OrchestrationError as error:
+        details = {} if error.run_id is None else {"run_id": str(error.run_id)}
+        return OperationResult.failure(
+            "submit", OperationError(error.code, error.message, details)
+        )
+    except RunStoreError as error:
+        return OperationResult.failure(
+            "submit", OperationError("RUN_STORE_ERROR", str(error))
+        )
 
 
 def status_operation(
     run_id: str,
     store: RunStore,
+    *,
+    scheduler: Scheduler | None = None,
 ) -> OperationResult[StatusValue]:
     record, error = _load_record(run_id, store)
     if error is not None:
         return OperationResult.failure("status", error)
     assert record is not None
+    if record.run.target.scheduler.kind == "slurm" and record.run.state not in {
+        ExecutionState.SUCCEEDED,
+        ExecutionState.FAILED,
+        ExecutionState.CANCELLED,
+    }:
+        try:
+            active_scheduler = scheduler or _record_slurm_scheduler(record)
+            record = SchedulerLifecycleService(
+                store=store, scheduler=active_scheduler
+            ).refresh(record)
+        except (OrchestrationError, RuntimeError, TypeError, ValueError) as error:
+            return OperationResult.failure(
+                "status",
+                OperationError(
+                    "SCHEDULER_QUERY_FAILED",
+                    f"Run {record.run.id} scheduler query failed: {error}",
+                    {"run_id": str(record.run.id)},
+                ),
+            )
     return OperationResult.success("status", _status_value(record))
+
+
+def cancel_operation(
+    run_id: str,
+    store: RunStore,
+    *,
+    scheduler: Scheduler | None = None,
+) -> OperationResult[CancelValue]:
+    record, error = _load_record(run_id, store)
+    if error is not None:
+        return OperationResult.failure("cancel", error)
+    assert record is not None
+    if record.run.target.scheduler.kind != "slurm":
+        return OperationResult.failure(
+            "cancel",
+            OperationError(
+                "CANCEL_UNSUPPORTED",
+                f"Run {record.run.id} does not use an asynchronous Slurm scheduler",
+                {"run_id": str(record.run.id)},
+            ),
+        )
+    try:
+        active_scheduler = scheduler or _record_slurm_scheduler(record)
+        record = SchedulerLifecycleService(
+            store=store, scheduler=active_scheduler
+        ).cancel(record)
+    except OrchestrationError as orchestration_error:
+        return OperationResult.failure(
+            "cancel",
+            OperationError(
+                orchestration_error.code,
+                orchestration_error.message,
+                {"run_id": str(record.run.id)},
+            ),
+        )
+    except RunStoreError as store_error:
+        return OperationResult.failure(
+            "cancel", OperationError("RUN_STORE_ERROR", str(store_error))
+        )
+    return OperationResult.success("cancel", CancelValue(_status_value(record)))
 
 
 def list_runs_operation(store: RunStore) -> OperationResult[ListRunsValue]:
@@ -940,9 +1091,11 @@ def _launch_resolution_value(
     return LaunchResolutionValue(resolved.profile, values, sources)
 
 
-def _unsupported_local_target(
+def _unsupported_execution_target(
     target: Target,
     experiment: ExperimentSpec,
+    *,
+    asynchronous: bool = False,
 ) -> OperationError | None:
     actual = (
         target.transport.kind,
@@ -954,6 +1107,12 @@ def _unsupported_local_target(
         "apptainer",
         "native",
     }:
+        if asynchronous:
+            return OperationError(
+                "ASYNC_UNAVAILABLE",
+                "Asynchronous submit requires an SSH/Slurm/rsync target",
+                {"target": target.name},
+            )
         if actual[3] == "native" and experiment.container is not None:
             return OperationError(
                 "CONTAINER_CONFLICT",
@@ -967,11 +1126,47 @@ def _unsupported_local_target(
                 {"target": target.name},
             )
         return None
+    if actual == ("ssh", "slurm", "rsync", "apptainer"):
+        if experiment.container is None:
+            return OperationError(
+                "CONTAINER_REQUIRED",
+                "The remote Slurm path requires an experiment container image",
+                {"target": target.name},
+            )
+        return None
     return OperationError(
         "TARGET_UNSUPPORTED",
-        f"Synchronous run does not support target '{target.name}'",
+        f"Execution does not support target '{target.name}'",
         {"target": target.name},
     )
+
+
+def _execution_adapters(
+    target: Target,
+) -> tuple[Transport, Stager, ContainerRuntime, Scheduler]:
+    if target.transport.kind == "local":
+        transport = LocalTransport()
+        runtime: ContainerRuntime = (
+            NativeRuntime() if target.container.kind == "native" else ApptainerRuntime()
+        )
+        return transport, LocalStager(), runtime, LocalScheduler(transport)
+    host = target.transport.options.get("host")
+    if type(host) is not str:
+        raise ValueError("SSH target host is unavailable")
+    remote_transport = SSHTransport(host)
+    return (
+        remote_transport,
+        RsyncStager(remote_transport, host=host),
+        RemoteApptainerRuntime(remote_transport),
+        SlurmScheduler(remote_transport),
+    )
+
+
+def _record_slurm_scheduler(record: RunRecord) -> SlurmScheduler:
+    host = record.run.target.transport.options.get("host")
+    if type(host) is not str:
+        raise ValueError("Persisted SSH target host is unavailable")
+    return SlurmScheduler(SSHTransport(host))
 
 
 def _config_error(error: ConfigError) -> OperationError:

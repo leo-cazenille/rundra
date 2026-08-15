@@ -5,7 +5,7 @@ import shutil
 from pathlib import PurePath
 
 from rundra.domain.models import Command
-from rundra.ports import BindMount, CapabilityCheck, ContainerRequest
+from rundra.ports import BindMount, CapabilityCheck, ContainerRequest, Transport
 
 _ENVIRONMENT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _RESERVED_ENVIRONMENT_NAMES = frozenset(
@@ -106,6 +106,42 @@ class ApptainerRuntime:
             for name, value in sorted(request.command.environment.items())
         }
         return Command(tuple(argv), environment=environment)
+
+
+class RemoteApptainerRuntime:
+    """Check Apptainer through a Transport while sharing pure command construction."""
+
+    def __init__(self, transport: Transport, executable: str = "apptainer") -> None:
+        if not isinstance(transport, Transport):
+            raise TypeError("RemoteApptainerRuntime requires a Transport")
+        self._transport = transport
+        self._runtime = ApptainerRuntime(executable)
+        self._executable = executable
+
+    def check(self) -> CapabilityCheck:
+        command = Command(
+            (
+                "/bin/sh",
+                "-c",
+                'command -v -- "$1" >/dev/null 2>&1',
+                "rundra-apptainer-check",
+                self._executable,
+            )
+        )
+        try:
+            result = self._transport.run(command)
+        except Exception as error:
+            raise ApptainerUnavailableError(
+                "Could not check the remote Apptainer executable"
+            ) from error
+        if result.exit_code != 0:
+            raise ApptainerUnavailableError(
+                f"Apptainer executable {self._executable!r} was not found remotely"
+            )
+        return CapabilityCheck("apptainer")
+
+    def build_command(self, request: ContainerRequest) -> Command:
+        return self._runtime.build_command(request)
 
 
 def _validate_command(command: Command) -> None:

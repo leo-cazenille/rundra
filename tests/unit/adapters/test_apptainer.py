@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import PurePosixPath
 
 import pytest
@@ -8,9 +9,30 @@ from rundra.adapters.apptainer import (
     ApptainerConfigurationError,
     ApptainerRuntime,
     ApptainerUnavailableError,
+    RemoteApptainerRuntime,
 )
 from rundra.domain.models import Command
-from rundra.ports import BindMount, ContainerRequest, ContainerRuntime
+from rundra.ports import (
+    BindMount,
+    CapabilityCheck,
+    CommandResult,
+    ContainerRequest,
+    ContainerRuntime,
+)
+
+
+class RemoteCheckTransport:
+    def __init__(self, exit_code: int) -> None:
+        self.exit_code = exit_code
+        self.calls: list[Command] = []
+
+    def check(self) -> CapabilityCheck:
+        return CapabilityCheck("test")
+
+    def run(self, command: Command) -> CommandResult:
+        self.calls.append(command)
+        now = datetime(2026, 8, 15, tzinfo=UTC)
+        return CommandResult(command, self.exit_code, "", "", now, now)
 
 
 def _request(
@@ -245,3 +267,27 @@ def test_apptainer_capability_check_reports_an_actionable_missing_runtime(
 def test_apptainer_runtime_rejects_invalid_executable_names(executable: str) -> None:
     with pytest.raises((TypeError, ValueError), match="executable"):
         ApptainerRuntime(executable=executable)
+
+
+def test_remote_apptainer_check_runs_on_the_target_transport() -> None:
+    transport = RemoteCheckTransport(0)
+    runtime = RemoteApptainerRuntime(transport, "apptainer-custom")
+
+    assert runtime.check() == CapabilityCheck("apptainer")
+    assert runtime.build_command(_request()).argv[0] == "apptainer-custom"
+    assert transport.calls == [
+        Command(
+            (
+                "/bin/sh",
+                "-c",
+                'command -v -- "$1" >/dev/null 2>&1',
+                "rundra-apptainer-check",
+                "apptainer-custom",
+            )
+        )
+    ]
+
+
+def test_remote_apptainer_check_reports_missing_target_executable() -> None:
+    with pytest.raises(ApptainerUnavailableError, match="not found remotely"):
+        RemoteApptainerRuntime(RemoteCheckTransport(1)).check()

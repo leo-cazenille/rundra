@@ -6,6 +6,7 @@ from datetime import timedelta
 from typing import Any
 
 from rundra.cli.operations import (
+    CancelValue,
     FetchValue,
     InspectValue,
     LaunchResolutionValue,
@@ -70,6 +71,8 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
             document["launch"] = _launch_document(value.launch)
     elif isinstance(value, StatusValue):
         document["status"] = _status_document(value)
+    elif isinstance(value, CancelValue):
+        document["cancel"] = _status_document(value.status)
     elif isinstance(value, ListRunsValue):
         document["runs"] = [_status_document(run) for run in value.runs]
     elif isinstance(value, LogsValue):
@@ -142,6 +145,9 @@ def render_human(result: OperationResult[Any]) -> str:
             f"Run: {value.run_id}\nState: {value.state.value}\n"
             f"Retrieval: {value.retrieval_state.value}\nTasks: {counts}"
         )
+    if isinstance(value, CancelValue):
+        status = value.status
+        return f"Run: {status.run_id}\nState after cancellation: {status.state.value}"
     if isinstance(value, ListRunsValue):
         if not value.runs:
             return "No Runs found."
