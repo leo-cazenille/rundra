@@ -18,7 +18,7 @@ class RunStore(Protocol):
         self,
         record: RunRecord,
         *,
-        expected: RunRecord | None = None,
+        expected: RunRecord,
     ) -> None: ...
 
     def list(self) -> tuple[RunRecord, ...]: ...

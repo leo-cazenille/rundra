@@ -71,19 +71,18 @@ class JsonRunStore:
         self,
         record: RunRecord,
         *,
-        expected: RunRecord | None = None,
+        expected: RunRecord,
     ) -> None:
         """Validate lifecycle changes and atomically replace a stored record."""
         self._require_record(record)
-        if expected is not None:
-            self._require_record(expected)
-            if expected.run.id != record.run.id:
-                raise ValueError("Expected and updated Run IDs must match")
+        self._require_record(expected)
+        if expected.run.id != record.run.id:
+            raise ValueError("Expected and updated Run IDs must match")
         with self._write_lock(record.run.id):
             previous = self.load(record.run.id)
             if previous == record:
                 return
-            if expected is not None and previous != expected:
+            if previous != expected:
                 raise RunStoreConflictError(
                     f"Run {record.run.id} changed since it was loaded"
                 )

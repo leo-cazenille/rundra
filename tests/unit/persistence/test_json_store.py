@@ -444,9 +444,9 @@ def test_json_store_updates_computation_and_retrieval_independently(
     staging = _with_states(
         created, ExecutionState.STAGING, RetrievalState.NOT_REQUESTED
     )
-    store.update(staging)
+    store.update(staging, expected=created)
     retrieving = _with_states(staging, ExecutionState.STAGING, RetrievalState.PENDING)
-    store.update(retrieving)
+    store.update(retrieving, expected=staging)
 
     assert store.load(created.run.id).run.state is ExecutionState.STAGING
     assert store.load(created.run.id).run.retrieval_state is RetrievalState.PENDING
@@ -477,7 +477,10 @@ def test_json_store_rejects_invalid_lifecycle_transitions(
     store.create(created)
 
     with pytest.raises(RunStoreError, match="Invalid .* state transition"):
-        store.update(_with_states(created, execution, retrieval))
+        store.update(
+            _with_states(created, execution, retrieval),
+            expected=created,
+        )
 
     assert store.load(created.run.id) == created
 
@@ -488,7 +491,10 @@ def test_json_store_rejects_changes_to_run_identity_and_inputs(tmp_path: Path) -
     store.create(original)
 
     with pytest.raises(RunStoreError, match="immutable run definition"):
-        store.update(replace(original, source_root=PurePosixPath("/work/different")))
+        store.update(
+            replace(original, source_root=PurePosixPath("/work/different")),
+            expected=original,
+        )
 
     assert store.load(original.run.id) == original
 
@@ -509,7 +515,7 @@ def test_json_store_failed_atomic_update_preserves_previous_record(
 
     monkeypatch.setattr(json_store.os, "replace", fail_replace)
     with pytest.raises(RunStoreError, match="atomic update"):
-        store.update(updated)
+        store.update(updated, expected=original)
 
     assert store.load(original.run.id) == original
     assert list(tmp_path.glob(".*.tmp")) == []

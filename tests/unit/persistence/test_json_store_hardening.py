@@ -109,7 +109,10 @@ def test_concurrent_readers_observe_only_complete_atomic_updates(
         try:
             for ordinal in range(100):
                 current = store.load(original.run.id)
-                store.update(replace(current, initiator=f"writer-{ordinal}"))
+                store.update(
+                    replace(current, initiator=f"writer-{ordinal}"),
+                    expected=current,
+                )
         finally:
             finished.set()
 

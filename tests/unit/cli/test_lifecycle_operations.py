@@ -4,6 +4,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 
@@ -26,7 +27,8 @@ from rundra.cli.operations import (
 )
 from rundra.cli.render import result_document
 from rundra.domain.mappings import ArrayTaskMapping
-from rundra.domain.models import Artifact, ArtifactKind, BackendConfig, TaskId
+from rundra.domain.models import Artifact, ArtifactKind, BackendConfig, RunId, TaskId
+from rundra.domain.records import RunRecord
 from rundra.domain.states import ExecutionState, RetrievalState
 from rundra.persistence import JsonRunStore, record_from_dict
 from rundra.ports import (
@@ -273,6 +275,72 @@ def test_concurrent_fetches_are_idempotent_and_preserve_one_artifact(
     assert (destination / "results/result.json").read_text(encoding="utf-8") == (
         '{"value": 17}\n'
     )
+
+
+def test_disjoint_concurrent_fetch_conflict_is_retryable_without_lost_state(
+    tmp_path: Path,
+) -> None:
+    _, run_id = _stored_array_record(tmp_path)
+    store_path = tmp_path / "array-records"
+    barrier = Barrier(2)
+
+    class CoordinatedStore(JsonRunStore):
+        def __init__(self, root: Path) -> None:
+            super().__init__(root)
+            self._first_load = True
+
+        def load(self, selected_run_id: RunId) -> RunRecord:
+            record = super().load(selected_run_id)
+            if self._first_load:
+                self._first_load = False
+                barrier.wait()
+            return record
+
+    selections = ("0", "1")
+
+    def fetch(selection: str) -> OperationResult[FetchValue]:
+        return fetch_operation(
+            run_id,
+            CoordinatedStore(store_path),
+            tmp_path / "retrieved",
+            tasks=(selection,),
+            stager=RecordingFetchStager(),
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = tuple(executor.map(fetch, selections))
+
+    assert sum(result.ok for result in results) == 1
+    conflict_index = next(
+        index for index, result in enumerate(results) if not result.ok
+    )
+    conflict = results[conflict_index]
+    assert conflict.error is not None
+    assert conflict.error.code == "RUN_STORE_CONFLICT"
+    persisted = JsonRunStore(store_path).list()[0]
+    assert (
+        tuple(persisted.task_retrieval_states.values()).count(RetrievalState.SUCCEEDED)
+        == 1
+    )
+    assert (
+        tuple(persisted.task_retrieval_states.values()).count(
+            RetrievalState.NOT_REQUESTED
+        )
+        == 1
+    )
+
+    retried = fetch_operation(
+        run_id,
+        JsonRunStore(store_path),
+        tmp_path / "retrieved",
+        tasks=(selections[conflict_index],),
+        stager=RecordingFetchStager(),
+    )
+
+    assert retried.ok
+    completed = JsonRunStore(store_path).list()[0]
+    assert completed.run.retrieval_state is RetrievalState.SUCCEEDED
+    assert set(completed.task_retrieval_states.values()) == {RetrievalState.SUCCEEDED}
 
 
 def test_partial_array_fetch_tracks_tasks_and_becomes_complete_incrementally(
