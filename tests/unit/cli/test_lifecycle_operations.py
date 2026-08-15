@@ -18,6 +18,7 @@ from rundra.cli.operations import (
     inspect_operation,
     list_runs_operation,
     logs_operation,
+    resolve_run_inputs_operation,
     run_operation,
     status_operation,
     submit_unavailable_operation,
@@ -209,3 +210,82 @@ targets:
     records = store.list()
     assert len(records) == 1
     assert records[0].run.state is ExecutionState.FAILED
+
+
+def test_run_input_resolution_uses_project_profile_and_user_defaults(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    experiment = project / "experiment.yaml"
+    experiment.touch()
+    (project / "rundra.yaml").write_text(
+        """\
+version: 1
+default_profile: local
+profiles:
+  local:
+    config: config.yaml
+    seed: 17
+    target: local
+    source_root: .
+    destination: retrieved
+""",
+        encoding="utf-8",
+    )
+    user = tmp_path / "user.yaml"
+    user.write_text(
+        """\
+version: 1
+defaults:
+  targets_file: targets.yaml
+  data_dir: records
+""",
+        encoding="utf-8",
+    )
+
+    result = resolve_run_inputs_operation(experiment, user_config_source=user)
+
+    assert result.ok and result.value is not None
+    assert result.value.config == (project / "config.yaml").resolve()
+    assert result.value.seed == 17
+    assert result.value.target == "local"
+    assert result.value.source_root == project.resolve()
+    assert result.value.destination == (project / "retrieved").resolve()
+    assert result.value.targets_file == (tmp_path / "targets.yaml").resolve()
+    assert result.value.data_dir == (tmp_path / "records").resolve()
+
+
+def test_run_input_resolution_reports_all_unresolved_required_values(
+    tmp_path: Path,
+) -> None:
+    result = resolve_run_inputs_operation(
+        tmp_path / "experiment.yaml",
+        user_config_source=tmp_path / "absent-user.yaml",
+    )
+
+    assert result.error is not None
+    assert result.error.code == "LAUNCH_VALUE_REQUIRED"
+    assert result.error.details == {"fields": ("config", "seed", "target")}
+
+
+def test_fully_explicit_run_inputs_do_not_depend_on_optional_defaults(
+    tmp_path: Path,
+) -> None:
+    malformed_user = tmp_path / "user.yaml"
+    malformed_user.write_text("not: a-user-config\n", encoding="utf-8")
+
+    result = resolve_run_inputs_operation(
+        tmp_path / "experiment.yaml",
+        config=tmp_path / "config.yaml",
+        seed=4,
+        target="local",
+        targets_file=tmp_path / "targets.yaml",
+        source_root=tmp_path,
+        destination=tmp_path / "results",
+        data_dir=tmp_path / "records",
+        user_config_source=malformed_user,
+    )
+
+    assert result.ok and result.value is not None
+    assert set(result.value.resolution.sources.values()) == {"cli"}

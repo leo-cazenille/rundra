@@ -13,6 +13,7 @@ from rundra.cli.operations import (
     list_runs_operation,
     logs_operation,
     plan_operation,
+    resolve_run_inputs_operation,
     run_operation,
     status_operation,
     submit_unavailable_operation,
@@ -51,16 +52,18 @@ def build_parser() -> argparse.ArgumentParser:
     _add_json_option(targets)
 
     run = subparsers.add_parser("run", help="execute one Task synchronously")
-    _add_execution_arguments(run, allow_many=False)
-    run.add_argument("--source-root", type=Path, default=Path.cwd())
-    run.add_argument("--destination", type=Path, default=Path("rundra-results"))
-    _add_store_option(run)
+    _add_execution_arguments(run, allow_many=False, required=False)
+    run.add_argument("--source-root", type=Path)
+    run.add_argument("--destination", type=Path)
+    run.add_argument("--project-file", type=Path)
+    run.add_argument("--profile")
+    _add_store_option(run, use_default=False)
     _add_json_option(run)
 
     submit = subparsers.add_parser(
         "submit", help="report asynchronous submission capability"
     )
-    _add_execution_arguments(submit, allow_many=True)
+    _add_execution_arguments(submit, allow_many=True, required=True)
     _add_json_option(submit)
 
     status = subparsers.add_parser("status", help="show persisted Run status")
@@ -103,23 +106,32 @@ def _default_data_dir() -> Path:
     return Path("~/.local/share/rundra/runs").expanduser()
 
 
-def _add_store_option(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--data-dir", type=Path, default=_default_data_dir())
+def _add_store_option(
+    parser: argparse.ArgumentParser, *, use_default: bool = True
+) -> None:
+    parser.add_argument(
+        "--data-dir", type=Path, default=_default_data_dir() if use_default else None
+    )
 
 
 def _add_execution_arguments(
     parser: argparse.ArgumentParser,
     *,
     allow_many: bool,
+    required: bool,
 ) -> None:
     parser.add_argument("experiment", type=Path)
-    parser.add_argument("--config", required=True, type=Path)
-    seed_group = parser.add_mutually_exclusive_group(required=True)
+    parser.add_argument("--config", required=required, type=Path)
+    seed_group = parser.add_mutually_exclusive_group(required=required)
     seed_group.add_argument("--seed", type=int)
     if allow_many:
         seed_group.add_argument("--seeds")
-    parser.add_argument("--target", required=True)
-    parser.add_argument("--targets-file", type=Path, default=_default_targets_file())
+    parser.add_argument("--target", required=required)
+    parser.add_argument(
+        "--targets-file",
+        type=Path,
+        default=_default_targets_file() if required else None,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -144,16 +156,33 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif arguments.command == "targets":
         result = targets_operation(arguments.targets_file)
     elif arguments.command == "run":
-        result = run_operation(
+        resolved = resolve_run_inputs_operation(
             arguments.experiment,
-            arguments.config,
-            arguments.targets_file,
-            arguments.target,
-            arguments.source_root,
-            arguments.destination,
-            JsonRunStore(arguments.data_dir),
+            config=arguments.config,
             seed=arguments.seed,
+            target=arguments.target,
+            targets_file=arguments.targets_file,
+            source_root=arguments.source_root,
+            destination=arguments.destination,
+            data_dir=arguments.data_dir,
+            project_file=arguments.project_file,
+            profile=arguments.profile,
         )
+        if not resolved.ok:
+            result = resolved
+        else:
+            assert resolved.value is not None
+            inputs = resolved.value
+            result = run_operation(
+                arguments.experiment,
+                inputs.config,
+                inputs.targets_file,
+                inputs.target,
+                inputs.source_root,
+                inputs.destination,
+                JsonRunStore(inputs.data_dir),
+                seed=inputs.seed,
+            )
     elif arguments.command == "submit":
         result = submit_unavailable_operation()
     elif arguments.command == "status":

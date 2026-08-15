@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import subprocess
 
+from rundra.cli.main import build_parser
+
 
 def test_console_entry_point_displays_help() -> None:
     result = subprocess.run(
@@ -16,3 +18,15 @@ def test_console_entry_point_displays_help() -> None:
     assert result.stdout.startswith("usage: rundr")
     for command in ("run", "submit", "status", "list", "logs", "fetch", "inspect"):
         assert command in result.stdout
+
+
+def test_run_parser_accepts_launch_resolution_without_repeated_arguments() -> None:
+    arguments = build_parser().parse_args(["run", "experiment.yaml"])
+
+    assert arguments.config is None
+    assert arguments.seed is None
+    assert arguments.target is None
+    assert arguments.targets_file is None
+    assert arguments.source_root is None
+    assert arguments.destination is None
+    assert arguments.data_dir is None

@@ -15,6 +15,14 @@ from rundra.adapters import (
 )
 from rundra.config.errors import ConfigError
 from rundra.config.experiments import load_config_snapshot, load_experiment
+from rundra.config.launch import (
+    LaunchResolutionError,
+    LaunchValues,
+    ResolvedLaunch,
+    discover_project_launch,
+    discover_user_launch,
+    resolve_launch,
+)
 from rundra.config.targets import load_targets
 from rundra.domain.models import (
     Artifact,
@@ -107,6 +115,35 @@ class FetchValue:
     artifacts: tuple[Artifact, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class ResolvedRunInputs:
+    config: Path
+    seed: int
+    target: str
+    targets_file: Path
+    source_root: Path
+    destination: Path
+    data_dir: Path
+    resolution: ResolvedLaunch
+
+    def __post_init__(self) -> None:
+        for name in (
+            "config",
+            "targets_file",
+            "source_root",
+            "destination",
+            "data_dir",
+        ):
+            if not isinstance(getattr(self, name), Path):
+                raise TypeError(f"ResolvedRunInputs {name} must be a Path")
+        if type(self.seed) is not int:
+            raise TypeError("ResolvedRunInputs seed must be an integer")
+        if type(self.target) is not str or not self.target:
+            raise ValueError("ResolvedRunInputs target must be nonblank")
+        if type(self.resolution) is not ResolvedLaunch:
+            raise TypeError("ResolvedRunInputs resolution must be ResolvedLaunch")
+
+
 def validate_operation(source: Path) -> OperationResult[ValidationValue]:
     try:
         return OperationResult.success(
@@ -160,6 +197,106 @@ def targets_operation(source: Path) -> OperationResult[TargetsValue]:
         )
     except ConfigError as error:
         return OperationResult.failure("targets", _config_error(error))
+
+
+def resolve_run_inputs_operation(
+    experiment_source: Path,
+    *,
+    config: Path | None = None,
+    seed: int | None = None,
+    target: str | None = None,
+    targets_file: Path | None = None,
+    source_root: Path | None = None,
+    destination: Path | None = None,
+    data_dir: Path | None = None,
+    project_file: Path | None = None,
+    profile: str | None = None,
+    user_config_source: Path | None = None,
+) -> OperationResult[ResolvedRunInputs]:
+    """Resolve synchronous run inputs without planning or executing work."""
+    try:
+        cli_values = LaunchValues(
+            config=config,
+            seed=seed,
+            target=target,
+            source_root=source_root,
+            destination=destination,
+            targets_file=targets_file,
+            data_dir=data_dir,
+        )
+        fully_explicit = all(
+            getattr(cli_values, field) is not None
+            for field in (
+                "config",
+                "seed",
+                "target",
+                "source_root",
+                "destination",
+                "targets_file",
+                "data_dir",
+            )
+        )
+        use_defaults = (
+            not fully_explicit or project_file is not None or profile is not None
+        )
+        project = (
+            discover_project_launch(experiment_source, project_file=project_file)
+            if use_defaults
+            else None
+        )
+        user = discover_user_launch(user_config_source) if use_defaults else None
+        builtins = LaunchValues(
+            source_root=(project.project_root if project is not None else Path.cwd()),
+            destination=Path("rundra-results"),
+            targets_file=Path("~/.config/rundra/targets.yaml").expanduser(),
+            data_dir=Path("~/.local/share/rundra/runs").expanduser(),
+        )
+        resolved = resolve_launch(
+            cli=cli_values,
+            project=project,
+            user=user,
+            builtins=builtins,
+            profile=profile,
+        )
+    except ConfigError as error:
+        return OperationResult.failure("run", _config_error(error))
+    except LaunchResolutionError as error:
+        return OperationResult.failure("run", OperationError(error.code, error.message))
+    missing = tuple(
+        name
+        for name in ("config", "seed", "target")
+        if getattr(resolved.values, name) is None
+    )
+    if missing:
+        return OperationResult.failure(
+            "run",
+            OperationError(
+                "LAUNCH_VALUE_REQUIRED",
+                f"Launch values could not resolve: {', '.join(missing)}",
+                {"fields": missing},
+            ),
+        )
+    values = resolved.values
+    assert values.config is not None
+    assert values.seed is not None
+    assert values.target is not None
+    assert values.targets_file is not None
+    assert values.source_root is not None
+    assert values.destination is not None
+    assert values.data_dir is not None
+    return OperationResult.success(
+        "run",
+        ResolvedRunInputs(
+            config=values.config,
+            seed=values.seed,
+            target=values.target,
+            targets_file=values.targets_file,
+            source_root=values.source_root,
+            destination=values.destination,
+            data_dir=values.data_dir,
+            resolution=resolved,
+        ),
+    )
 
 
 def run_operation(
