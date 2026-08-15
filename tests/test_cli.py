@@ -14,3 +14,5 @@ def test_console_entry_point_displays_help() -> None:
     assert result.returncode == 0, result.stderr
     assert result.stderr == ""
     assert result.stdout.startswith("usage: rundr")
+    for command in ("run", "submit", "status", "list", "logs", "fetch", "inspect"):
+        assert command in result.stdout

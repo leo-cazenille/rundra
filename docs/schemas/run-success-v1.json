@@ -1,0 +1,51 @@
+{
+  "format_version": 1,
+  "ok": true,
+  "operation": "run",
+  "run": {
+    "artifacts": [
+      {
+        "kind": "source_snapshot",
+        "path": "/workspaces/runs/run_0123456789abcdef0123456789abcdef/source",
+        "size_bytes": null,
+        "task_id": null
+      },
+      {
+        "kind": "effective_config",
+        "path": "/workspaces/runs/run_0123456789abcdef0123456789abcdef/input/config.yaml",
+        "size_bytes": 24,
+        "task_id": null
+      },
+      {
+        "kind": "stdout",
+        "path": "/workspaces/runs/run_0123456789abcdef0123456789abcdef/logs/task_000000.stdout",
+        "size_bytes": 15,
+        "task_id": "task_000000"
+      },
+      {
+        "kind": "stderr",
+        "path": "/workspaces/runs/run_0123456789abcdef0123456789abcdef/logs/task_000000.stderr",
+        "size_bytes": 0,
+        "task_id": "task_000000"
+      },
+      {
+        "kind": "raw_result",
+        "path": "/work/minimal/retrieved/results/result.json",
+        "size_bytes": 42,
+        "task_id": "task_000000"
+      }
+    ],
+    "experiment": "minimal",
+    "retrieval_state": "SUCCEEDED",
+    "run_id": "run_0123456789abcdef0123456789abcdef",
+    "scheduler_job_ids": [
+      "local-0123456789abcdef0123456789abcdef"
+    ],
+    "state": "SUCCEEDED",
+    "target": "local",
+    "task_exit_codes": {
+      "task_000000": 0
+    },
+    "tasks": 1
+  }
+}

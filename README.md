@@ -22,9 +22,11 @@ environment, working-directory, and GPU handling. The CLI can validate
 configuration, inspect a non-submitting plan, and list configured targets.
 M1.4 adds the port-driven single-task local lifecycle: shell-free process
 execution, synchronous local scheduling, durable state reconciliation, separate
-stdout/stderr artifacts, and partial-output retrieval after task failure. This
-lifecycle is available as an application service; the `run` and lifecycle CLI
-commands remain M1.5 work.
+stdout/stderr artifacts, and partial-output retrieval after task failure. M1.5
+exposes that service through synchronous `run` and persisted `status`, `list`,
+`logs`, `fetch`, and `inspect` commands with version-1 JSON contracts.
+Asynchronous `submit` reports an explicit capability error until durable async
+semantics exist.
 
 Implementation progress is tracked in
 [`.agent/plans/v0.1.md`](.agent/plans/v0.1.md).
@@ -64,6 +66,10 @@ uv run rundr plan examples/minimal/experiment.yaml \
   --targets-file examples/minimal/targets.yaml
 uv run rundr targets --targets-file examples/minimal/targets.yaml
 ```
+
+Lifecycle commands use `~/.local/share/rundra/runs` by default; pass
+`--data-dir` to select another record store. `run` accepts one `--seed`, a
+project `--source-root`, and a deterministic or explicit `--destination`.
 
 Add `--json` to obtain the version-1 machine-readable contracts documented in
 [`docs/schemas/`](docs/schemas/). Authentication comes only from external

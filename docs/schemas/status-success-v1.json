@@ -1,0 +1,16 @@
+{
+  "format_version": 1,
+  "ok": true,
+  "operation": "status",
+  "status": {
+    "experiment": "minimal",
+    "retrieval_state": "SUCCEEDED",
+    "run_id": "run_0123456789abcdef0123456789abcdef",
+    "state": "SUCCEEDED",
+    "target": "local",
+    "tasks": {
+      "succeeded": 1,
+      "total": 1
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "fetch": {
+    "artifacts": [
+      {
+        "kind": "raw_result",
+        "path": "/work/minimal/retrieved/results/result.json",
+        "size_bytes": 42,
+        "task_id": "task_000000"
+      }
+    ],
+    "destination": "retrieved",
+    "retrieval_state": "SUCCEEDED",
+    "run_id": "run_0123456789abcdef0123456789abcdef"
+  },
+  "format_version": 1,
+  "ok": true,
+  "operation": "fetch"
+}

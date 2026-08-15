@@ -1,0 +1,13 @@
+{
+  "format_version": 1,
+  "logs": {
+    "run_id": "run_0123456789abcdef0123456789abcdef",
+    "stderr": "",
+    "stderr_path": "/workspaces/runs/run_0123456789abcdef0123456789abcdef/logs/task_000000.stderr",
+    "stdout": "seed=17 done\n",
+    "stdout_path": "/workspaces/runs/run_0123456789abcdef0123456789abcdef/logs/task_000000.stdout",
+    "task_id": "task_000000"
+  },
+  "ok": true,
+  "operation": "logs"
+}

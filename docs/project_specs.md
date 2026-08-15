@@ -1447,6 +1447,25 @@ Failures must not be communicated only through free-form prose.
 
 CLI process exit codes should also reflect success or failure appropriately.
 
+The M1.5 local CLI adds synchronous `run` and persisted `status`, `list`,
+`logs`, `fetch`, and `inspect`. Each useful command supports `--json` and both
+renderers consume the same typed result. The default record directory is
+`~/.local/share/rundra/runs`; `--data-dir` selects another store. `run` accepts
+exactly one seed, uses the current directory as its default source root, and
+reports the output destination and stable Run ID. A successfully reconciled
+task failure returns a Run document with state `FAILED` and process exit code
+2; operation/configuration/infrastructure failures return exit code 1; other
+successful operations return 0.
+
+`status`, `list`, and `inspect` load strict persisted RunRecords rather than
+querying native tools. `logs` resolves framework-managed stdout/stderr artifacts
+by stable Task ID. Local `fetch` reconstructs the per-Run workspace from its
+target and Run ID, is idempotent, and updates the artifact manifest; refetching
+an already successful retrieval keeps its successful state. Asynchronous
+`submit` is present only as the structured `ASYNC_UNAVAILABLE` capability error
+in M1.5. `cancel` remains unavailable because there is no active asynchronous
+local process to cancel.
+
 ---
 
 ## 23. Agent-facing design requirements

@@ -16,6 +16,11 @@ The M1.4 example represents a completed local Run and demonstrates its artifact
 manifest, scheduler reference, timestamps, Task exit code, and independent
 successful retrieval state.
 
+M1.5 adds checked success envelopes for synchronous `run`, `status`, `list`,
+`logs`, and `fetch`. The `inspect` contract embeds `run-record-v1.json` unchanged
+under the standard envelope's `record` field. `submit` uses the common error
+envelope with code `ASYNC_UNAVAILABLE` until asynchronous semantics exist.
+
 Fields may be added compatibly during v0.1 development. Removing a field,
 changing its meaning, or changing its type requires a new `format_version`.
 The CLI JSON renderer and human renderer consume the same typed operation

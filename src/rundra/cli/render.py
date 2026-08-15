@@ -5,9 +5,19 @@ from collections.abc import Mapping
 from datetime import timedelta
 from typing import Any
 
-from rundra.cli.operations import TargetsValue, ValidationValue
-from rundra.domain.models import Command, ResourceRequest, Target
+from rundra.cli.operations import (
+    FetchValue,
+    InspectValue,
+    ListRunsValue,
+    LogsValue,
+    RunValue,
+    StatusValue,
+    TargetsValue,
+    ValidationValue,
+)
+from rundra.domain.models import Artifact, Command, ResourceRequest, Target
 from rundra.orchestration.models import ExecutionPlan
+from rundra.persistence import record_to_dict
 from rundra.results import OperationResult
 
 _FORMAT_VERSION = 1
@@ -50,6 +60,30 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
         document["targets"] = [
             _target_document(value.targets[name]) for name in sorted(value.targets)
         ]
+    elif isinstance(value, RunValue):
+        document["run"] = _run_value_document(value)
+    elif isinstance(value, StatusValue):
+        document["status"] = _status_document(value)
+    elif isinstance(value, ListRunsValue):
+        document["runs"] = [_status_document(run) for run in value.runs]
+    elif isinstance(value, LogsValue):
+        document["logs"] = {
+            "run_id": str(value.run_id),
+            "task_id": str(value.task_id),
+            "stdout": value.stdout,
+            "stderr": value.stderr,
+            "stdout_path": str(value.stdout_path),
+            "stderr_path": str(value.stderr_path),
+        }
+    elif isinstance(value, FetchValue):
+        document["fetch"] = {
+            "run_id": str(value.run_id),
+            "destination": str(value.destination),
+            "retrieval_state": value.retrieval_state.value,
+            "artifacts": [_artifact_document(item) for item in value.artifacts],
+        }
+    elif isinstance(value, InspectValue):
+        document["record"] = record_to_dict(value.record)
     else:
         raise TypeError(f"No public renderer for {type(value).__name__}")
     return document
@@ -82,6 +116,48 @@ def render_human(result: OperationResult[Any]) -> str:
             for name in sorted(value.targets)
         )
         return "\n".join(lines)
+    if isinstance(value, RunValue):
+        return (
+            f"Run: {value.run_id}\n"
+            f"State: {value.record.run.state.value}\n"
+            f"Retrieval: {value.record.run.retrieval_state.value}\n"
+            f"Target: {value.record.run.target.name}"
+        )
+    if isinstance(value, StatusValue):
+        counts = ", ".join(
+            f"{state.lower()}={count}"
+            for state, count in sorted(value.task_counts.items())
+        )
+        return (
+            f"Run: {value.run_id}\nState: {value.state.value}\n"
+            f"Retrieval: {value.retrieval_state.value}\nTasks: {counts}"
+        )
+    if isinstance(value, ListRunsValue):
+        if not value.runs:
+            return "No Runs found."
+        return "Known Runs:\n" + "\n".join(
+            f"  {run.run_id}: {run.state.value} ({run.experiment} on {run.target})"
+            for run in value.runs
+        )
+    if isinstance(value, LogsValue):
+        return (
+            f"Run: {value.run_id}\nTask: {value.task_id}\n"
+            f"--- stdout ---\n{value.stdout}"
+            f"--- stderr ---\n{value.stderr}"
+        ).rstrip()
+    if isinstance(value, FetchValue):
+        return (
+            f"Fetched {len(value.artifacts)} artifact(s) for {value.run_id} "
+            f"to {value.destination}"
+        )
+    if isinstance(value, InspectValue):
+        record = value.record
+        return (
+            f"Run: {record.run.id}\nExperiment: {record.run.experiment_name}\n"
+            f"State: {record.run.state.value}\n"
+            f"Retrieval: {record.run.retrieval_state.value}\n"
+            f"Artifacts: {len(record.artifacts)}"
+        )
     raise TypeError(f"No human renderer for {type(value).__name__}")
 
 
@@ -149,3 +225,49 @@ def _resources_document(resources: ResourceRequest) -> dict[str, Any]:
 
 def _duration_seconds(value: timedelta | None) -> int | None:
     return int(value.total_seconds()) if value is not None else None
+
+
+def _run_value_document(value: RunValue) -> dict[str, Any]:
+    record = value.record
+    return {
+        "run_id": str(record.run.id),
+        "experiment": record.run.experiment_name,
+        "target": record.run.target.name,
+        "state": record.run.state.value,
+        "retrieval_state": record.run.retrieval_state.value,
+        "tasks": len(record.run.tasks),
+        "scheduler_job_ids": list(record.scheduler_job_ids),
+        "task_exit_codes": {
+            str(task_id): exit_code
+            for task_id, exit_code in sorted(
+                record.task_exit_codes.items(), key=lambda item: item[0].value
+            )
+        },
+        "artifacts": [_artifact_document(item) for item in record.artifacts],
+    }
+
+
+def _status_document(value: StatusValue) -> dict[str, Any]:
+    return {
+        "run_id": str(value.run_id),
+        "experiment": value.experiment,
+        "target": value.target,
+        "state": value.state.value,
+        "retrieval_state": value.retrieval_state.value,
+        "tasks": {
+            "total": sum(value.task_counts.values()),
+            **{
+                state.lower(): count
+                for state, count in sorted(value.task_counts.items())
+            },
+        },
+    }
+
+
+def _artifact_document(artifact: Artifact) -> dict[str, Any]:
+    return {
+        "kind": artifact.kind.value,
+        "path": str(artifact.path),
+        "task_id": None if artifact.task_id is None else str(artifact.task_id),
+        "size_bytes": artifact.size_bytes,
+    }
