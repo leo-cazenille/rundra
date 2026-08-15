@@ -29,11 +29,13 @@ is writable, or that any backend is reachable.
 
 Shoal tests carry the registered `shoal_system` marker and are skipped unless
 the explicit command-line switch is present. The harness additionally requires
-the path to the operator's edited target file; the target name defaults to
-`shoal` and can be overridden when needed:
+the paths to the operator's edited target, experiment, and opaque configuration
+files. The target name defaults to `shoal` and can be overridden when needed:
 
 ```bash
 RUNDRA_SHOAL_TARGETS_FILE=/tmp/rundra-shoal-targets.yaml \
+RUNDRA_SHOAL_EXPERIMENT=/absolute/path/to/experiment.yaml \
+RUNDRA_SHOAL_CONFIG=/absolute/path/to/config.yaml \
   uv run pytest tests/system \
     -m shoal_system \
     --run-shoal-system-tests \
@@ -42,6 +44,8 @@ RUNDRA_SHOAL_TARGETS_FILE=/tmp/rundra-shoal-targets.yaml \
 
 ```bash
 RUNDRA_SHOAL_TARGETS_FILE=/tmp/rundra-shoal-targets.yaml \
+RUNDRA_SHOAL_EXPERIMENT=/absolute/path/to/experiment.yaml \
+RUNDRA_SHOAL_CONFIG=/absolute/path/to/config.yaml \
 RUNDRA_SHOAL_TARGET=my-shoal \
   uv run pytest tests/system \
     -m shoal_system \
@@ -56,6 +60,32 @@ an unknown target, a relative/root workspace, or the unchanged
 `YOUR_USERNAME` placeholder fails with an actionable message after explicit
 opt-in.
 
-Ordinary `uv run pytest` skips marked Shoal tests and never contacts the
-cluster. M4.2 will introduce non-submitting backend preflight checks; CPU and
-GPU submissions remain later, separately authorized checkpoints.
+## M4.2 non-submitting preflight
+
+The selected experiment must describe exactly one bounded CPU Task: one node,
+one task, at most one CPU, no GPU, at most 1 GiB, and at most five minutes. Its
+container image must be an absolute path visible from `fishvision`; relative
+images cannot be inspected before source staging.
+
+After the pure plan passes, preflight checks these layers independently:
+
+- supported SSH/Slurm/rsync/Apptainer target selection;
+- local OpenSSH and rsync clients;
+- authenticated SSH connectivity under normal host-key policy;
+- an existing writable/searchable remote workspace;
+- remote `sbatch`, `squeue`, `sacct`, and `scancel` commands;
+- remote Apptainer availability and image inspection;
+- requested Slurm resources through `sbatch --test-only`;
+- an NFS filesystem beneath the configured workspace.
+
+`sbatch --test-only` writes a temporary script, asks Slurm to validate the
+request, and removes the script. It does not submit a job. The M4.2 harness does
+not allocate a Rundra workspace or Run ID, stage source, invoke `rundr run` or
+`rundr submit`, or execute the container. Failures name the affected layer and
+provide a corrective action without copying arbitrary remote stderr into test
+output.
+
+The NFS check observes the login-side mount only. Compute-node visibility is
+not claimed until the bounded CPU execution in M4.3. Ordinary `uv run pytest`
+continues to skip every marked Shoal test and never contacts the cluster. GPU
+submission remains a later, separately authorized checkpoint.
