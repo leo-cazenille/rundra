@@ -38,6 +38,17 @@ done
 [ -d "$path" ] && [ -w "$path" ] && [ -x "$path" ]
 """
 _FILESYSTEM_CHECK_SCRIPT = _NEAREST_DIRECTORY_SCRIPT + 'exec stat -f -c %T -- "$path"\n'
+_SLURM_COMMANDS_CHECK_SCRIPT = """\
+set -eu
+for name in sbatch squeue scancel scontrol; do
+    command -v -- "$name" >/dev/null || exit 1
+done
+if command -v -- sacct >/dev/null; then
+    printf 'true\\n'
+else
+    printf 'false\\n'
+fi
+"""
 
 
 class PreflightStatus(StrEnum):
@@ -264,24 +275,38 @@ class RemotePreflight:
         )
 
     def _slurm_commands_check(self) -> PreflightCheck:
-        return self._remote_check(
+        try:
+            result = self._transport.run(
+                Command(
+                    (
+                        "/bin/sh",
+                        "-c",
+                        _SLURM_COMMANDS_CHECK_SCRIPT,
+                        "rundra-slurm-check",
+                    )
+                )
+            )
+        except Exception:
+            return _failed(
+                "slurm_commands",
+                "scheduler",
+                "Could not run the Slurm command check",
+                "Load the site Slurm environment providing sbatch, squeue, scancel, and scontrol.",
+            )
+        sacct_available = result.stdout.strip()
+        if result.exit_code != 0 or sacct_available not in {"true", "false"}:
+            return _failed(
+                "slurm_commands",
+                "scheduler",
+                "Required Slurm command check exited unsuccessfully",
+                "Load the site Slurm environment providing sbatch, squeue, scancel, and scontrol.",
+                exit_code=result.exit_code,
+            )
+        return _passed(
             "slurm_commands",
             "scheduler",
-            Command(
-                (
-                    "/bin/sh",
-                    "-c",
-                    'for name do command -v -- "$name" >/dev/null || exit 1; done',
-                    "rundra-slurm-check",
-                    "sbatch",
-                    "squeue",
-                    "sacct",
-                    "scancel",
-                    "scontrol",
-                )
-            ),
             "Required Slurm client commands are available",
-            "Load the site Slurm environment providing sbatch, squeue, sacct, scancel, and scontrol.",
+            sacct_available=sacct_available == "true",
         )
 
     def _image_check(self) -> PreflightCheck:

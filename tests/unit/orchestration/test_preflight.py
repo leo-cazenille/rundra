@@ -54,12 +54,21 @@ def _result(
     return CommandResult(command, exit_code, stdout, stderr, now, now)
 
 
-def _transport(exit_codes: tuple[int, ...]) -> FakeTransport:
+def _transport(
+    exit_codes: tuple[int, ...], *, sacct_available: bool = True
+) -> FakeTransport:
     commands = [Command(("scripted", str(index))) for index in range(len(exit_codes))]
     results = [
         _result(command, code)
         for command, code in zip(commands, exit_codes, strict=True)
     ]
+    if len(results) > 2:
+        slurm = results[2]
+        results[2] = _result(
+            slurm.command,
+            slurm.exit_code,
+            stdout=f"{str(sacct_available).lower()}\n",
+        )
     if results:
         last = results[-1]
         results[-1] = _result(last.command, last.exit_code, stdout="zfs\n")
@@ -116,6 +125,27 @@ def test_remote_preflight_checks_every_layer_without_submitting() -> None:
     assert "while [ ! -e" in filesystem_command.argv[2]
     assert "exec stat -f" in filesystem_command.argv[2]
     assert "mkdir" not in filesystem_command.argv[2]
+    slurm = next(check for check in report.checks if check.name == "slurm_commands")
+    assert slurm.details == {"sacct_available": True}
+
+
+def test_remote_preflight_accepts_absent_optional_sacct() -> None:
+    transport = _transport((0, 0, 0, 0, 0, 0), sacct_available=False)
+
+    report = RemotePreflight(
+        _target(),
+        _experiment(),
+        transport,
+        rsync_check=lambda: CapabilityCheck("rsync"),
+        runtime=_runtime(),
+    ).run()
+
+    assert report.ok
+    slurm = next(check for check in report.checks if check.name == "slurm_commands")
+    assert slurm.details == {"sacct_available": False}
+    command = transport.run_calls[2]
+    assert "for name in sbatch squeue scancel scontrol" in command.argv[2]
+    assert "command -v -- sacct" in command.argv[2]
 
 
 def test_connectivity_failure_blocks_remote_checks_and_redacts_diagnostics() -> None:
