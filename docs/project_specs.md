@@ -2046,7 +2046,34 @@ data in RunRecord v1. Pre-M5.2 version-1 records load with an empty mapping.
 The mapping contains no scheduler job ID and does not make a Task an array
 element; it only records how a selected backend strategy will relate the two.
 M5.2 does not generate an array script, submit work, or interpret Slurm
-accounting. Those behaviors begin in M5.3 and M5.4.
+accounting.
+
+M5.3 adds a construction-only Slurm boundary. A `SlurmArrayRequest` requires:
+
+- at least two ordered scheduler units;
+- the exact M5.2 Task/seed/index mapping;
+- uniform resources;
+- an absolute NUL-free remote manifest path;
+- an explicit positive site `MaxArraySize`, with the Task count no greater
+  than that bound.
+
+The Task manifest is a deterministic POSIX-shell `case` dispatcher. It accepts
+exactly one validated zero-based index and executes the corresponding canonical
+`Command` serialized through Rundra's existing safe remote-shell boundary.
+Task IDs and integer seeds appear only as inert comments; command/config/seed
+literals are shell-quoted, and neither `eval` nor a nested `sh -c` is used.
+Missing or unknown indices exit 64.
+
+The separate sbatch script contains portable and allowlisted native resource
+directives plus the exact contiguous `--array=0-N` bound. Array stdout and
+stderr paths must be absolute and contain both Slurm's `%A` array-job and `%a`
+array-index placeholders. The script contains no Task command/config/seed
+payload; it passes `SLURM_ARRAY_TASK_ID` to the safely quoted manifest path.
+
+M5.3 deliberately keeps multi-Task `SlurmScheduler.submit` disabled before any
+transport call. Persisting the manifest, submitting it, and reconciling
+per-Task scheduler/accounting observations are completed with the M5.4
+lifecycle work; the pure renderer cannot allocate resources.
 
 ---
 

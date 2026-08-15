@@ -141,7 +141,9 @@ submission follow in later checkpoints. M5.2 now makes grouping inspectable:
 for two or more homogeneous Tasks on a Slurm target, `plan --json` reports
 `strategy: "slurm_array"`, one ordered Task group, and an explicit Task
 ID/seed/zero-based-array-index mapping. It does not submit or generate an array
-script yet.
+script yet. M5.3 now provides the tested construction boundary for bounded
+array scripts and safely quoted per-Task manifests. Multi-Task scheduler
+submission remains disabled until per-Task reconciliation is implemented.
 
 ## Launch configuration
 
