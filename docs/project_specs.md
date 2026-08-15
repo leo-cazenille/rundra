@@ -2020,12 +2020,33 @@ M5.1 fixes the v0.1 seed-set semantics before scheduler grouping:
 - every Task in the v0.1 replicated Run consumes the same exact effective
   config snapshot.
 
-The version-1 RunRecord already represents these facts without duplicating
-them: the ordered `run.tasks` array contains each Task ID, seed, config,
-resources, and state; `task_exit_codes` is keyed by Task ID; and every
-task-specific artifact carries its Task ID. Shared source/config artifacts
-remain Run-level. The Task-to-native-array mapping is deliberately added by
-M5.2, when an execution strategy exists.
+The version-1 RunRecord represents these facts without duplicating them: the
+ordered `run.tasks` array contains each Task ID, seed, config, resources, and
+state; `task_exit_codes` is keyed by Task ID; and every task-specific artifact
+carries its Task ID. Shared source/config artifacts remain Run-level.
+
+M5.2 adds a pure, inspectable execution grouping before any scheduler command
+is constructed. A Slurm target with two or more homogeneous Tasks selects the
+`slurm_array` strategy and one ordered group; a single Task or a non-Slurm
+target retains `one_unit_per_task` with singleton groups. Groups must partition
+the logical Tasks exactly once and in plan order. Array Tasks must share the
+same exact config and resource request.
+
+For an array plan, `array_mapping` records a contiguous zero-based mapping:
+
+```json
+[
+  {"task_id": "task_000000", "seed": 7, "array_index": 0},
+  {"task_id": "task_000001", "seed": 8, "array_index": 1}
+]
+```
+
+The same mapping is preserved as immutable `task_array_mapping` definition
+data in RunRecord v1. Pre-M5.2 version-1 records load with an empty mapping.
+The mapping contains no scheduler job ID and does not make a Task an array
+element; it only records how a selected backend strategy will relate the two.
+M5.2 does not generate an array script, submit work, or interpret Slurm
+accounting. Those behaviors begin in M5.3 and M5.4.
 
 ---
 

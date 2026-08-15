@@ -137,7 +137,11 @@ user default. Explicit `--seeds START:STOP` uses an inclusive range in `plan`:
 `0:2` produces Tasks for seeds 0, 1, and 2. Task order follows seed-request
 order, IDs are stable zero-based ordinals, and duplicate seeds are rejected.
 M5.1 fixes these logical semantics; Slurm array grouping and multi-Task
-submission follow in M5.2 and later checkpoints.
+submission follow in later checkpoints. M5.2 now makes grouping inspectable:
+for two or more homogeneous Tasks on a Slurm target, `plan --json` reports
+`strategy: "slurm_array"`, one ordered Task group, and an explicit Task
+ID/seed/zero-based-array-index mapping. It does not submit or generate an array
+script yet.
 
 ## Launch configuration
 

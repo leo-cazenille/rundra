@@ -22,7 +22,12 @@ M5.1 confirms that the same version-1 fields losslessly represent ordered
 multi-Task Runs: each `run.tasks` entry carries its stable ordinal ID, explicit
 seed, shared effective config, resources, and state; `task_exit_codes` and
 task-specific artifacts refer back to those IDs. No scheduler-array identity is
-inferred before M5.2 establishes and records that explicit mapping.
+inferred. M5.2 adds `groups` and `array_mapping` to plan output, and the
+additive durable `task_array_mapping` RunRecord field. Each mapping entry
+contains exactly a Task ID, its recorded seed, and a contiguous zero-based
+array index. Old version-1 records without the field remain readable as an
+empty mapping. Native job IDs and accounting state are not fabricated at the
+planning boundary.
 
 M1.5 adds checked success envelopes for synchronous `run`, `status`, `list`,
 `logs`, and `fetch`. The `inspect` contract embeds `run-record-v1.json` unchanged
