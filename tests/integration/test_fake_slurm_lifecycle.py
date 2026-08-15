@@ -17,6 +17,7 @@ from rundra.domain.models import (
     RunId,
     Target,
 )
+from rundra.domain.records import RunRecord
 from rundra.domain.states import ExecutionState, RetrievalState
 from rundra.orchestration.planner import create_plan
 from rundra.orchestration.service import (
@@ -83,7 +84,11 @@ class FakeRuntime:
         return CapabilityCheck("fake-apptainer")
 
     def build_command(self, request: ContainerRequest) -> Command:
-        return Command(("apptainer", "exec", "/images/test.sif", "program"))
+        return Command(
+            ("apptainer", "exec", "/images/test.sif", *request.command.argv),
+            environment=request.command.environment,
+            working_directory=request.command.working_directory,
+        )
 
 
 def _request(tmp_path: Path, *, seeds: tuple[int, ...] = (17,)) -> RunExecutionRequest:
@@ -239,6 +244,60 @@ def test_scripted_slurm_array_reconciles_every_task_and_mixed_outcome(
     assert "#SBATCH --array=0-1" in submission_command.argv[6]
     assert "task_id=task_000000 seed=17" in submission_command.argv[5]
     assert "task_id=task_000001 seed=23" in submission_command.argv[5]
+
+
+def test_scripted_slurm_array_is_reproducible_for_the_same_seed_set(
+    tmp_path: Path,
+) -> None:
+    accounting = (
+        "42_0|COMPLETED|0:0|2026-08-15T10:00:00|"
+        "2026-08-15T10:01:00|node01|\n"
+        "42_1|COMPLETED|0:0|2026-08-15T10:00:00|"
+        "2026-08-15T10:01:30|node02|\n"
+    )
+
+    def execute(root: Path) -> tuple[RunRecord, str]:
+        service, transport, _ = _service(
+            root,
+            deque(
+                [
+                    (0, "MaxArraySize = 1001\n", ""),
+                    (0, "42\n", ""),
+                    (0, "", ""),
+                    (0, accounting, ""),
+                ]
+            ),
+        )
+        result = service.execute_one(_request(root, seeds=(17, 23)))
+        return result.record, transport.commands[1].argv[5]
+
+    first, first_manifest = execute(tmp_path / "first")
+    second, second_manifest = execute(tmp_path / "second")
+
+    assert type(first) is type(second)
+    assert [task.id for task in first.run.tasks] == [
+        task.id for task in second.run.tasks
+    ]
+    assert [task.seed for task in first.run.tasks] == [17, 23]
+    assert [task.seed for task in first.run.tasks] == [
+        task.seed for task in second.run.tasks
+    ]
+    assert [task.config for task in first.run.tasks] == [
+        task.config for task in second.run.tasks
+    ]
+    assert first.task_array_mapping == second.task_array_mapping
+    assert first_manifest == second_manifest
+    assert "--seed 17" in first_manifest
+    assert "--seed 23" in first_manifest
+    assert first.run.state is ExecutionState.SUCCEEDED
+    assert first.task_exit_codes == {
+        first.run.tasks[0].id: 0,
+        first.run.tasks[1].id: 0,
+    }
+    assert first.task_retrieval_states == {
+        first.run.tasks[0].id: RetrievalState.SUCCEEDED,
+        first.run.tasks[1].id: RetrievalState.SUCCEEDED,
+    }
 
 
 def test_accounting_disappearance_times_out_without_failing_the_run(
