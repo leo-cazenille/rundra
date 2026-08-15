@@ -148,6 +148,56 @@ def test_run_record_round_trips_every_known_field() -> None:
     json.dumps(document, allow_nan=False)
 
 
+def test_run_record_round_trips_ordered_multi_task_identity_and_artifacts() -> None:
+    record = _record()
+    first = record.run.tasks[0]
+    second_id = TaskId.from_ordinal(1)
+    second = replace(first, id=second_id, seed=23)
+    multi = replace(
+        record,
+        run=replace(record.run, tasks=(first, second)),
+        task_exit_codes={first.id: 0, second.id: 7},
+        artifacts=(
+            Artifact(
+                ArtifactKind.STDOUT,
+                PurePosixPath("logs/task_000000.stdout"),
+                task_id=first.id,
+            ),
+            Artifact(
+                ArtifactKind.STDERR,
+                PurePosixPath("logs/task_000001.stderr"),
+                task_id=second.id,
+            ),
+            Artifact(
+                ArtifactKind.RAW_RESULT,
+                PurePosixPath("output/task_000001/result.json"),
+                task_id=second.id,
+            ),
+        ),
+    )
+
+    document = record_to_dict(multi)
+
+    assert [task["id"] for task in document["run"]["tasks"]] == [
+        "task_000000",
+        "task_000001",
+    ]
+    assert [task["seed"] for task in document["run"]["tasks"]] == [17, 23]
+    assert (
+        document["run"]["tasks"][0]["config"] == document["run"]["tasks"][1]["config"]
+    )
+    assert document["task_exit_codes"] == {
+        "task_000000": 0,
+        "task_000001": 7,
+    }
+    assert [artifact["task_id"] for artifact in document["artifacts"]] == [
+        "task_000000",
+        "task_000001",
+        "task_000001",
+    ]
+    assert record_from_dict(document) == multi
+
+
 def test_run_record_round_trips_absent_optional_provenance_without_fabrication() -> (
     None
 ):

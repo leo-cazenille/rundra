@@ -18,6 +18,11 @@ successful retrieval state. It also demonstrates the optional M1.6 Git commit,
 branch, dirty flag, and bounded dirty patch fields.
 M3 adds immutable scalar `scheduler_metadata`, including available accounting
 source, allocated-node, accounting-delay, and normalized log-path values.
+M5.1 confirms that the same version-1 fields losslessly represent ordered
+multi-Task Runs: each `run.tasks` entry carries its stable ordinal ID, explicit
+seed, shared effective config, resources, and state; `task_exit_codes` and
+task-specific artifacts refer back to those IDs. No scheduler-array identity is
+inferred before M5.2 establishes and records that explicit mapping.
 
 M1.5 adds checked success envelopes for synchronous `run`, `status`, `list`,
 `logs`, and `fetch`. The `inspect` contract embeds `run-record-v1.json` unchanged

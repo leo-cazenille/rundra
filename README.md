@@ -133,8 +133,11 @@ and checks that criterion. It does not claim byte identity across different
 Python/runtime versions.
 
 Use `--random-seed` to override a fixed seed supplied by a project profile or
-user default. Explicit `--seeds START:STOP` remains available to `plan`; the
-multi-Task execution lifecycle is scheduled for M5.
+user default. Explicit `--seeds START:STOP` uses an inclusive range in `plan`:
+`0:2` produces Tasks for seeds 0, 1, and 2. Task order follows seed-request
+order, IDs are stable zero-based ordinals, and duplicate seeds are rejected.
+M5.1 fixes these logical semantics; Slurm array grouping and multi-Task
+submission follow in M5.2 and later checkpoints.
 
 ## Launch configuration
 

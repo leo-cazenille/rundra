@@ -937,6 +937,23 @@ runs/<run-id>/
 
 The physical directory layout is not a stable public API unless explicitly documented as such.
 
+For replicated Runs, M5.1 defines backend-neutral Task paths without making
+the physical layout a public API. `StagedWorkspace.for_task(task_id)` keeps the
+sealed source snapshot and exact config shared across Tasks, and derives
+isolated mutable locations equivalent to:
+
+```text
+runtime/<task-id>/
+output/<task-id>/
+logs/<task-id>.stdout
+logs/<task-id>.stderr
+metadata/<task-id>/
+```
+
+These paths are pure staging semantics at M5.1. Array construction and use of
+the isolated locations begin in M5.2/M5.3; existing single-Task execution is
+unchanged.
+
 The M1 local implementation follows this layout through backend-neutral
 `StagedWorkspace` paths. It copies the source tree and exact effective config,
 then removes all write bits from `source/` and `input/` before returning the
@@ -1990,6 +2007,25 @@ The mapping between:
 - Slurm array index;
 
 must be explicit and recorded.
+
+M5.1 fixes the v0.1 seed-set semantics before scheduler grouping:
+
+- CLI ranges use strict inclusive `START:STOP` syntax, so `0:2` means the
+  ordered seeds `(0, 1, 2)` and `4:4` means one Task;
+- negative integer endpoints are valid, whitespace, extra separators, decimal
+  endpoints, and reversed ranges are invalid;
+- caller-provided seed sequences retain their order and reject duplicates;
+- Task IDs are contiguous zero-based ordinals in that requested order
+  (`task_000000`, `task_000001`, ...), never seed-derived or scheduler-derived;
+- every Task in the v0.1 replicated Run consumes the same exact effective
+  config snapshot.
+
+The version-1 RunRecord already represents these facts without duplicating
+them: the ordered `run.tasks` array contains each Task ID, seed, config,
+resources, and state; `task_exit_codes` is keyed by Task ID; and every
+task-specific artifact carries its Task ID. Shared source/config artifacts
+remain Run-level. The Task-to-native-array mapping is deliberately added by
+M5.2, when an execution strategy exists.
 
 ---
 
