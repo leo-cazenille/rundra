@@ -10,10 +10,12 @@ from typing import TextIO
 import pytest
 
 import rundra.persistence.json_store as json_store
+from rundra.domain.records import RunRecord
 from rundra.persistence import (
     JsonRunStore,
     RunAlreadyExistsError,
     RunRecordFormatError,
+    RunStoreConflictError,
     RunStoreError,
     record_to_dict,
 )
@@ -134,3 +136,51 @@ def test_concurrent_readers_observe_only_complete_atomic_updates(
     assert sum(read_counts) > 0
     assert JsonRunStore(tmp_path).load(original.run.id).initiator == "writer-99"
     assert list(tmp_path.glob(".*.tmp")) == []
+
+
+def test_concurrent_stale_updates_cannot_silently_overwrite_each_other(
+    tmp_path: Path,
+) -> None:
+    original = _record()
+    JsonRunStore(tmp_path).create(original)
+    start = Event()
+    candidates = (
+        replace(original, initiator="first-writer"),
+        replace(original, initiator="second-writer"),
+    )
+
+    def update(candidate: RunRecord) -> str:
+        start.wait()
+        try:
+            JsonRunStore(tmp_path).update(candidate, expected=original)
+        except RunStoreConflictError:
+            return "conflict"
+        return "updated"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = tuple(executor.submit(update, candidate) for candidate in candidates)
+        start.set()
+        outcomes = tuple(future.result() for future in futures)
+
+    assert outcomes.count("updated") == 1
+    assert outcomes.count("conflict") == 1
+    assert JsonRunStore(tmp_path).load(original.run.id) in candidates
+
+
+def test_concurrent_identical_updates_are_idempotent(tmp_path: Path) -> None:
+    original = _record()
+    desired = replace(original, initiator="same-update")
+    JsonRunStore(tmp_path).create(original)
+    start = Event()
+
+    def update() -> None:
+        start.wait()
+        JsonRunStore(tmp_path).update(desired, expected=original)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = tuple(executor.submit(update) for _index in range(16))
+        start.set()
+        for future in futures:
+            future.result()
+
+    assert JsonRunStore(tmp_path).load(original.run.id) == desired

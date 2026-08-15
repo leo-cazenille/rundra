@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+import stat
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 
 from rundra.domain.models import RunId, Task
@@ -16,6 +19,7 @@ from rundra.persistence.errors import (
     RunAlreadyExistsError,
     RunNotFoundError,
     RunRecordFormatError,
+    RunStoreConflictError,
     RunStoreError,
 )
 from rundra.persistence.serialization import record_from_dict, record_to_dict
@@ -63,22 +67,38 @@ class JsonRunStore:
             )
         return record
 
-    def update(self, record: RunRecord) -> None:
+    def update(
+        self,
+        record: RunRecord,
+        *,
+        expected: RunRecord | None = None,
+    ) -> None:
         """Validate lifecycle changes and atomically replace a stored record."""
         self._require_record(record)
-        previous = self.load(record.run.id)
-        self._validate_update(previous, record)
-        temporary = self._write_temporary(record)
-        destination = self._record_path(record.run.id)
-        try:
-            os.replace(temporary, destination)
-        except OSError as error:
-            raise RunStoreError(
-                f"Could not perform atomic update for Run {record.run.id}: {error}"
-            ) from error
-        finally:
-            temporary.unlink(missing_ok=True)
-        self._sync_root()
+        if expected is not None:
+            self._require_record(expected)
+            if expected.run.id != record.run.id:
+                raise ValueError("Expected and updated Run IDs must match")
+        with self._write_lock(record.run.id):
+            previous = self.load(record.run.id)
+            if previous == record:
+                return
+            if expected is not None and previous != expected:
+                raise RunStoreConflictError(
+                    f"Run {record.run.id} changed since it was loaded"
+                )
+            self._validate_update(previous, record)
+            temporary = self._write_temporary(record)
+            destination = self._record_path(record.run.id)
+            try:
+                os.replace(temporary, destination)
+            except OSError as error:
+                raise RunStoreError(
+                    f"Could not perform atomic update for Run {record.run.id}: {error}"
+                ) from error
+            finally:
+                temporary.unlink(missing_ok=True)
+            self._sync_root()
 
     def list(self) -> tuple[RunRecord, ...]:
         """Return all records in deterministic Run-ID order."""
@@ -108,6 +128,31 @@ class JsonRunStore:
 
     def _record_path(self, run_id: RunId) -> Path:
         return self._root / f"{run_id}.json"
+
+    @contextmanager
+    def _write_lock(self, run_id: RunId) -> Iterator[None]:
+        lock_path = self._root / f".{run_id}.lock"
+        flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_CLOEXEC", 0)
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            descriptor = os.open(lock_path, flags, 0o600)
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise OSError("lock path is not a regular file")
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+        except OSError as error:
+            if "descriptor" in locals():
+                os.close(descriptor)
+            raise RunStoreError(
+                f"Could not lock Run {run_id} for update: {error}"
+            ) from error
+        try:
+            yield
+        finally:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            finally:
+                os.close(descriptor)
 
     def _write_temporary(self, record: RunRecord) -> Path:
         document = record_to_dict(record)

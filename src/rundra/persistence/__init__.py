@@ -5,6 +5,7 @@ from rundra.persistence.errors import (
     RunAlreadyExistsError,
     RunNotFoundError,
     RunRecordFormatError,
+    RunStoreConflictError,
     RunStoreError,
 )
 from rundra.persistence.json_store import JsonRunStore
@@ -15,6 +16,7 @@ __all__ = [
     "RunAlreadyExistsError",
     "RunNotFoundError",
     "RunRecordFormatError",
+    "RunStoreConflictError",
     "RunStore",
     "RunStoreError",
     "record_from_dict",

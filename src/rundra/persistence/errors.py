@@ -10,5 +10,9 @@ class RunNotFoundError(RunStoreError):
     """Raised when a requested Run has no persisted record."""
 
 
+class RunStoreConflictError(RunStoreError):
+    """Raised when an update was computed from a stale persisted record."""
+
+
 class RunRecordFormatError(RunStoreError):
     """Raised when persisted RunRecord JSON is malformed or unsupported."""
