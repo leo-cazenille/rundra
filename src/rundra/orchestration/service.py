@@ -179,12 +179,48 @@ class SchedulerLifecycleService:
         _require_record(record)
         if record.run.state in _TERMINAL_STATES:
             return record
-        if len(record.run.tasks) != 1:
-            raise OrchestrationError(
-                code="ARRAY_CANCELLATION_UNAVAILABLE",
-                message=(f"Run {record.run.id} array cancellation is deferred to M5.5"),
-                run_id=record.run.id,
+        if len(record.run.tasks) == 1:
+            return self._cancel_single(
+                record, timeout=timeout, poll_interval=poll_interval
             )
+        try:
+            current = self.refresh(record)
+            if current.run.state in _TERMINAL_STATES:
+                return current
+            task_references = _record_task_references(current)
+            active = tuple(
+                (task_id, reference)
+                for task_id, reference in task_references
+                if next(task for task in current.run.tasks if task.id == task_id).state
+                not in _TERMINAL_STATES
+            )
+            references = tuple(reference for _, reference in active)
+            observations = self._scheduler.cancel(references)
+            _validate_observations(observations, references)
+        except Exception as error:
+            raise OrchestrationError(
+                code="SCHEDULER_CANCEL_FAILED",
+                message=f"Run {record.run.id} cancellation failed: {error}",
+                run_id=record.run.id,
+            ) from error
+        current = _observed_records(
+            current,
+            tuple(
+                (task_id, observation)
+                for (task_id, _), observation in zip(active, observations, strict=True)
+            ),
+            self._clock(),
+        )
+        self._store.update(current)
+        return self.wait(current, timeout=timeout, poll_interval=poll_interval)
+
+    def _cancel_single(
+        self,
+        record: RunRecord,
+        *,
+        timeout: float | None,
+        poll_interval: float,
+    ) -> RunRecord:
         reference = _record_reference(record)
         try:
             observation = _single_observation(
@@ -672,10 +708,13 @@ def _observed_records(
 ) -> RunRecord:
     observations = dict(task_observations)
     expected_task_ids = {task.id for task in record.run.tasks}
-    if set(observations) != expected_task_ids:
-        raise ValueError("Scheduler observations must map every Run Task exactly")
+    if not observations or not set(observations).issubset(expected_task_ids):
+        raise ValueError("Scheduler observations contain no known Run Tasks")
     tasks = tuple(
-        replace(task, state=observations[task.id].state) for task in record.run.tasks
+        replace(task, state=observations[task.id].state)
+        if task.id in observations
+        else task
+        for task in record.run.tasks
     )
     state = aggregate_execution_state(tuple(task.state for task in tasks))
     updated = replace(record, run=replace(record.run, tasks=tasks, state=state))

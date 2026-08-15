@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 
@@ -13,6 +13,7 @@ from rundra.cli.operations import (
     cancel_operation,
     logs_operation,
 )
+from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import (
     BackendConfig,
     Command,
@@ -42,6 +43,11 @@ _RUN_ID = RunId("run_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 _TASK_ID = TaskId.from_ordinal(0)
 _REFERENCE = SchedulerReference("12345")
 _CREATED = datetime(2026, 8, 15, 10, tzinfo=UTC)
+_TERMINAL_TEST_STATES = {
+    ExecutionState.SUCCEEDED,
+    ExecutionState.FAILED,
+    ExecutionState.CANCELLED,
+}
 
 
 @dataclass
@@ -73,6 +79,29 @@ class SequenceScheduler:
         if isinstance(outcome, Exception):
             raise outcome
         return (outcome,)
+
+
+@dataclass
+class ArrayCancellationScheduler:
+    refreshed: tuple[SchedulerObservation, ...]
+    cancelled: tuple[SchedulerObservation, ...]
+    query_references: tuple[SchedulerReference, ...] = ()
+    cancel_references: tuple[SchedulerReference, ...] = ()
+
+    def submit(self, group: SchedulerGroup) -> SchedulerSubmission:
+        raise AssertionError("lifecycle reconciliation must not submit")
+
+    def query(
+        self, references: tuple[SchedulerReference, ...]
+    ) -> tuple[SchedulerObservation, ...]:
+        self.query_references = references
+        return self.refreshed
+
+    def cancel(
+        self, references: tuple[SchedulerReference, ...]
+    ) -> tuple[SchedulerObservation, ...]:
+        self.cancel_references = references
+        return self.cancelled
 
 
 class LogTransport:
@@ -125,6 +154,56 @@ def _record() -> RunRecord:
         PurePosixPath("/source"),
         scheduler_job_ids=("12345",),
         submitted_at=_CREATED + timedelta(seconds=1),
+    )
+
+
+def _array_record() -> RunRecord:
+    record = _record()
+    first = record.run.tasks[0]
+    tasks = (
+        first,
+        replace(first, id=TaskId.from_ordinal(1), seed=23),
+        replace(first, id=TaskId.from_ordinal(2), seed=29),
+    )
+    return replace(
+        record,
+        run=replace(record.run, tasks=tasks),
+        task_array_mapping=tuple(
+            ArrayTaskMapping(task.id, task.seed, index)
+            for index, task in enumerate(tasks)
+        ),
+        task_scheduler_ids={
+            task.id: f"777_{index}" for index, task in enumerate(tasks)
+        },
+    )
+
+
+def _array_observation(
+    index: int,
+    state: ExecutionState,
+    native: str,
+    *,
+    exit_code: int | None = None,
+) -> SchedulerObservation:
+    return SchedulerObservation(
+        SchedulerReference(f"777_{index}"),
+        state,
+        native,
+        exit_code=exit_code,
+        started_at=(
+            _CREATED + timedelta(seconds=2)
+            if state
+            in {
+                ExecutionState.RUNNING,
+                ExecutionState.SUCCEEDED,
+                ExecutionState.FAILED,
+                ExecutionState.CANCELLED,
+            }
+            else None
+        ),
+        finished_at=(
+            _CREATED + timedelta(seconds=3) if state in _TERMINAL_TEST_STATES else None
+        ),
     )
 
 
@@ -236,6 +315,56 @@ def test_cancel_reconciles_a_race_and_is_idempotent_after_terminal(tmp_path) -> 
     assert repeated == cancelled
     assert scheduler.cancel_calls == 1
     assert scheduler.query_calls == 1
+
+
+def test_array_cancel_reconciles_first_and_cancels_only_active_elements(
+    tmp_path: Path,
+) -> None:
+    record = _array_record()
+    store = JsonRunStore(tmp_path / "records")
+    store.create(record)
+    scheduler = ArrayCancellationScheduler(
+        refreshed=(
+            _array_observation(0, ExecutionState.SUCCEEDED, "COMPLETED", exit_code=0),
+            _array_observation(1, ExecutionState.RUNNING, "RUNNING"),
+            _array_observation(2, ExecutionState.QUEUED, "PENDING"),
+        ),
+        cancelled=(
+            _array_observation(1, ExecutionState.CANCELLED, "CANCELLED", exit_code=0),
+            _array_observation(2, ExecutionState.SUCCEEDED, "COMPLETED", exit_code=0),
+        ),
+    )
+    service = SchedulerLifecycleService(
+        store=store,
+        scheduler=scheduler,
+        clock=lambda: _CREATED + timedelta(seconds=4),
+        sleeper=lambda delay: None,
+    )
+
+    cancelled = service.cancel(record, poll_interval=0.01)
+    repeated = service.cancel(cancelled)
+
+    assert [task.state for task in cancelled.run.tasks] == [
+        ExecutionState.SUCCEEDED,
+        ExecutionState.CANCELLED,
+        ExecutionState.SUCCEEDED,
+    ]
+    assert cancelled.run.state is ExecutionState.CANCELLED
+    assert cancelled.task_exit_codes == {
+        TaskId.from_ordinal(0): 0,
+        TaskId.from_ordinal(1): 0,
+        TaskId.from_ordinal(2): 0,
+    }
+    assert scheduler.query_references == (
+        SchedulerReference("777_0"),
+        SchedulerReference("777_1"),
+        SchedulerReference("777_2"),
+    )
+    assert scheduler.cancel_references == (
+        SchedulerReference("777_1"),
+        SchedulerReference("777_2"),
+    )
+    assert repeated == cancelled
 
 
 def test_logs_use_normalized_artifacts_without_exposing_slurm_filenames(
