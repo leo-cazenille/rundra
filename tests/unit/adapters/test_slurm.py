@@ -785,6 +785,7 @@ def test_slurm_query_combines_queue_and_accounting_in_request_order() -> None:
         (
             "squeue",
             "--noheader",
+            "--array",
             "--jobs",
             "123,456",
             "--format",
@@ -838,6 +839,90 @@ def test_slurm_query_combines_queue_and_accounting_in_request_order() -> None:
     assert observations[1].exit_code == 137
     assert observations[1].finished_at == datetime(2026, 8, 15, 9, 1, tzinfo=UTC)
     assert transport.run_calls == [squeue_command, sacct_command]
+
+
+def test_slurm_query_reconciles_array_elements_independently() -> None:
+    first = SchedulerReference("123_0")
+    second = SchedulerReference("123_1")
+    third = SchedulerReference("123_2")
+    transport = ScriptedTransport(deque([]))
+    scheduler = SlurmScheduler(
+        transport,
+        timezone=UTC,
+        log_directory=PurePosixPath("/remote/run/logs"),
+    )
+    transport.results.extend(
+        (
+            _command_result(
+                Command(("unused",)),
+                0,
+                "123_1|RUNNING|2026-08-15T10:02:00|node02\n",
+            ),
+            _command_result(
+                Command(("unused",)),
+                0,
+                "123_0|COMPLETED|0:0|2026-08-15T10:00:00|"
+                "2026-08-15T10:01:00|node01|\n"
+                "123_0.batch|COMPLETED|0:0|2026-08-15T10:00:00|"
+                "2026-08-15T10:01:00|node01|\n"
+                "123_2|FAILED|9:0|2026-08-15T10:00:00|"
+                "2026-08-15T10:01:30|node03|\n",
+            ),
+        )
+    )
+
+    observations = scheduler.query((first, second, third))
+
+    assert [observation.reference for observation in observations] == [
+        first,
+        second,
+        third,
+    ]
+    assert [observation.state for observation in observations] == [
+        ExecutionState.SUCCEEDED,
+        ExecutionState.RUNNING,
+        ExecutionState.FAILED,
+    ]
+    assert [observation.exit_code for observation in observations] == [0, None, 9]
+    assert observations[0].metadata["stdout_path"] == "/remote/run/logs/123_0.stdout"
+    assert observations[1].metadata["stderr_path"] == "/remote/run/logs/123_1.stderr"
+    assert observations[2].metadata["stdout_path"] == "/remote/run/logs/123_2.stdout"
+
+
+def test_slurm_controller_array_limit_is_explicitly_discovered() -> None:
+    transport = ScriptedTransport(
+        deque(
+            [
+                _command_result(
+                    Command(("scontrol", "show", "config")),
+                    0,
+                    "ClusterName = shoal\nMaxArraySize = 1001\nSlurmctldPort = 6817\n",
+                )
+            ]
+        )
+    )
+
+    assert SlurmScheduler(transport).array_limit() == 1001
+
+
+@pytest.mark.parametrize(
+    "output", ["ClusterName = shoal\n", "MaxArraySize = 0\n"]
+)
+def test_slurm_controller_rejects_missing_or_invalid_array_limit(output: str) -> None:
+    transport = ScriptedTransport(
+        deque([_command_result(Command(("unused",)), 0, output)])
+    )
+
+    with pytest.raises(SlurmQueryError, match="MaxArraySize"):
+        SlurmScheduler(transport).array_limit()
+
+
+@pytest.mark.parametrize("native_id", ["123_", "123_1.batch", "123-1", "text"])
+def test_slurm_query_rejects_non_element_scheduler_references(native_id: str) -> None:
+    scheduler = SlurmScheduler(ScriptedTransport(deque([])))
+
+    with pytest.raises(ValueError, match="job or job_array-index"):
+        scheduler.query((SchedulerReference(native_id),))
 
 
 def test_naive_slurm_timestamps_are_not_fabricated_without_site_timezone() -> None:

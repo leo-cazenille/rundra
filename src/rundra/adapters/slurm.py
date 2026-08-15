@@ -25,6 +25,8 @@ _VALUE_OPTIONS = ("account", "constraint", "partition", "qos")
 _FLAG_OPTIONS = ("exclusive",)
 _ALLOWED_OPTIONS = frozenset((*_VALUE_OPTIONS, *_FLAG_OPTIONS))
 _PARSABLE_SUBMISSION = re.compile(r"(?P<job_id>[0-9]+)(?:;(?P<cluster>[^;\r\n]+))?\Z")
+_SLURM_REFERENCE = re.compile(r"[0-9]+(?:_[0-9]+)?\Z")
+_MAX_ARRAY_SIZE = re.compile(r"(?:^|\n)\s*MaxArraySize\s*=\s*([0-9]+)\s*(?:\n|$)")
 _SUBMIT_SCRIPT = """\
 set -eu
 script=$(mktemp "${TMPDIR:-/tmp}/rundra-sbatch.XXXXXX")
@@ -292,6 +294,7 @@ class SlurmScheduler:
                 (
                     self._squeue,
                     "--noheader",
+                    "--array",
                     "--jobs",
                     joined,
                     "--format",
@@ -345,6 +348,19 @@ class SlurmScheduler:
             )
             for reference in normalized
         )
+
+    def array_limit(self) -> int:
+        """Read the controller's positive MaxArraySize submission bound."""
+        result = self._run_query(
+            Command((self._scontrol, "show", "config")), source="scontrol"
+        )
+        match = _MAX_ARRAY_SIZE.search(result.stdout)
+        if match is None:
+            raise SlurmQueryError("scontrol did not return MaxArraySize")
+        limit = int(match.group(1))
+        if limit <= 0:
+            raise SlurmQueryError("scontrol returned a non-positive MaxArraySize")
+        return limit
 
     def cancel(
         self, references: tuple[SchedulerReference, ...]
@@ -643,8 +659,13 @@ def _references(
         raise TypeError("Slurm references must be a tuple of SchedulerReference values")
     if len(set(references)) != len(references):
         raise ValueError("Slurm references must be unique")
-    if any(not reference.native_id.isdigit() for reference in references):
-        raise ValueError("Slurm job references must be numeric")
+    if any(
+        _SLURM_REFERENCE.fullmatch(reference.native_id) is None
+        for reference in references
+    ):
+        raise ValueError(
+            "Slurm references must be numeric job or job_array-index identities"
+        )
     return references
 
 
