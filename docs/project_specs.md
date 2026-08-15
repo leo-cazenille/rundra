@@ -795,7 +795,24 @@ Future implementations may include:
 - SGE;
 - HTCondor.
 
-A Scheduler should consume a normalized execution description rather than an `ExperimentSpec` directly.
+A Scheduler consumes a nonempty normalized `SchedulerGroup`, not an
+`ExperimentSpec` or planner model directly. Each `SchedulerUnit` contains only
+the logical `TaskId`, executable `Command`, and portable `ResourceRequest`
+needed by both local and Slurm adapters. A group must not repeat Task IDs.
+
+Submission returns an opaque scheduler reference and a nonempty explicit
+mapping from every submitted logical Task ID to its native scheduler identity.
+Run IDs, Task IDs, scheduler references, and backend-native Task identities are
+distinct values; adapters must not derive or conflate them.
+
+A scheduler observation contains the opaque reference, portable execution
+state, separately preserved nonblank native state, and optional exit code,
+timezone-aware start/finish timestamps, scalar native metadata, and captured
+command result. Scheduler observations cannot report pre-scheduler
+`CREATED`/`STAGING` states. Nonterminal observations cannot contain an exit,
+finish time, or command result; successful observations cannot contain a
+nonzero exit status. When a synchronous result is present, its exit status and
+timestamps must agree with the observation.
 
 For synchronous schedulers, a scheduler observation may include the captured
 `CommandResult` that produced it. This is optional at the portable boundary:

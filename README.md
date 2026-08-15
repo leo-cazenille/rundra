@@ -11,13 +11,19 @@ The project, GitHub repository, Python package, and PyPI distribution are named
 
 ## Development status
 
-M1, M1E, and M2 are complete; M3 scheduler work has not started. Rundra has
+M1, M1E, and M2 are complete; M3 scheduler work is in progress. Rundra has
 portable domain and configuration models,
 deterministic planning, isolated local staging, durable versioned Run records,
 shell-free local execution, Apptainer command construction, Git provenance,
 artifact retrieval, and common human/JSON lifecycle interfaces. The checked
 minimal experiment runs through the same planner, ports, orchestration service,
 and persistence path intended for later remote execution.
+
+M3.1 defines the backend-neutral scheduler boundary: nonempty groups contain
+minimal per-Task command/resource units, submissions retain an explicit mapping
+from logical Task IDs to opaque native IDs, and observations preserve portable
+and native states plus optional accounting data. Slurm command generation and
+submission begin in M3.2 and are not implemented yet.
 
 M2.1 adds a typed OpenSSH transport adapter that honors normal user SSH
 configuration, agent authentication, jump-host configuration, and host-key
