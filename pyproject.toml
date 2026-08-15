@@ -32,6 +32,7 @@ testpaths = ["tests"]
 markers = [
   "shoal_system: opt-in tests that may access the real Shoal cluster",
   "shoal_cpu: resource-consuming Shoal tests requiring a separate CPU opt-in",
+  "shoal_gpu: resource-consuming Shoal tests requiring a separate GPU opt-in",
 ]
 
 [tool.ruff]

@@ -79,6 +79,14 @@ def shoal_cpu_image() -> Path:
 
 
 @pytest.fixture(scope="session")
+def shoal_gpu_image() -> Path:
+    image = _required_file("RUNDRA_SHOAL_GPU_IMAGE")
+    if not image.is_absolute():
+        pytest.fail("RUNDRA_SHOAL_GPU_IMAGE must be an absolute path")
+    return image
+
+
+@pytest.fixture(scope="session")
 def shoal_experiment(shoal_experiment_source: Path) -> ExperimentSpec:
     try:
         return load_experiment(shoal_experiment_source)
@@ -94,6 +102,19 @@ def shoal_cpu_resources() -> ResourceRequest:
         tasks=1,
         cpus_per_task=1,
         gpus_per_task=0,
+        memory_bytes=1024**3,
+        walltime=timedelta(minutes=5),
+    )
+
+
+@pytest.fixture(scope="session")
+def shoal_gpu_resources() -> ResourceRequest:
+    """Bounded defaults for the separately authorized GPU system check."""
+    return ResourceRequest(
+        nodes=1,
+        tasks=1,
+        cpus_per_task=1,
+        gpus_per_task=1,
         memory_bytes=1024**3,
         walltime=timedelta(minutes=5),
     )
