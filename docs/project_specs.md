@@ -2119,6 +2119,14 @@ failure moves retrieval from `PENDING` to `FAILED` without changing a completed
 Run or Task execution state, exit code, or scheduler identity; a later explicit
 fetch may transition `FAILED` back through `PENDING` to `SUCCEEDED`.
 
+Default integration tests use executable OpenSSH and rsync shims backed by
+temporary local trees. They exercise the real subprocess and remote-shell
+boundaries, live non-Git upload, exact config transfer, sealing, two isolated
+snapshots across a source edit, result/log/metadata round trips, repeat fetch,
+interruption, and retry without network or Slurm access. Tests against a real
+SSH host or rsync installation are developer-owned opt-in system tests only and
+must never run in ordinary CI without explicit configuration.
+
 ---
 
 ## 38. Persistence

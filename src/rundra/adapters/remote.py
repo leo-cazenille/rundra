@@ -87,7 +87,7 @@ def _safe_remote_root(value: PurePath) -> PurePosixPath:
     root = PurePosixPath(str(value))
     if not root.is_absolute():
         raise RemoteWorkspaceError("Remote workspace root must be absolute")
-    if root == PurePosixPath("/"):
+    if not root.name:
         raise RemoteWorkspaceError("Remote workspace root must not be filesystem root")
     if ".." in root.parts:
         raise RemoteWorkspaceError("Remote workspace root must not contain traversal")
@@ -119,6 +119,16 @@ def validate_remote_workspace(
     if type(workspace) is not StagedWorkspace:
         raise TypeError("Remote workspace must be a StagedWorkspace")
     run_root = _safe_remote_root(workspace.root)
+    try:
+        RunId(run_root.name)
+    except (TypeError, ValueError) as error:
+        raise RemoteWorkspaceError(
+            "Remote workspace root must end with a validated Run ID"
+        ) from error
+    if run_root.parent.name != "runs":
+        raise RemoteWorkspaceError(
+            "Remote workspace root must be contained by a Runs directory"
+        )
     root = (
         _safe_remote_root(configured_root) if configured_root is not None else run_root
     )

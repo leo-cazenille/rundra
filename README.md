@@ -11,8 +11,8 @@ The project, GitHub repository, Python package, and PyPI distribution are named
 
 ## Development status
 
-M1 and M1E are complete, and M2 remote transport work is in progress. Rundra
-has portable domain and configuration models,
+M1, M1E, and M2 are complete; M3 scheduler work has not started. Rundra has
+portable domain and configuration models,
 deterministic planning, isolated local staging, durable versioned Run records,
 shell-free local execution, Apptainer command construction, Git provenance,
 artifact retrieval, and common human/JSON lifecycle interfaces. The checked
@@ -28,12 +28,16 @@ M2.2 centralizes the unavoidable remote-shell serialization boundary. Literal
 arguments, environment values, and working directories are POSIX-shell quoted;
 diagnostics expose only structurally redacted command summaries.
 
-M2.3–M2.5 add validated isolated remote workspace allocation and rsync upload
+M2.3–M2.6 add validated isolated remote workspace allocation and rsync upload
 of live working trees plus exact effective configuration. Successfully uploaded
 source/input snapshots are sealed read-only. Independent idempotent rsync
 retrieval collects output, logs, and metadata while keeping transfer state
 separate from computation state. Remote lifecycle CLI execution is still
 pending on the Slurm milestone.
+
+The default integration suite validates this remote transport/staging path with
+executable SSH and rsync shims. It requires neither a network connection nor an
+installed scheduler. Real-cluster checks remain explicitly opt-in.
 
 M1E adds strict project launch profiles, optional user defaults, deterministic
 resolution precedence, concise `run`/`plan` commands, and generated seeds that

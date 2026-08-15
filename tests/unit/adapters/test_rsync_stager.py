@@ -37,7 +37,7 @@ from rundra.ports import (
 
 @dataclass
 class RecordingTransport:
-    exits: deque[int]
+    exits: deque[int | Exception]
     calls: list[Command] = field(default_factory=list)
 
     def check(self) -> CapabilityCheck:
@@ -46,7 +46,10 @@ class RecordingTransport:
     def run(self, command: Command) -> CommandResult:
         self.calls.append(command)
         now = datetime(2026, 1, 1, tzinfo=UTC)
-        return CommandResult(command, self.exits.popleft(), "", "", now, now)
+        outcome = self.exits.popleft()
+        if isinstance(outcome, Exception):
+            raise outcome
+        return CommandResult(command, outcome, "", "", now, now)
 
 
 def _request(source: Path, *, excludes: tuple[str, ...] = ()) -> StageRequest:
@@ -248,6 +251,11 @@ def test_rsync_stager_reports_config_and_sealing_failures(
     )
     with pytest.raises(RsyncUploadError, match="seal"):
         RsyncStager(RecordingTransport(deque([0, 0, 0, 1]))).stage(request)
+    with pytest.raises(RsyncUploadError, match="seal") as captured:
+        RsyncStager(
+            RecordingTransport(deque([0, 0, 0, RuntimeError("SECRET_REMOTE")]))
+        ).stage(request)
+    assert "SECRET_REMOTE" not in str(captured.value)
 
 
 def test_rsync_stager_rejects_invalid_targets_exclusions_and_sources(
@@ -430,4 +438,20 @@ def test_rsync_fetch_requires_host_and_valid_semantic_workspace(tmp_path: Path) 
     with pytest.raises(RsyncRetrievalError, match="workspace"):
         RsyncStager(RecordingTransport(deque()), host="cluster").fetch(
             FetchRequest(malformed, ("results/**",), tmp_path / "retrieved")
+        )
+    invalid_run_root = PurePosixPath("/remote/work tree/runs/not-a-run")
+    invalid_run = replace(
+        workspace,
+        root=invalid_run_root,
+        source=invalid_run_root / "source",
+        inputs=invalid_run_root / "input",
+        config=invalid_run_root / "input/config.yaml",
+        runtime=invalid_run_root / "runtime",
+        outputs=invalid_run_root / "output",
+        logs=invalid_run_root / "logs",
+        metadata=invalid_run_root / "metadata",
+    )
+    with pytest.raises(RsyncRetrievalError, match="Run ID"):
+        RsyncStager(RecordingTransport(deque()), host="cluster").fetch(
+            FetchRequest(invalid_run, ("results/**",), tmp_path / "retrieved")
         )

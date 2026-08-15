@@ -156,7 +156,14 @@ class RsyncStager:
                 f"Could not prepare effective config for Run {request.run_id}"
             ) from error
 
-        seal = self._transport.run(_seal_command(workspace.source, workspace.inputs))
+        try:
+            seal = self._transport.run(
+                _seal_command(workspace.source, workspace.inputs)
+            )
+        except Exception as error:
+            raise RsyncUploadError(
+                f"Could not seal remote snapshot for Run {request.run_id}"
+            ) from error
         if seal.exit_code != 0:
             raise RsyncUploadError(
                 f"Could not seal remote snapshot for Run {request.run_id}"

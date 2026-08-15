@@ -96,6 +96,7 @@ def test_remote_workspace_allocator_reports_collisions_without_reusing_path() ->
     [
         PurePosixPath("relative/workspace"),
         PurePosixPath("/"),
+        PurePosixPath("//"),
         PurePosixPath("/safe/../escape"),
         PurePosixPath("/remote/bad\x00root"),
     ],
