@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import re
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 
 from rundra.adapters._remote_shell import serialize_remote_command
 from rundra.domain.models import Command, NativeValue, ResourceRequest
+from rundra.domain.states import ExecutionState
 from rundra.ports import (
+    CommandResult,
     SchedulerGroup,
     SchedulerObservation,
     SchedulerReference,
@@ -35,18 +37,44 @@ class SlurmSubmissionError(RuntimeError):
     """Raised when sbatch submission fails or returns invalid structured output."""
 
 
+class SlurmQueryError(RuntimeError):
+    """Raised when Slurm state output cannot be queried or represented safely."""
+
+
 class SlurmScheduler:
     """Submit normalized groups to Slurm through a configured Transport."""
 
-    def __init__(self, transport: Transport, *, sbatch: str = "sbatch") -> None:
+    def __init__(
+        self,
+        transport: Transport,
+        *,
+        sbatch: str = "sbatch",
+        squeue: str = "squeue",
+        sacct: str = "sacct",
+        timezone: tzinfo = UTC,
+    ) -> None:
         if not isinstance(transport, Transport):
             raise TypeError("SlurmScheduler transport must implement Transport")
-        if type(sbatch) is not str or not sbatch.strip() or "\x00" in sbatch:
-            raise ValueError(
-                "SlurmScheduler sbatch executable must be nonblank and safe"
-            )
+        for name, executable in (
+            ("sbatch", sbatch),
+            ("squeue", squeue),
+            ("sacct", sacct),
+        ):
+            if (
+                type(executable) is not str
+                or not executable.strip()
+                or "\x00" in executable
+            ):
+                raise ValueError(
+                    f"SlurmScheduler {name} executable must be nonblank and safe"
+                )
+        if not isinstance(timezone, tzinfo):
+            raise TypeError("SlurmScheduler timezone must be a tzinfo")
         self._transport = transport
         self._sbatch = sbatch
+        self._squeue = squeue
+        self._sacct = sacct
+        self._timezone = timezone
 
     def submit(self, group: SchedulerGroup) -> SchedulerSubmission:
         """Submit one generated script and retain opaque Slurm identity."""
@@ -81,12 +109,75 @@ class SlurmScheduler:
     def query(
         self, references: tuple[SchedulerReference, ...]
     ) -> tuple[SchedulerObservation, ...]:
-        raise NotImplementedError("Slurm query is implemented in M3.4")
+        """Query active state, then accounting for references absent from squeue."""
+        normalized = _references(references)
+        if not normalized:
+            return ()
+        joined = ",".join(reference.native_id for reference in normalized)
+        queued = self._run_query(
+            Command(
+                (
+                    self._squeue,
+                    "--noheader",
+                    "--jobs",
+                    joined,
+                    "--format",
+                    "%i|%T|%S|%N",
+                )
+            ),
+            source="squeue",
+        )
+        observations = _parse_squeue(queued.stdout, normalized, self._timezone)
+        missing = tuple(
+            reference for reference in normalized if reference not in observations
+        )
+        if missing:
+            accounting = self._run_query(
+                Command(
+                    (
+                        self._sacct,
+                        "--noheader",
+                        "--parsable2",
+                        "--jobs",
+                        ",".join(reference.native_id for reference in missing),
+                        "--format",
+                        "JobIDRaw,State,ExitCode,Start,End,NodeList",
+                    )
+                ),
+                source="sacct",
+            )
+            observations.update(
+                _parse_sacct(accounting.stdout, missing, self._timezone)
+            )
+        return tuple(
+            observations.get(
+                reference,
+                SchedulerObservation(
+                    reference,
+                    ExecutionState.UNKNOWN,
+                    "ACCOUNTING_PENDING",
+                    metadata={"accounting_pending": True},
+                ),
+            )
+            for reference in normalized
+        )
 
     def cancel(
         self, references: tuple[SchedulerReference, ...]
     ) -> tuple[SchedulerObservation, ...]:
         raise NotImplementedError("Slurm cancellation is implemented in M3.5")
+
+    def _run_query(self, command: Command, *, source: str) -> CommandResult:
+        try:
+            result = self._transport.run(command)
+        except Exception as error:
+            raise SlurmQueryError(f"Could not start {source} query") from error
+        if result.exit_code != 0:
+            detail = result.stderr.strip() or "no scheduler diagnostic"
+            raise SlurmQueryError(
+                f"{source} failed with exit code {result.exit_code}: {detail}"
+            )
+        return result
 
 
 def render_sbatch_script(group: SchedulerGroup) -> str:
@@ -165,3 +256,147 @@ def _slurm_duration(value: timedelta) -> str:
     minutes, seconds = divmod(remainder, 60)
     clock = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
     return f"{days}-{clock}" if days else clock
+
+
+def _references(
+    references: tuple[SchedulerReference, ...],
+) -> tuple[SchedulerReference, ...]:
+    if not isinstance(references, tuple) or any(
+        type(reference) is not SchedulerReference for reference in references
+    ):
+        raise TypeError("Slurm references must be a tuple of SchedulerReference values")
+    if len(set(references)) != len(references):
+        raise ValueError("Slurm references must be unique")
+    if any(not reference.native_id.isdigit() for reference in references):
+        raise ValueError("Slurm job references must be numeric")
+    return references
+
+
+def _parse_squeue(
+    output: str,
+    requested: tuple[SchedulerReference, ...],
+    timezone: tzinfo,
+) -> dict[SchedulerReference, SchedulerObservation]:
+    expected = {reference.native_id: reference for reference in requested}
+    observations: dict[SchedulerReference, SchedulerObservation] = {}
+    for line in output.splitlines():
+        if not line.strip():
+            continue
+        fields = line.split("|")
+        if len(fields) != 4:
+            raise SlurmQueryError("squeue returned a malformed row")
+        job_id, native_state, raw_start, nodes = fields
+        reference = expected.get(job_id)
+        if reference is None:
+            continue
+        if reference in observations:
+            raise SlurmQueryError(f"squeue returned duplicate job {job_id}")
+        state = _portable_state(native_state, None)
+        metadata: dict[str, NativeValue] = {"source": "squeue"}
+        if nodes not in {"", "(null)", "N/A"}:
+            metadata["allocated_nodes"] = nodes
+        observations[reference] = SchedulerObservation(
+            reference,
+            state,
+            native_state,
+            metadata=metadata,
+            started_at=(
+                _parse_timestamp(raw_start, timezone)
+                if state is ExecutionState.RUNNING
+                else None
+            ),
+        )
+    return observations
+
+
+def _parse_sacct(
+    output: str,
+    requested: tuple[SchedulerReference, ...],
+    timezone: tzinfo,
+) -> dict[SchedulerReference, SchedulerObservation]:
+    expected = {reference.native_id: reference for reference in requested}
+    observations: dict[SchedulerReference, SchedulerObservation] = {}
+    for line in output.splitlines():
+        if not line.strip():
+            continue
+        fields = line.split("|")
+        if fields and fields[-1] == "":
+            fields.pop()
+        if len(fields) != 6:
+            raise SlurmQueryError("sacct returned a malformed row")
+        job_id, native_state, raw_exit, raw_start, raw_end, nodes = fields
+        reference = expected.get(job_id)
+        if reference is None:
+            continue
+        if reference in observations:
+            raise SlurmQueryError(f"sacct returned duplicate job {job_id}")
+        exit_code = _parse_exit_code(raw_exit)
+        state = _portable_state(native_state, exit_code)
+        terminal = state in {
+            ExecutionState.SUCCEEDED,
+            ExecutionState.FAILED,
+            ExecutionState.CANCELLED,
+        }
+        metadata: dict[str, NativeValue] = {"source": "sacct"}
+        if nodes not in {"", "(null)", "Unknown"}:
+            metadata["allocated_nodes"] = nodes
+        observations[reference] = SchedulerObservation(
+            reference,
+            state,
+            native_state,
+            exit_code=exit_code if terminal else None,
+            metadata=metadata,
+            started_at=_parse_timestamp(raw_start, timezone),
+            finished_at=(_parse_timestamp(raw_end, timezone) if terminal else None),
+        )
+    return observations
+
+
+def _portable_state(native_state: str, exit_code: int | None) -> ExecutionState:
+    normalized = native_state.strip().upper().removesuffix("+").split(" ", 1)[0]
+    if not normalized:
+        raise SlurmQueryError("Slurm returned a blank native state")
+    if normalized in {"PENDING", "CONFIGURING", "RESIZING", "REQUEUED"}:
+        return ExecutionState.QUEUED
+    if normalized in {"RUNNING", "COMPLETING", "SUSPENDED", "STAGE_OUT"}:
+        return ExecutionState.RUNNING
+    if normalized == "COMPLETED":
+        return (
+            ExecutionState.SUCCEEDED
+            if exit_code in {None, 0}
+            else ExecutionState.FAILED
+        )
+    if normalized == "CANCELLED":
+        return ExecutionState.CANCELLED
+    if normalized in {
+        "BOOT_FAIL",
+        "DEADLINE",
+        "FAILED",
+        "NODE_FAIL",
+        "OUT_OF_MEMORY",
+        "PREEMPTED",
+        "REVOKED",
+        "SPECIAL_EXIT",
+        "TIMEOUT",
+    }:
+        return ExecutionState.FAILED
+    return ExecutionState.UNKNOWN
+
+
+def _parse_exit_code(value: str) -> int | None:
+    if value in {"", "N/A", "Unknown"}:
+        return None
+    match = re.fullmatch(r"(-?[0-9]+):[0-9]+", value)
+    if match is None:
+        raise SlurmQueryError("sacct returned an invalid exit code")
+    return int(match.group(1))
+
+
+def _parse_timestamp(value: str, timezone: tzinfo) -> datetime | None:
+    if value in {"", "N/A", "Unknown", "None"}:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise SlurmQueryError("Slurm returned an invalid timestamp") from error
+    return parsed.replace(tzinfo=timezone) if parsed.tzinfo is None else parsed

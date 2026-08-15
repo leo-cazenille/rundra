@@ -8,17 +8,21 @@ from pathlib import PurePosixPath
 import pytest
 
 from rundra.adapters import (
+    SlurmQueryError,
     SlurmScheduler,
     SlurmScriptError,
     SlurmSubmissionError,
     render_sbatch_script,
 )
+from rundra.adapters.slurm import _portable_state
 from rundra.domain.models import Command, ResourceRequest, TaskId
+from rundra.domain.states import ExecutionState
 from rundra.ports import (
     CapabilityCheck,
     CommandResult,
     Scheduler,
     SchedulerGroup,
+    SchedulerReference,
     SchedulerUnit,
 )
 
@@ -254,3 +258,135 @@ def test_slurm_submission_normalizes_transport_start_failure() -> None:
 
     with pytest.raises(SlurmSubmissionError, match="Could not start"):
         SlurmScheduler(transport).submit(_group())
+
+
+def test_slurm_query_combines_queue_and_accounting_in_request_order() -> None:
+    first = SchedulerReference("123")
+    second = SchedulerReference("456")
+    transport = ScriptedTransport(deque([]))
+    scheduler = SlurmScheduler(transport)
+    squeue_command = Command(
+        (
+            "squeue",
+            "--noheader",
+            "--jobs",
+            "123,456",
+            "--format",
+            "%i|%T|%S|%N",
+        )
+    )
+    sacct_command = Command(
+        (
+            "sacct",
+            "--noheader",
+            "--parsable2",
+            "--jobs",
+            "456",
+            "--format",
+            "JobIDRaw,State,ExitCode,Start,End,NodeList",
+        )
+    )
+    transport.results.extend(
+        (
+            _command_result(
+                squeue_command,
+                0,
+                "123|RUNNING|2026-08-15T10:01:02|node[01-02]\n",
+            ),
+            _command_result(
+                sacct_command,
+                0,
+                "456|OUT_OF_MEMORY|137:0|2026-08-15T09:00:00|"
+                "2026-08-15T09:01:00|node03|\n"
+                "456.batch|FAILED|137:0|2026-08-15T09:00:00|"
+                "2026-08-15T09:01:00|node03|\n",
+            ),
+        )
+    )
+
+    observations = scheduler.query((first, second))
+
+    assert [item.reference for item in observations] == [first, second]
+    assert observations[0].state is ExecutionState.RUNNING
+    assert observations[0].native_state == "RUNNING"
+    assert observations[0].started_at == datetime(2026, 8, 15, 10, 1, 2, tzinfo=UTC)
+    assert observations[0].metadata == {
+        "source": "squeue",
+        "allocated_nodes": "node[01-02]",
+    }
+    assert observations[1].state is ExecutionState.FAILED
+    assert observations[1].native_state == "OUT_OF_MEMORY"
+    assert observations[1].exit_code == 137
+    assert observations[1].finished_at == datetime(2026, 8, 15, 9, 1, tzinfo=UTC)
+    assert transport.run_calls == [squeue_command, sacct_command]
+
+
+def test_slurm_query_marks_accounting_lag_explicitly() -> None:
+    reference = SchedulerReference("789")
+    transport = ScriptedTransport(deque([]))
+    scheduler = SlurmScheduler(transport)
+    transport.results.extend(
+        (
+            _command_result(Command(("unused",)), 0, ""),
+            _command_result(Command(("unused",)), 0, ""),
+        )
+    )
+
+    observation = scheduler.query((reference,))[0]
+
+    assert observation.state is ExecutionState.UNKNOWN
+    assert observation.native_state == "ACCOUNTING_PENDING"
+    assert observation.metadata == {"accounting_pending": True}
+
+
+@pytest.mark.parametrize(
+    ("native", "exit_code", "expected"),
+    [
+        ("PENDING", None, ExecutionState.QUEUED),
+        ("CONFIGURING", None, ExecutionState.QUEUED),
+        ("RUNNING", None, ExecutionState.RUNNING),
+        ("COMPLETING", None, ExecutionState.RUNNING),
+        ("COMPLETED", 0, ExecutionState.SUCCEEDED),
+        ("COMPLETED", 1, ExecutionState.FAILED),
+        ("FAILED", 1, ExecutionState.FAILED),
+        ("OUT_OF_MEMORY", 137, ExecutionState.FAILED),
+        ("TIMEOUT", 0, ExecutionState.FAILED),
+        ("PREEMPTED", 0, ExecutionState.FAILED),
+        ("CANCELLED by 42", 0, ExecutionState.CANCELLED),
+        ("FUTURE_STATE", None, ExecutionState.UNKNOWN),
+    ],
+)
+def test_slurm_native_states_have_comprehensive_portable_mapping(
+    native: str, exit_code: int | None, expected: ExecutionState
+) -> None:
+    assert _portable_state(native, exit_code) is expected
+
+
+@pytest.mark.parametrize(
+    ("results", "message"),
+    [
+        ((1, "", "permission denied"), "squeue failed"),
+        ((0, "malformed", ""), "malformed row"),
+    ],
+)
+def test_slurm_query_rejects_command_and_parse_failures(
+    results: tuple[int, str, str], message: str
+) -> None:
+    exit_code, stdout, stderr = results
+    transport = ScriptedTransport(
+        deque([_command_result(Command(("unused",)), exit_code, stdout, stderr)])
+    )
+
+    with pytest.raises(SlurmQueryError, match=message):
+        SlurmScheduler(transport).query((SchedulerReference("123"),))
+
+
+def test_slurm_query_validates_reference_collection() -> None:
+    scheduler = SlurmScheduler(ScriptedTransport(deque([])))
+    reference = SchedulerReference("123")
+
+    assert scheduler.query(()) == ()
+    with pytest.raises(ValueError, match="unique"):
+        scheduler.query((reference, reference))
+    with pytest.raises(ValueError, match="numeric"):
+        scheduler.query((SchedulerReference("local-1"),))
