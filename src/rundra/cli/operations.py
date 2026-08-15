@@ -63,6 +63,11 @@ class TargetsValue:
 @dataclass(frozen=True, slots=True)
 class RunValue:
     record: RunRecord
+    launch: LaunchResolutionValue | None = None
+
+    def __post_init__(self) -> None:
+        if self.launch is not None and type(self.launch) is not LaunchResolutionValue:
+            raise TypeError("RunValue launch must be LaunchResolutionValue or None")
 
     @property
     def run_id(self) -> RunId:
@@ -122,6 +127,52 @@ class FetchValue:
     artifacts: tuple[Artifact, ...]
 
 
+type LaunchOutputValue = str | int | None
+
+
+@dataclass(frozen=True, slots=True)
+class LaunchResolutionValue:
+    profile: str | None
+    values: Mapping[str, LaunchOutputValue]
+    sources: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        if self.profile is not None and (
+            type(self.profile) is not str or not self.profile
+        ):
+            raise ValueError("Launch profile must be nonblank or None")
+        if not isinstance(self.values, Mapping) or not isinstance(
+            self.sources, Mapping
+        ):
+            raise TypeError("Launch resolution values and sources must be mappings")
+        values = dict(self.values)
+        sources = dict(self.sources)
+        if any(
+            type(name) is not str or type(value) not in (str, int, type(None))
+            for name, value in values.items()
+        ):
+            raise TypeError("Launch resolution values are invalid")
+        if set(values) != set(sources) or any(
+            type(name) is not str or type(source) is not str or not source
+            for name, source in sources.items()
+        ):
+            raise ValueError("Launch resolution sources must match values")
+        object.__setattr__(self, "values", MappingProxyType(values))
+        object.__setattr__(self, "sources", MappingProxyType(sources))
+
+
+@dataclass(frozen=True, slots=True)
+class PlanValue:
+    plan: ExecutionPlan
+    launch: LaunchResolutionValue | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.plan) is not ExecutionPlan:
+            raise TypeError("PlanValue plan must be an ExecutionPlan")
+        if self.launch is not None and type(self.launch) is not LaunchResolutionValue:
+            raise TypeError("PlanValue launch must be LaunchResolutionValue or None")
+
+
 @dataclass(frozen=True, slots=True)
 class ResolvedRunInputs:
     config: Path
@@ -150,6 +201,22 @@ class ResolvedRunInputs:
         if type(self.resolution) is not ResolvedLaunch:
             raise TypeError("ResolvedRunInputs resolution must be ResolvedLaunch")
 
+    @property
+    def launch(self) -> LaunchResolutionValue:
+        """Return public metadata for values consumed by synchronous run."""
+        return _launch_resolution_value(
+            self.resolution,
+            (
+                "config",
+                "seed",
+                "target",
+                "targets_file",
+                "source_root",
+                "destination",
+                "data_dir",
+            ),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class ResolvedPlanInputs:
@@ -174,6 +241,22 @@ class ResolvedPlanInputs:
         if type(self.resolution) is not ResolvedLaunch:
             raise TypeError("ResolvedPlanInputs resolution must be ResolvedLaunch")
 
+    @property
+    def launch(self) -> LaunchResolutionValue:
+        """Return public metadata for values consumed by non-submitting plan."""
+        if self.seeds is not None:
+            base = _launch_resolution_value(
+                self.resolution, ("config", "target", "targets_file")
+            )
+            return LaunchResolutionValue(
+                base.profile,
+                {**base.values, "seeds": self.seeds},
+                {**base.sources, "seeds": "cli"},
+            )
+        return _launch_resolution_value(
+            self.resolution, ("config", "seed", "target", "targets_file")
+        )
+
 
 def validate_operation(source: Path) -> OperationResult[ValidationValue]:
     try:
@@ -192,7 +275,8 @@ def plan_operation(
     *,
     seed: object = None,
     seeds: object = None,
-) -> OperationResult[ExecutionPlan]:
+    launch: LaunchResolutionValue | None = None,
+) -> OperationResult[PlanValue]:
     try:
         experiment = load_experiment(experiment_source)
         config = load_config_snapshot(config_source)
@@ -212,7 +296,7 @@ def plan_operation(
             targets[target_name],
             seeds=expand_seeds(seed=seed, seeds=seeds),
         )
-        return OperationResult.success("plan", plan)
+        return OperationResult.success("plan", PlanValue(plan, launch))
     except ConfigError as error:
         return OperationResult.failure("plan", _config_error(error))
     except PlanningError as error:
@@ -493,6 +577,7 @@ def run_operation(
     store: RunStore,
     *,
     seed: object,
+    launch: LaunchResolutionValue | None = None,
 ) -> OperationResult[RunValue]:
     try:
         experiment = load_experiment(experiment_source)
@@ -539,7 +624,7 @@ def run_operation(
                 experiment_source=experiment_source,
             )
         )
-        return OperationResult.success("run", RunValue(result.record))
+        return OperationResult.success("run", RunValue(result.record, launch))
     except ConfigError as error:
         return OperationResult.failure("run", _config_error(error))
     except PlanningError as error:
@@ -838,6 +923,21 @@ def _merge_artifacts(
             key=lambda item: (item[0].value, str(item[1]), str(item[2])),
         )
     )
+
+
+def _launch_resolution_value(
+    resolved: ResolvedLaunch,
+    fields: tuple[str, ...],
+) -> LaunchResolutionValue:
+    values: dict[str, LaunchOutputValue] = {}
+    sources: dict[str, str] = {}
+    for field in fields:
+        value = getattr(resolved.values, field)
+        if value is None or field not in resolved.sources:
+            raise ValueError(f"Resolved launch field is unavailable: {field}")
+        values[field] = str(value) if isinstance(value, Path) else value
+        sources[field] = resolved.sources[field]
+    return LaunchResolutionValue(resolved.profile, values, sources)
 
 
 def _unsupported_local_target(

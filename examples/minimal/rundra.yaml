@@ -1,0 +1,10 @@
+version: 1
+
+default_profile: local
+
+profiles:
+  local:
+    config: config.yaml
+    target: local
+    source_root: .
+    destination: retrieved

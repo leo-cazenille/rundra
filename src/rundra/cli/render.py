@@ -8,8 +8,10 @@ from typing import Any
 from rundra.cli.operations import (
     FetchValue,
     InspectValue,
+    LaunchResolutionValue,
     ListRunsValue,
     LogsValue,
+    PlanValue,
     RunValue,
     StatusValue,
     TargetsValue,
@@ -53,8 +55,10 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
             "schema_version": value.experiment.version,
             "source": str(value.source),
         }
-    elif isinstance(value, ExecutionPlan):
-        document["plan"] = _plan_document(value)
+    elif isinstance(value, PlanValue):
+        document["plan"] = _plan_document(value.plan)
+        if value.launch is not None:
+            document["launch"] = _launch_document(value.launch)
     elif isinstance(value, TargetsValue):
         document["source"] = str(value.source)
         document["targets"] = [
@@ -62,6 +66,8 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
         ]
     elif isinstance(value, RunValue):
         document["run"] = _run_value_document(value)
+        if value.launch is not None:
+            document["launch"] = _launch_document(value.launch)
     elif isinstance(value, StatusValue):
         document["status"] = _status_document(value)
     elif isinstance(value, ListRunsValue):
@@ -101,13 +107,15 @@ def render_human(result: OperationResult[Any]) -> str:
             f"Valid experiment: {value.experiment.name} "
             f"(schema v{value.experiment.version})"
         )
-    if isinstance(value, ExecutionPlan):
-        seeds = ", ".join(str(unit.seed) for unit in value.units)
-        return (
-            f"Plan for {value.experiment_name} on {value.target.name}: "
-            f"{len(value.units)} task(s)\nSeeds: {seeds}\n"
-            f"Strategy: {value.strategy}\nStaging: {value.staging_backend}"
+    if isinstance(value, PlanValue):
+        plan = value.plan
+        seeds = ", ".join(str(unit.seed) for unit in plan.units)
+        rendered = (
+            f"Plan for {plan.experiment_name} on {plan.target.name}: "
+            f"{len(plan.units)} task(s)\nSeeds: {seeds}\n"
+            f"Strategy: {plan.strategy}\nStaging: {plan.staging_backend}"
         )
+        return _with_launch(rendered, value.launch)
     if isinstance(value, TargetsValue):
         lines = ["Configured targets:"]
         lines.extend(
@@ -117,13 +125,14 @@ def render_human(result: OperationResult[Any]) -> str:
         )
         return "\n".join(lines)
     if isinstance(value, RunValue):
-        return (
+        rendered = (
             f"Run: {value.run_id}\n"
             f"Seed: {value.seed}\n"
             f"State: {value.record.run.state.value}\n"
             f"Retrieval: {value.record.run.retrieval_state.value}\n"
             f"Target: {value.record.run.target.name}"
         )
+        return _with_launch(rendered, value.launch)
     if isinstance(value, StatusValue):
         counts = ", ".join(
             f"{state.lower()}={count}"
@@ -180,6 +189,27 @@ def _plan_document(plan: ExecutionPlan) -> dict[str, Any]:
             for unit in plan.units
         ],
     }
+
+
+def _launch_document(value: LaunchResolutionValue) -> dict[str, Any]:
+    return {
+        "profile": value.profile,
+        "values": dict(value.values),
+        "sources": dict(value.sources),
+    }
+
+
+def _with_launch(rendered: str, launch: LaunchResolutionValue | None) -> str:
+    if launch is None:
+        return rendered
+    lines = [rendered, "Launch resolution:"]
+    lines.extend(
+        f"  {name}={launch.values[name]} ({launch.sources[name]})"
+        for name in sorted(launch.values)
+    )
+    if launch.profile is not None:
+        lines.append(f"  profile={launch.profile}")
+    return "\n".join(lines)
 
 
 def _target_document(target: Target) -> dict[str, Any]:

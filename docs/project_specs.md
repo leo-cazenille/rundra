@@ -1494,17 +1494,16 @@ Synchronous `run` wires the Git provenance provider into the same orchestration
 service. `inspect` exposes the persisted optional fields through the existing
 RunRecord contract; no CLI-specific Git command path exists.
 
-### 22.4 Planned launch defaults and profiles
+### 22.4 Launch defaults and profiles
 
-The pre-M2 M1E milestone will retain the fully explicit CLI while adding a
-strict, versioned project launch file and user defaults. A configured project
-should support:
+The pre-M2 M1E milestone retains the fully explicit CLI and adds a strict,
+versioned project launch file and user defaults. A configured project supports:
 
 ```bash
 rundr run experiment.yaml
 ```
 
-Launch values will resolve in this order:
+Launch values resolve in this order:
 
 ```text
 explicit CLI argument
@@ -1514,17 +1513,49 @@ explicit CLI argument
 → built-in default
 ```
 
+An adjacent project file can define defaults and named profiles without
+embedding backend definitions:
+
+```yaml
+version: 1
+default_profile: local
+profiles:
+  local:
+    config: config.yaml
+    target: local
+    source_root: .
+    destination: retrieved
+    # seed is optional
+```
+
+Optional user defaults live at `~/.config/rundra/config.yaml`:
+
+```yaml
+version: 1
+defaults:
+  target: local
+  targets_file: targets.yaml
+  data_dir: records
+```
+
 Project configuration may select a target name, but target backend definitions
 remain in the separate target file. Paths are resolved relative to the file
-that declares them. Resolution must be inspectable in human and JSON plan/run
-output, must never prompt in an agent-facing workflow, and must return a
-structured error when config or target remains unavailable.
+that declares them. Resolution is inspectable in human and JSON plan/run output,
+never prompts in an agent-facing workflow, and returns a structured error when
+config or target remains unavailable. Automatic discovery is deliberately
+adjacent-only; `--project-file` selects a non-adjacent project file.
 
 An omitted seed requests framework generation, not application-level implicit
 randomness. The launch resolver generates the integer before invoking the pure
 planner; the Task and RunRecord contain that concrete value. A non-submitting
 plan may generate and display a preview seed, but an independent later run will
 generate another seed unless the preview is passed explicitly.
+
+Successful plan/run JSON includes a sibling `launch` value containing the
+selected profile, consumed effective values, and a source for each field. The
+stable source forms are `cli`, `project_profile:NAME`, `project`, `user`,
+`built_in`, and `generated`. This is additive to the existing version-1
+operation payload.
 
 ---
 

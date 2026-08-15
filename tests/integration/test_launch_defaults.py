@@ -83,19 +83,49 @@ defaults:
         assert planned.returncode == 0, planned.stderr or planned.stdout
         preview_seed = json.loads(planned.stdout)["plan"]["units"][0]["seed"]
         assert type(preview_seed) is int and 0 <= preview_seed < 2**63
+        planned_launch = json.loads(planned.stdout)["launch"]
+        assert planned_launch["profile"] == "local"
+        assert planned_launch["sources"]["seed"] == "generated"
+        assert planned_launch["sources"]["config"] == "project_profile:local"
+        assert planned_launch["sources"]["targets_file"] == "user"
         assert result.returncode == 0, result.stderr or result.stdout
         document = json.loads(result.stdout)
         assert document["run"]["state"] == "SUCCEEDED"
         seed = document["run"]["seed"]
         assert type(seed) is int and 0 <= seed < 2**63
+        assert document["launch"]["values"]["seed"] == seed
+        assert document["launch"]["sources"]["seed"] == "generated"
+        assert document["launch"]["sources"]["data_dir"] == "user"
         assert (project / "retrieved/results/result.json").is_file()
         result_document = json.loads(
             (project / "retrieved/results/result.json").read_text(encoding="utf-8")
         )
         assert result_document["seed"] == seed
+        replay = subprocess.run(
+            [
+                "rundr",
+                "run",
+                "experiment.yaml",
+                "--seed",
+                str(seed),
+                "--destination",
+                "replayed",
+                "--json",
+            ],
+            cwd=project,
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert replay.returncode == 0, replay.stderr or replay.stdout
+        assert json.loads(replay.stdout)["launch"]["sources"]["seed"] == "cli"
+        assert (project / "retrieved/results/result.json").read_bytes() == (
+            project / "replayed/results/result.json"
+        ).read_bytes()
         stored = JsonRunStore(records).list()
-        assert len(stored) == 1
-        assert stored[0].run.tasks[0].seed == seed
+        assert len(stored) == 2
+        assert all(record.run.tasks[0].seed == seed for record in stored)
     finally:
         for run_root in (workspace / "runs").glob("run_*"):
             _restore_writes(run_root / "source")

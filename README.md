@@ -11,12 +11,16 @@ The project, GitHub repository, Python package, and PyPI distribution are named
 
 ## Development status
 
-M1 is complete. Rundra has portable domain and configuration models,
+M1 and M1E are complete. Rundra has portable domain and configuration models,
 deterministic planning, isolated local staging, durable versioned Run records,
 shell-free local execution, Apptainer command construction, Git provenance,
 artifact retrieval, and common human/JSON lifecycle interfaces. The checked
 minimal experiment runs through the same planner, ports, orchestration service,
 and persistence path intended for later remote execution.
+
+M1E adds strict project launch profiles, optional user defaults, deterministic
+resolution precedence, concise `run`/`plan` commands, and generated seeds that
+are displayed and durably recorded before execution.
 
 Local execution is synchronous. `submit` reports `ASYNC_UNAVAILABLE` until a
 durable asynchronous backend exists. An explicit `native` runtime supports only
@@ -50,7 +54,31 @@ manager.
 
 ## Minimal local example
 
-Run the checked example with an explicit seed:
+Install the checked local target at the standard user location once:
+
+```bash
+mkdir -p ~/.config/rundra
+cp examples/minimal/targets.yaml ~/.config/rundra/targets.yaml
+```
+
+The adjacent `examples/minimal/rundra.yaml` profile supplies the config, target,
+source root, and destination. Plan or run it concisely:
+
+```bash
+uv run rundr plan examples/minimal/experiment.yaml
+uv run rundr run examples/minimal/experiment.yaml
+```
+
+When no seed is configured, Rundra generates a non-negative 63-bit integer
+before planning, displays it, passes it to the application, and stores it in the
+RunRecord. An independent `plan` and `run` generate different values. Replay a
+reported seed explicitly when reproducibility is required:
+
+```bash
+uv run rundr run examples/minimal/experiment.yaml --seed 17
+```
+
+The fully explicit agent-oriented form remains supported:
 
 ```bash
 uv run rundr run examples/minimal/experiment.yaml \
@@ -68,6 +96,43 @@ runtime, repeated runs must produce byte-identical
 and checks that criterion. It does not claim byte identity across different
 Python/runtime versions.
 
+Use `--random-seed` to override a fixed seed supplied by a project profile or
+user default. Explicit `--seeds START:STOP` remains available to `plan`; the
+multi-Task execution lifecycle is scheduled for M5.
+
+## Launch configuration
+
+Rundra automatically checks for `rundra.yaml` beside the experiment. Use
+`--project-file` for any other location and `--profile` to select a non-default
+profile. Relative project paths are resolved against the project file:
+
+```yaml
+version: 1
+default_profile: local
+profiles:
+  local:
+    config: config.yaml
+    target: local
+    source_root: .
+    destination: retrieved
+```
+
+Optional user defaults live in `~/.config/rundra/config.yaml`; target backend
+definitions remain in their separate target file:
+
+```yaml
+version: 1
+defaults:
+  target: local
+  targets_file: targets.yaml
+  data_dir: records
+```
+
+Paths in user defaults are relative to the user configuration file. Resolution
+precedence is CLI → selected project profile → project defaults → user defaults
+→ built-ins. `plan --json` and `run --json` expose the effective values and the
+source selected for each field under `launch`.
+
 ## Inspecting without execution
 
 The checked example can be inspected without executing an experiment:
@@ -83,8 +148,9 @@ uv run rundr targets --targets-file examples/minimal/targets.yaml
 ```
 
 Lifecycle commands use `~/.local/share/rundra/runs` by default; pass
-`--data-dir` to select another record store. `run` accepts one `--seed`, a
-project `--source-root`, and a deterministic or explicit `--destination`.
+`--data-dir` to select another record store. Synchronous `run` executes exactly
+one seed, supplied or generated, while `source_root` and `destination` may come
+from the same launch-resolution layers.
 
 Add `--json` to obtain the version-1 machine-readable contracts documented in
 [`docs/schemas/`](docs/schemas/). Authentication comes only from external

@@ -22,6 +22,12 @@ M1.5 adds checked success envelopes for synchronous `run`, `status`, `list`,
 under the standard envelope's `record` field. `submit` uses the common error
 envelope with code `ASYNC_UNAVAILABLE` until asynchronous semantics exist.
 
+M1E adds a sibling `launch` object to checked `plan` and `run` success
+envelopes. It contains the selected profile, every launch value consumed by the
+operation, and the resolution source for each value. Generated seeds therefore
+remain explicit and replayable without changing the existing `plan` or `run`
+payload shapes.
+
 Fields may be added compatibly during v0.1 development. Removing a field,
 changing its meaning, or changing its type requires a new `format_version`.
 The CLI JSON renderer and human renderer consume the same typed operation

@@ -8,7 +8,6 @@ from types import MappingProxyType
 from rundra.config._schema import (
     ConfigPath,
     check_fields,
-    expect_integer,
     expect_mapping,
     expect_string,
     fail,
@@ -364,13 +363,7 @@ def _launch_values(
     )
     return LaunchValues(
         config=_optional_path(section, "config", source, path),
-        seed=(
-            expect_integer(
-                section["seed"], source=source, path=(*path, "seed"), minimum=0
-            )
-            if "seed" in section
-            else None
-        ),
+        seed=_optional_seed(section, source, path),
         target=(
             expect_string(
                 section["target"],
@@ -403,6 +396,24 @@ def _optional_path(
     if not declared.is_absolute():
         declared = source.parent / declared
     return declared.resolve()
+
+
+def _optional_seed(
+    section: Mapping[str, object],
+    source: Path,
+    path: ConfigPath,
+) -> int | None:
+    if "seed" not in section:
+        return None
+    value = section["seed"]
+    if type(value) is not int:
+        fail(
+            source=source,
+            path=(*path, "seed"),
+            code="INVALID_TYPE",
+            message="Expected an integer",
+        )
+    return value
 
 
 def _reject_credential_fields(

@@ -8,6 +8,7 @@ import pytest
 from rundra.cli.operations import (
     FetchValue,
     InspectValue,
+    LaunchResolutionValue,
     ListRunsValue,
     LogsValue,
     RunValue,
@@ -48,12 +49,36 @@ _RAW_ARTIFACTS = tuple(
     for artifact in _RECORD.artifacts
     if artifact.kind is ArtifactKind.RAW_RESULT
 )
+_RUN_LAUNCH = LaunchResolutionValue(
+    None,
+    {
+        "config": "examples/minimal/config.yaml",
+        "seed": 17,
+        "target": "local",
+        "targets_file": "examples/minimal/targets.yaml",
+        "source_root": "/work/minimal",
+        "destination": "/work/minimal/retrieved",
+        "data_dir": "/work/records",
+    },
+    {
+        "config": "cli",
+        "seed": "cli",
+        "target": "cli",
+        "targets_file": "cli",
+        "source_root": "cli",
+        "destination": "cli",
+        "data_dir": "cli",
+    },
+)
 
 
 @pytest.mark.parametrize(
     ("result", "contract"),
     [
-        (OperationResult.success("run", RunValue(_RECORD)), "run-success-v1.json"),
+        (
+            OperationResult.success("run", RunValue(_RECORD, _RUN_LAUNCH)),
+            "run-success-v1.json",
+        ),
         (OperationResult.success("status", _STATUS), "status-success-v1.json"),
         (
             OperationResult.success("list", ListRunsValue((_STATUS,))),

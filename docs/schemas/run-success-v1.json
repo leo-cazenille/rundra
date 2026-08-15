@@ -1,5 +1,26 @@
 {
   "format_version": 1,
+  "launch": {
+    "profile": null,
+    "sources": {
+      "config": "cli",
+      "data_dir": "cli",
+      "destination": "cli",
+      "seed": "cli",
+      "source_root": "cli",
+      "target": "cli",
+      "targets_file": "cli"
+    },
+    "values": {
+      "config": "examples/minimal/config.yaml",
+      "data_dir": "/work/records",
+      "destination": "/work/minimal/retrieved",
+      "seed": 17,
+      "source_root": "/work/minimal",
+      "target": "local",
+      "targets_file": "examples/minimal/targets.yaml"
+    }
+  },
   "ok": true,
   "operation": "run",
   "run": {

@@ -31,7 +31,7 @@ defaults:
 profiles:
   local:
     config: config.yaml
-    seed: 17
+    seed: -17
     source_root: .
     destination: retrieved
 """,
@@ -48,7 +48,7 @@ profiles:
     assert launch.defaults.destination == (source.parent / "common-results").resolve()
     profile = launch.profiles["local"]
     assert profile.config == (source.parent / "config.yaml").resolve()
-    assert profile.seed == 17
+    assert profile.seed == -17
     assert profile.source_root == source.parent.resolve()
     assert profile.destination == (source.parent / "retrieved").resolve()
     with pytest.raises(TypeError):

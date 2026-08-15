@@ -183,6 +183,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 plan_inputs.target,
                 seed=plan_inputs.seed,
                 seeds=plan_inputs.seeds,
+                launch=plan_inputs.launch,
             )
     elif arguments.command == "targets":
         result = targets_operation(arguments.targets_file)
@@ -214,6 +215,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 run_inputs.destination,
                 JsonRunStore(run_inputs.data_dir),
                 seed=run_inputs.seed,
+                launch=run_inputs.launch,
             )
     elif arguments.command == "submit":
         result = submit_unavailable_operation()

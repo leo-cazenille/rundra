@@ -1,5 +1,20 @@
 {
   "format_version": 1,
+  "launch": {
+    "profile": null,
+    "sources": {
+      "config": "cli",
+      "seeds": "cli",
+      "target": "cli",
+      "targets_file": "cli"
+    },
+    "values": {
+      "config": "examples/minimal/config.yaml",
+      "seeds": "0:1",
+      "target": "local",
+      "targets_file": "examples/minimal/targets.yaml"
+    }
+  },
   "ok": true,
   "operation": "plan",
   "plan": {
