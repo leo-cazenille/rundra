@@ -10,7 +10,7 @@ from pathlib import PurePath
 from types import MappingProxyType
 from uuid import uuid4
 
-from shoal_run.domain.states import ExecutionState, RetrievalState
+from rundra.domain.states import ExecutionState, RetrievalState
 
 _RUN_ID_PATTERN = re.compile(r"run_[0-9a-f]{32}\Z")
 _TASK_ID_PATTERN = re.compile(r"task_[0-9]{6,}\Z")

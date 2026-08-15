@@ -10,4 +10,4 @@ targets:
       type: local
     container:
       type: apptainer
-    workspace: .shoal-run
+    workspace: .rundra

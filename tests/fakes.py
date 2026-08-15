@@ -3,9 +3,9 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 
-from shoal_run.domain.models import Command
-from shoal_run.orchestration.models import ExecutionUnit
-from shoal_run.ports import (
+from rundra.domain.models import Command
+from rundra.orchestration.models import ExecutionUnit
+from rundra.ports import (
     CapabilityCheck,
     CommandResult,
     ContainerRequest,

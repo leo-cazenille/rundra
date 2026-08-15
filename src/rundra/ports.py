@@ -8,7 +8,7 @@ from pathlib import PurePath
 from types import MappingProxyType
 from typing import Protocol, runtime_checkable
 
-from shoal_run.domain.models import (
+from rundra.domain.models import (
     Artifact,
     Command,
     ConfigSnapshot,
@@ -18,8 +18,8 @@ from shoal_run.domain.models import (
     Target,
     TaskId,
 )
-from shoal_run.domain.states import ExecutionState
-from shoal_run.orchestration.models import ExecutionUnit
+from rundra.domain.states import ExecutionState
+from rundra.orchestration.models import ExecutionUnit
 
 
 def _freeze_metadata(

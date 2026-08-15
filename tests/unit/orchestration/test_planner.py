@@ -2,7 +2,7 @@ from pathlib import PurePosixPath
 
 import pytest
 
-from shoal_run.domain.models import (
+from rundra.domain.models import (
     BackendConfig,
     Command,
     ConfigSnapshot,
@@ -38,7 +38,7 @@ def _target() -> Target:
         scheduler=local,
         staging=local,
         container=BackendConfig(kind="apptainer"),
-        workspace=PurePosixPath("/tmp/shoal-run"),
+        workspace=PurePosixPath("/tmp/rundra"),
     )
 
 
@@ -52,7 +52,7 @@ def test_expand_seeds_supports_one_seed_or_an_inclusive_range(
     expected: tuple[int, ...],
 ) -> None:
     """Catches nondeterministic or off-by-one seed expansion."""
-    from shoal_run.orchestration.planner import expand_seeds
+    from rundra.orchestration.planner import expand_seeds
 
     assert expand_seeds(seed=seed, seeds=seeds) == expected
 
@@ -73,8 +73,8 @@ def test_expand_seeds_rejects_ambiguous_or_invalid_requests(
     code: str,
 ) -> None:
     """Catches implicit seeds and ambiguous task-set requests."""
-    from shoal_run.orchestration.models import PlanningError
-    from shoal_run.orchestration.planner import expand_seeds
+    from rundra.orchestration.models import PlanningError
+    from rundra.orchestration.planner import expand_seeds
 
     with pytest.raises(PlanningError) as caught:
         expand_seeds(seed=seed, seeds=seeds)
@@ -84,7 +84,7 @@ def test_expand_seeds_rejects_ambiguous_or_invalid_requests(
 
 def test_create_plan_is_deterministic_inspectable_and_does_not_create_a_run() -> None:
     """Catches plans with random Run IDs or unresolved execution placeholders."""
-    from shoal_run.orchestration.planner import create_plan
+    from rundra.orchestration.planner import create_plan
 
     first = create_plan(_spec(), _config(), _target(), seeds=(4, 9))
     second = create_plan(_spec(), _config(), _target(), seeds=(4, 9))
@@ -114,7 +114,7 @@ def test_create_plan_is_deterministic_inspectable_and_does_not_create_a_run() ->
 
 def test_construct_tasks_requires_a_run_id_but_not_a_scheduler_mapping() -> None:
     """Catches equating logical Tasks with scheduler jobs or array indices."""
-    from shoal_run.orchestration.planner import construct_tasks
+    from rundra.orchestration.planner import construct_tasks
 
     run_id = RunId.new()
     tasks = construct_tasks(run_id, _spec(), _config(), seeds=(4, 9))
@@ -140,8 +140,8 @@ def test_create_plan_rejects_incomplete_or_unknown_placeholders(
     code: str,
 ) -> None:
     """Catches commands that cannot propagate config and seed deterministically."""
-    from shoal_run.orchestration.models import PlanningError
-    from shoal_run.orchestration.planner import create_plan
+    from rundra.orchestration.models import PlanningError
+    from rundra.orchestration.planner import create_plan
 
     with pytest.raises(PlanningError) as caught:
         create_plan(_spec(argv), _config(), _target(), seeds=(1,))
@@ -154,8 +154,8 @@ def test_create_plan_rejects_empty_duplicate_or_non_integer_seeds(
     seeds: tuple[object, ...],
 ) -> None:
     """Catches plans whose logical task set is unstable or lacks explicit seeds."""
-    from shoal_run.orchestration.models import PlanningError
-    from shoal_run.orchestration.planner import create_plan
+    from rundra.orchestration.models import PlanningError
+    from rundra.orchestration.planner import create_plan
 
     with pytest.raises(PlanningError, match="seed"):
         create_plan(_spec(), _config(), _target(), seeds=seeds)

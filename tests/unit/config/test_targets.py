@@ -5,7 +5,7 @@ import pytest
 
 def test_load_targets_builds_immutable_site_configuration(tmp_path: Path) -> None:
     """Catches mixing target selections/options into scientific configuration."""
-    from shoal_run.config.targets import load_targets
+    from rundra.config.targets import load_targets
 
     source = tmp_path / "targets.yaml"
     source.write_text(
@@ -17,7 +17,7 @@ targets:
     scheduler: {type: local}
     staging: {type: local}
     container: {type: apptainer}
-    workspace: ~/.local/share/shoal-run
+    workspace: ~/.local/share/rundra
   shoal:
     transport:
       type: ssh
@@ -25,7 +25,7 @@ targets:
     scheduler: {type: slurm}
     staging: {type: rsync}
     container: {type: apptainer}
-    workspace: /shoalhome/{user}/.shoal-run
+    workspace: /shoalhome/{user}/.rundra
 """,
         encoding="utf-8",
     )
@@ -33,11 +33,11 @@ targets:
     targets = load_targets(source)
 
     assert tuple(targets) == ("local", "shoal")
-    assert targets["local"].workspace == PurePosixPath("~/.local/share/shoal-run")
+    assert targets["local"].workspace == PurePosixPath("~/.local/share/rundra")
     assert targets["shoal"].transport.kind == "ssh"
     assert targets["shoal"].transport.options == {"host": "fishvision"}
     assert targets["shoal"].scheduler.kind == "slurm"
-    assert targets["shoal"].workspace == PurePosixPath("/shoalhome/{user}/.shoal-run")
+    assert targets["shoal"].workspace == PurePosixPath("/shoalhome/{user}/.rundra")
     with pytest.raises(TypeError):
         targets["other"] = targets["local"]
 
@@ -91,8 +91,8 @@ def test_load_targets_reports_strict_actionable_schema_errors(
     path: tuple[str | int, ...],
 ) -> None:
     """Catches permissive site schemas or backend errors without field paths."""
-    from shoal_run.config.errors import ConfigError
-    from shoal_run.config.targets import load_targets
+    from rundra.config.errors import ConfigError
+    from rundra.config.targets import load_targets
 
     source = tmp_path / "targets.yaml"
     source.write_text(content, encoding="utf-8")
@@ -119,8 +119,8 @@ def test_load_targets_rejects_known_backend_in_the_wrong_role(
     kind: str,
 ) -> None:
     """Catches treating backend names as interchangeable plugin identifiers."""
-    from shoal_run.config.errors import ConfigError
-    from shoal_run.config.targets import load_targets
+    from rundra.config.errors import ConfigError
+    from rundra.config.targets import load_targets
 
     sections = {
         "transport": "local",

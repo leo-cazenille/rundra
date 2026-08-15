@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from pathlib import Path, PurePath
 from types import MappingProxyType
 
-from shoal_run.config._schema import (
+from rundra.config._schema import (
     check_fields,
     expect_mapping,
     expect_string,
@@ -12,8 +12,8 @@ from shoal_run.config._schema import (
     is_credential_field,
     require_version_one,
 )
-from shoal_run.config._yaml import read_yaml_document
-from shoal_run.domain.models import BackendConfig, NativeValue, Target
+from rundra.config._yaml import read_yaml_document
+from rundra.domain.models import BackendConfig, NativeValue, Target
 
 _TARGET_FIELDS = frozenset(
     {"transport", "scheduler", "staging", "container", "workspace"}

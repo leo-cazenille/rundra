@@ -10,7 +10,7 @@
       "scheduler": {"options": {}, "type": "local"},
       "staging": {"options": {}, "type": "local"},
       "transport": {"options": {}, "type": "local"},
-      "workspace": ".shoal-run"
+      "workspace": ".rundra"
     }
   ]
 }

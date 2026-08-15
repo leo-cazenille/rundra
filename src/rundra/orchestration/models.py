@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
-from shoal_run.domain.models import (
+from rundra.domain.models import (
     Command,
     ConfigSnapshot,
     ResourceRequest,

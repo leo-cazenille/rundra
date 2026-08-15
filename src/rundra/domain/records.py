@@ -1,0 +1,165 @@
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import PurePath
+from types import MappingProxyType
+
+from rundra.domain.models import Artifact, ExperimentSpec, Run, TaskId
+
+
+def _freeze_strings(value: object, *, field_name: str) -> tuple[str, ...]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise TypeError(f"{field_name} must be a sequence of strings")
+    values = tuple(value)
+    if any(type(item) is not str or not item for item in values):
+        raise ValueError(f"{field_name} must contain nonempty strings")
+    return values
+
+
+def _optional_string(value: object, *, field_name: str) -> None:
+    if value is not None and type(value) is not str:
+        raise TypeError(f"{field_name} must be a string or None")
+
+
+def _optional_nonblank_string(value: object, *, field_name: str) -> None:
+    _optional_string(value, field_name=field_name)
+    if type(value) is str and not value.strip():
+        raise ValueError(f"{field_name} must not be blank")
+
+
+def _optional_timestamp(value: object, *, field_name: str) -> None:
+    if value is None:
+        return
+    if not isinstance(value, datetime):
+        raise TypeError(f"{field_name} must be a datetime or None")
+    if value.utcoffset() is None:
+        raise ValueError(f"{field_name} must be timezone-aware")
+
+
+@dataclass(frozen=True, slots=True)
+class RunRecord:
+    """Versioned durable state and available provenance for one logical Run."""
+
+    format_version: int
+    framework_version: str
+    run: Run
+    experiment: ExperimentSpec
+    source_root: PurePath
+    experiment_source: PurePath | None = None
+    initiator: str | None = None
+    git_commit: str | None = None
+    git_branch: str | None = None
+    git_dirty: bool | None = None
+    git_diff: str | None = None
+    container_digest: str | None = None
+    scheduler_job_ids: tuple[str, ...] = ()
+    allocated_nodes: tuple[str, ...] = ()
+    submitted_at: datetime | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    native_state: str | None = None
+    task_exit_codes: Mapping[TaskId, int] = field(default_factory=dict)
+    artifacts: tuple[Artifact, ...] = ()
+
+    def __post_init__(self) -> None:
+        if type(self.format_version) is not int:
+            raise TypeError("RunRecord format_version must be an integer")
+        if self.format_version != 1:
+            raise ValueError("RunRecord format_version must be 1")
+        if type(self.framework_version) is not str:
+            raise TypeError("RunRecord framework_version must be a string")
+        if not self.framework_version.strip():
+            raise ValueError("RunRecord framework_version must not be blank")
+        if type(self.run) is not Run:
+            raise TypeError("RunRecord run must be a Run")
+        if type(self.experiment) is not ExperimentSpec:
+            raise TypeError("RunRecord experiment must be an ExperimentSpec")
+        if self.experiment.name != self.run.experiment_name:
+            raise ValueError("RunRecord experiment must match its Run")
+        if not isinstance(self.source_root, PurePath):
+            raise TypeError("RunRecord source_root must be a PurePath")
+        if self.experiment_source is not None and not isinstance(
+            self.experiment_source, PurePath
+        ):
+            raise TypeError("RunRecord experiment_source must be a PurePath or None")
+        for field_name in (
+            "initiator",
+            "git_commit",
+            "git_branch",
+            "container_digest",
+            "native_state",
+        ):
+            _optional_nonblank_string(
+                getattr(self, field_name),
+                field_name=f"RunRecord {field_name}",
+            )
+        _optional_string(self.git_diff, field_name="RunRecord git_diff")
+        if self.git_dirty is not None and type(self.git_dirty) is not bool:
+            raise TypeError("RunRecord git_dirty must be a boolean or None")
+        object.__setattr__(
+            self,
+            "scheduler_job_ids",
+            _freeze_strings(
+                self.scheduler_job_ids,
+                field_name="RunRecord scheduler_job_ids",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "allocated_nodes",
+            _freeze_strings(
+                self.allocated_nodes,
+                field_name="RunRecord allocated_nodes",
+            ),
+        )
+        for field_name in ("submitted_at", "started_at", "completed_at"):
+            _optional_timestamp(
+                getattr(self, field_name),
+                field_name=f"RunRecord {field_name}",
+            )
+        timestamps = tuple(
+            value
+            for value in (
+                self.run.created_at,
+                self.submitted_at,
+                self.started_at,
+                self.completed_at,
+            )
+            if value is not None
+        )
+        if any(
+            later < earlier
+            for earlier, later in zip(timestamps, timestamps[1:], strict=False)
+        ):
+            raise ValueError("RunRecord timestamps must be chronological")
+        task_ids = {task.id for task in self.run.tasks}
+        if not isinstance(self.task_exit_codes, Mapping):
+            raise TypeError("RunRecord task_exit_codes must be a mapping")
+        exit_codes = dict(self.task_exit_codes)
+        if any(
+            type(task_id) is not TaskId or type(exit_code) is not int
+            for task_id, exit_code in exit_codes.items()
+        ):
+            raise TypeError("RunRecord task_exit_codes must map TaskIds to integers")
+        if not set(exit_codes).issubset(task_ids):
+            raise ValueError("RunRecord task_exit_codes contain an unknown TaskId")
+        object.__setattr__(
+            self,
+            "task_exit_codes",
+            MappingProxyType(exit_codes),
+        )
+        if not isinstance(self.artifacts, Sequence) or isinstance(
+            self.artifacts, (str, bytes)
+        ):
+            raise TypeError("RunRecord artifacts must be a sequence")
+        artifacts = tuple(self.artifacts)
+        if any(type(artifact) is not Artifact for artifact in artifacts):
+            raise TypeError("RunRecord artifacts must contain only Artifacts")
+        if any(
+            artifact.task_id is not None and artifact.task_id not in task_ids
+            for artifact in artifacts
+        ):
+            raise ValueError("RunRecord artifacts contain an unknown TaskId")
+        object.__setattr__(self, "artifacts", artifacts)

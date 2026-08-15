@@ -1,15 +1,23 @@
-# shoal-run — Project Specification
+# Rundra — Project Specification
 
-> **Status:** Initial implementation specification  
-> **Project name:** `shoal-run` is a working/placeholder name. The project may be renamed when it grows beyond the original shoal-cluster use case.  
-> **Primary reference deployment:** the shoal cluster, accessed through `fishvision`  
+> **Status:** Initial implementation specification
+>
+> - **Project/brand:** Rundra
+> - **GitHub repository:** `rundra`
+> - **Python package:** `rundra`
+> - **PyPI distribution:** `rundra`
+> - **CLI command:** `rundr`
+> - **Primary domain:** `rundra.ai` (not yet reserved)
+> - **Secondary domain:** `rundr.ai` (not yet reserved; redirects to `rundra.ai`)
+>
+> **Primary reference deployment:** the shoal cluster, accessed through `fishvision`
 > **Initial implementation language:** Python 3.12
 
 ---
 
 ## 1. Purpose
 
-`shoal-run` is a portable experiment-execution layer for reproducible scientific computing.
+Rundra is a portable experiment-execution layer for reproducible scientific computing.
 
 Its initial purpose is to make the following workflow possible from a developer workstation or laptop:
 
@@ -658,7 +666,7 @@ targets:
     container:
       type: apptainer
 
-    workspace: "~/.local/share/shoal-run"
+    workspace: "~/.local/share/rundra"
 
   shoal:
     transport:
@@ -674,7 +682,7 @@ targets:
     container:
       type: apptainer
 
-    workspace: "/shoalhome/{user}/.shoal-run"
+    workspace: "/shoalhome/{user}/.rundra"
 ```
 
 Target configuration may later include:
@@ -695,7 +703,7 @@ Target configuration may later include:
 A default user-level location should be supported, for example:
 
 ```text
-~/.config/shoal-run/targets.yaml
+~/.config/rundra/targets.yaml
 ```
 
 The exact location may be finalized during implementation.
@@ -1105,12 +1113,10 @@ Projects may choose to include analysis artifacts in their requested outputs, bu
 
 The CLI is the first public interface.
 
-The exact executable name may change with the project name.
-
-For this specification, examples use:
+The command-line executable is:
 
 ```text
-shoal-run
+rundr
 ```
 
 ---
@@ -1118,7 +1124,7 @@ shoal-run
 ### 21.1 `validate`
 
 ```bash
-shoal-run validate experiment.yaml
+rundr validate experiment.yaml
 ```
 
 Responsibilities:
@@ -1131,7 +1137,7 @@ Responsibilities:
 Optional:
 
 ```bash
-shoal-run validate experiment.yaml --target shoal
+rundr validate experiment.yaml --target shoal
 ```
 
 may additionally validate target capabilities.
@@ -1141,7 +1147,7 @@ may additionally validate target capabilities.
 ### 21.2 `plan`
 
 ```bash
-shoal-run plan experiment.yaml \
+rundr plan experiment.yaml \
     --config configs/test.yaml \
     --seeds 0:9 \
     --target shoal
@@ -1166,7 +1172,7 @@ For an agent, `plan` is a key safety boundary.
 ### 21.3 `run`
 
 ```bash
-shoal-run run experiment.yaml \
+rundr run experiment.yaml \
     --config configs/test.yaml \
     --seed 42 \
     --target shoal
@@ -1199,7 +1205,7 @@ A failed task must still allow logs and partial outputs to be collected when pos
 ### 21.4 `submit`
 
 ```bash
-shoal-run submit experiment.yaml \
+rundr submit experiment.yaml \
     --config configs/test.yaml \
     --seeds 0:99 \
     --target shoal
@@ -1228,7 +1234,7 @@ This is the preferred interface for long-running experiments.
 ### 21.5 `status`
 
 ```bash
-shoal-run status <run-id>
+rundr status <run-id>
 ```
 
 For multi-task Runs, status should summarize task states.
@@ -1251,13 +1257,13 @@ Tasks:
 ### 21.6 `logs`
 
 ```bash
-shoal-run logs <run-id>
+rundr logs <run-id>
 ```
 
 Task selection should be possible:
 
 ```bash
-shoal-run logs <run-id> --task 17
+rundr logs <run-id> --task 17
 ```
 
 Useful options may later include:
@@ -1275,7 +1281,7 @@ Agents and users should not need to know native scheduler log filenames.
 ### 21.7 `fetch`
 
 ```bash
-shoal-run fetch <run-id>
+rundr fetch <run-id>
 ```
 
 Retrieves configured/requested outputs and relevant metadata.
@@ -1289,7 +1295,7 @@ Fetching should be idempotent where practical.
 ### 21.8 `cancel`
 
 ```bash
-shoal-run cancel <run-id>
+rundr cancel <run-id>
 ```
 
 Cancels active scheduler jobs associated with the Run.
@@ -1301,7 +1307,7 @@ Cancellation must be recorded in the RunRecord.
 ### 21.9 `inspect`
 
 ```bash
-shoal-run inspect <run-id>
+rundr inspect <run-id>
 ```
 
 Returns detailed run/provenance information.
@@ -1311,7 +1317,7 @@ Returns detailed run/provenance information.
 ### 21.10 `list`
 
 ```bash
-shoal-run list
+rundr list
 ```
 
 Lists known Runs.
@@ -1323,7 +1329,7 @@ Filtering by state, target, experiment, or recency may be added later.
 ### 21.11 `targets`
 
 ```bash
-shoal-run targets
+rundr targets
 ```
 
 Lists configured targets and basic capabilities.
@@ -1331,7 +1337,7 @@ Lists configured targets and basic capabilities.
 Potential future operation:
 
 ```bash
-shoal-run targets inspect shoal
+rundr targets inspect shoal
 ```
 
 ---
@@ -1538,7 +1544,7 @@ config × parameter set × seed
 Example future CLI:
 
 ```bash
-shoal-run sweep configs/base.yaml \
+rundr sweep configs/base.yaml \
     --param density=0.1,0.2,0.3,0.4 \
     --param noise=0.0,0.05,0.1 \
     --replicates 20
@@ -1714,7 +1720,7 @@ This must remain a target/backend detail rather than become part of the portable
 A user on a remote workstation must be able to launch a CPU experiment such as:
 
 ```bash
-shoal-run run experiment.yaml \
+rundr run experiment.yaml \
     --config configs/test.yaml \
     --seed 1 \
     --target shoal
@@ -1753,7 +1759,7 @@ Version 0.1 must support one logical Run containing multiple seeds.
 Example:
 
 ```bash
-shoal-run submit experiment.yaml \
+rundr submit experiment.yaml \
     --config configs/test.yaml \
     --seeds 0:99 \
     --target shoal
@@ -1869,7 +1875,7 @@ A simple local persistence mechanism is preferred for v0.1.
 Possible implementation:
 
 ```text
-~/.local/share/shoal-run/runs/
+~/.local/share/rundra/runs/
 ```
 
 with one structured record per Run.
@@ -1877,6 +1883,12 @@ with one structured record per Run.
 A relational database is not required for v0.1 unless implementation evidence shows that it substantially simplifies correctness.
 
 Persistence details are implementation choices, but public Run semantics must not depend on the initiating shell process remaining alive.
+
+The version-1 local store uses one `<run-id>.json` document per Run. Creation is
+collision-safe, updates replace a fully written temporary document atomically,
+and incompatible versions or unknown fields fail explicitly. The persisted
+format stores portable computation and result-retrieval states independently;
+its checked example is `docs/schemas/run-record-v1.json`.
 
 ---
 
@@ -1925,7 +1937,7 @@ Framework logs must be distinguishable from experiment stdout/stderr.
 Do not mix:
 
 ```text
-shoal-run orchestration logs
+rundr orchestration logs
 ```
 
 with:
@@ -2161,7 +2173,7 @@ Requirements:
 
 ### Scenario 6 — cancellation
 
-An asynchronous Run can be cancelled through `shoal-run cancel`.
+An asynchronous Run can be cancelled through `rundr cancel`.
 
 The framework records the cancellation and reconciles scheduler state.
 
@@ -2172,7 +2184,7 @@ The framework records the cancellation and reconciles scheduler state.
 After:
 
 ```bash
-shoal-run submit ...
+rundr submit ...
 ```
 
 the initiating shell process may exit.
@@ -2180,9 +2192,9 @@ the initiating shell process may exit.
 A later invocation can still:
 
 ```bash
-shoal-run status <run-id>
-shoal-run logs <run-id>
-shoal-run fetch <run-id>
+rundr status <run-id>
+rundr logs <run-id>
+rundr fetch <run-id>
 ```
 
 ---
@@ -2194,7 +2206,7 @@ A user on a remote laptop must be able to go from modified local source code to 
 The primary synchronous experience should approximate:
 
 ```bash
-shoal-run run experiment.yaml \
+rundr run experiment.yaml \
     --config configs/test.yaml \
     --seed 17 \
     --target shoal
@@ -2203,7 +2215,7 @@ shoal-run run experiment.yaml \
 The primary asynchronous experience should approximate:
 
 ```bash
-shoal-run submit experiment.yaml \
+rundr submit experiment.yaml \
     --config configs/test.yaml \
     --seeds 0:99 \
     --target shoal
@@ -2212,9 +2224,9 @@ shoal-run submit experiment.yaml \
 followed later by:
 
 ```bash
-shoal-run status <run-id>
-shoal-run logs <run-id>
-shoal-run fetch <run-id>
+rundr status <run-id>
+rundr logs <run-id>
+rundr fetch <run-id>
 ```
 
 An LLM coding agent must be able to perform equivalent operations using documented CLI semantics and `--json`, without parsing scheduler-specific output.
@@ -2227,7 +2239,7 @@ A possible structure is:
 
 ```text
 src/
-└── shoal_run/
+└── rundra/
     ├── __init__.py
     │
     ├── domain/
@@ -2329,7 +2341,7 @@ Deliver:
 Acceptance:
 
 ```bash
-shoal-run run ... --target local
+rundr run ... --target local
 ```
 
 works for the minimal example.
@@ -2569,4 +2581,4 @@ Version 0.1 is done when:
 - linting, formatting, type checking, and tests pass;
 - documentation accurately reflects implemented behavior.
 
-At that point, `shoal-run` should already be useful as a practical deployment and experiment-execution tool, while retaining a credible path toward a broader portable research-execution framework.
+At that point, Rundra should already be useful as a practical deployment and experiment-execution tool, while retaining a credible path toward a broader portable research-execution framework.

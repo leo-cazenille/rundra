@@ -4,13 +4,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from shoal_run.config.errors import ConfigError
-from shoal_run.config.experiments import load_config_snapshot, load_experiment
-from shoal_run.config.targets import load_targets
-from shoal_run.domain.models import ExperimentSpec, Target
-from shoal_run.orchestration.models import ExecutionPlan, PlanningError
-from shoal_run.orchestration.planner import create_plan, expand_seeds
-from shoal_run.results import OperationError, OperationResult
+from rundra.config.errors import ConfigError
+from rundra.config.experiments import load_config_snapshot, load_experiment
+from rundra.config.targets import load_targets
+from rundra.domain.models import ExperimentSpec, Target
+from rundra.orchestration.models import ExecutionPlan, PlanningError
+from rundra.orchestration.planner import create_plan, expand_seeds
+from rundra.results import OperationError, OperationResult
 
 
 @dataclass(frozen=True, slots=True)

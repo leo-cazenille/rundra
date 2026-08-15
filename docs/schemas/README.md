@@ -1,11 +1,20 @@
-# CLI JSON contracts
+# Versioned JSON contracts
 
-The checked examples in this directory define the public M0 JSON envelope for
-`validate`, `plan`, and `targets`. Every document has `format_version: 1`, an
-operation name, and an `ok` flag. Successful documents contain an
+The checked CLI examples in this directory define the public JSON envelope for
+`validate`, `plan`, and `targets`. Every CLI document has `format_version: 1`,
+an operation name, and an `ok` flag. Successful documents contain an
 operation-specific value; failures contain a structured `error` with `code`,
 `message`, and `details`.
 
+[`run-record-v1.json`](run-record-v1.json) defines a complete checked example of
+the persisted RunRecord format introduced in M1.1. Unlike CLI envelopes, it is
+a durable state document rather than an operation result. Optional unavailable
+provenance uses JSON `null` or an empty collection; values are never inferred or
+fabricated while loading. Computation state is stored in `run.state`, while
+result-transfer state is independently stored in `run.retrieval_state`.
+
 Fields may be added compatibly during v0.1 development. Removing a field,
 changing its meaning, or changing its type requires a new `format_version`.
-The JSON renderer and human renderer consume the same typed operation result.
+The CLI JSON renderer and human renderer consume the same typed operation
+result. Persisted RunRecords reject unknown fields and unsupported format
+versions instead of silently reinterpreting them.

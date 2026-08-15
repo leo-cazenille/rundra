@@ -4,7 +4,7 @@ import pytest
 
 
 def test_execution_transition_table_is_explicit_and_complete() -> None:
-    from shoal_run.domain.states import ExecutionState, validate_execution_transition
+    from rundra.domain.states import ExecutionState, validate_execution_transition
 
     allowed = {
         ("CREATED", "STAGING"),
@@ -46,7 +46,7 @@ def test_execution_transition_table_is_explicit_and_complete() -> None:
 
 
 def test_retrieval_transition_table_is_explicit_and_complete() -> None:
-    from shoal_run.domain.states import RetrievalState, validate_retrieval_transition
+    from rundra.domain.states import RetrievalState, validate_retrieval_transition
 
     allowed = {
         ("NOT_REQUESTED", "PENDING"),
@@ -65,7 +65,7 @@ def test_retrieval_transition_table_is_explicit_and_complete() -> None:
 
 @pytest.mark.parametrize("validator", ["execution", "retrieval"])
 def test_transition_validators_reject_non_enum_inputs(validator: str) -> None:
-    from shoal_run.domain.states import (
+    from rundra.domain.states import (
         validate_execution_transition,
         validate_retrieval_transition,
     )
@@ -81,7 +81,7 @@ def test_transition_validators_reject_non_enum_inputs(validator: str) -> None:
 
 def test_execution_state_contains_exactly_the_portable_v01_states() -> None:
     try:
-        from shoal_run.domain.states import ExecutionState
+        from rundra.domain.states import ExecutionState
     except ModuleNotFoundError:
         pytest.fail("ExecutionState is not implemented")
 
@@ -111,7 +111,7 @@ def test_execution_transition_validation_accepts_supported_lifecycles(
     states: tuple[str, ...],
 ) -> None:
     try:
-        from shoal_run.domain.states import (
+        from rundra.domain.states import (
             ExecutionState,
             validate_execution_transition,
         )
@@ -138,7 +138,7 @@ def test_execution_transition_validation_rejects_invalid_lifecycles(
     current: str,
     target: str,
 ) -> None:
-    from shoal_run.domain.states import ExecutionState, validate_execution_transition
+    from rundra.domain.states import ExecutionState, validate_execution_transition
 
     with pytest.raises(ValueError, match=f"{current}.*{target}"):
         validate_execution_transition(ExecutionState(current), ExecutionState(target))
@@ -146,7 +146,7 @@ def test_execution_transition_validation_rejects_invalid_lifecycles(
 
 def test_retrieval_state_is_distinct_and_allows_failed_fetch_retry() -> None:
     try:
-        from shoal_run.domain.states import (
+        from rundra.domain.states import (
             RetrievalState,
             validate_retrieval_transition,
         )
@@ -169,7 +169,7 @@ def test_retrieval_state_is_distinct_and_allows_failed_fetch_retry() -> None:
 
 
 def test_retrieval_state_rejects_reopening_a_successful_fetch() -> None:
-    from shoal_run.domain.states import RetrievalState, validate_retrieval_transition
+    from rundra.domain.states import RetrievalState, validate_retrieval_transition
 
     with pytest.raises(ValueError, match="SUCCEEDED.*PENDING"):
         validate_retrieval_transition(

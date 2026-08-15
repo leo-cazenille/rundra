@@ -11,7 +11,7 @@ _ROOT = Path(__file__).parents[2]
 
 def _run(*arguments: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["shoal-run", *arguments],
+        ["rundr", *arguments],
         cwd=_ROOT,
         check=False,
         capture_output=True,

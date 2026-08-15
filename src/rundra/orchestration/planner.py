@@ -4,7 +4,7 @@ import re
 from collections.abc import Sequence
 from typing import cast
 
-from shoal_run.domain.models import (
+from rundra.domain.models import (
     Command,
     ConfigSnapshot,
     ExperimentSpec,
@@ -13,7 +13,7 @@ from shoal_run.domain.models import (
     Task,
     TaskId,
 )
-from shoal_run.orchestration.models import ExecutionPlan, ExecutionUnit, PlanningError
+from rundra.orchestration.models import ExecutionPlan, ExecutionUnit, PlanningError
 
 _PLACEHOLDER_PATTERN = re.compile(r"\{[^{}]+\}")
 _REQUIRED_PLACEHOLDERS = frozenset({"{config}", "{seed}"})

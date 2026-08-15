@@ -5,10 +5,10 @@ from collections.abc import Mapping
 from datetime import timedelta
 from typing import Any
 
-from shoal_run.cli.operations import TargetsValue, ValidationValue
-from shoal_run.domain.models import Command, ResourceRequest, Target
-from shoal_run.orchestration.models import ExecutionPlan
-from shoal_run.results import OperationResult
+from rundra.cli.operations import TargetsValue, ValidationValue
+from rundra.domain.models import Command, ResourceRequest, Target
+from rundra.orchestration.models import ExecutionPlan
+from rundra.results import OperationResult
 
 _FORMAT_VERSION = 1
 

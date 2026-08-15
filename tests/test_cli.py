@@ -5,7 +5,7 @@ import subprocess
 
 def test_console_entry_point_displays_help() -> None:
     result = subprocess.run(
-        ["shoal-run", "--help"],
+        ["rundr", "--help"],
         check=False,
         capture_output=True,
         text=True,
@@ -13,4 +13,4 @@ def test_console_entry_point_displays_help() -> None:
 
     assert result.returncode == 0, result.stderr
     assert result.stderr == ""
-    assert result.stdout.startswith("usage: shoal-run")
+    assert result.stdout.startswith("usage: rundr")

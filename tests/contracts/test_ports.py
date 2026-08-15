@@ -4,13 +4,13 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
-from shoal_run.config.experiments import load_config_snapshot, load_experiment
-from shoal_run.config.targets import load_targets
-from shoal_run.domain.models import Command, RunId
-from shoal_run.domain.states import ExecutionState
-from shoal_run.orchestration.models import ExecutionUnit
-from shoal_run.orchestration.planner import create_plan
-from shoal_run.ports import (
+from rundra.config.experiments import load_config_snapshot, load_experiment
+from rundra.config.targets import load_targets
+from rundra.domain.models import Command, RunId
+from rundra.domain.states import ExecutionState
+from rundra.orchestration.models import ExecutionUnit
+from rundra.orchestration.planner import create_plan
+from rundra.ports import (
     CapabilityCheck,
     CommandResult,
     ContainerRequest,

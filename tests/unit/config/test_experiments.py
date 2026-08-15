@@ -6,7 +6,7 @@ import pytest
 
 def test_load_experiment_reads_a_minimal_version_one_document(tmp_path: Path) -> None:
     """Catches a loader that cannot construct the portable v1 domain value."""
-    from shoal_run.config.experiments import load_experiment
+    from rundra.config.experiments import load_experiment
 
     source = tmp_path / "experiment.yaml"
     source.write_text(
@@ -36,8 +36,8 @@ def test_load_experiment_reports_missing_files_as_structured_errors(
     tmp_path: Path,
 ) -> None:
     """Catches leaking a raw OSError without an actionable error code or source."""
-    from shoal_run.config.errors import ConfigError
-    from shoal_run.config.experiments import load_experiment
+    from rundra.config.errors import ConfigError
+    from rundra.config.experiments import load_experiment
 
     source = tmp_path / "missing.yaml"
     with pytest.raises(ConfigError) as caught:
@@ -62,8 +62,8 @@ def test_load_experiment_translates_unreadable_inputs(
     code: str,
 ) -> None:
     """Catches leaking platform I/O and decoding exceptions from the public loader."""
-    from shoal_run.config.errors import ConfigError
-    from shoal_run.config.experiments import load_experiment
+    from rundra.config.errors import ConfigError
+    from rundra.config.experiments import load_experiment
 
     source = tmp_path / "experiment.yaml"
     if setup == "directory":
@@ -92,8 +92,8 @@ def test_load_experiment_rejects_ambiguous_or_malformed_yaml(
     code: str,
 ) -> None:
     """Catches accepting syntax whose effective configuration is ambiguous."""
-    from shoal_run.config.errors import ConfigError
-    from shoal_run.config.experiments import load_experiment
+    from rundra.config.errors import ConfigError
+    from rundra.config.experiments import load_experiment
 
     source = tmp_path / "experiment.yaml"
     source.write_text(content, encoding="utf-8")
@@ -109,7 +109,7 @@ def test_load_experiment_normalizes_the_complete_portable_schema(
     tmp_path: Path,
 ) -> None:
     """Catches dropping portable fields or retaining scheduler-formatted units."""
-    from shoal_run.config.experiments import load_experiment
+    from rundra.config.experiments import load_experiment
 
     source = tmp_path / "experiment.yaml"
     source.write_text(
@@ -209,8 +209,8 @@ def test_load_experiment_reports_schema_errors_with_precise_paths(
     path: tuple[str | int, ...],
 ) -> None:
     """Catches permissive schemas and errors that do not identify the bad field."""
-    from shoal_run.config.errors import ConfigError
-    from shoal_run.config.experiments import load_experiment
+    from rundra.config.errors import ConfigError
+    from rundra.config.experiments import load_experiment
 
     source = tmp_path / "experiment.yaml"
     source.write_text(content, encoding="utf-8")
@@ -237,8 +237,8 @@ def test_load_experiment_rejects_invalid_resource_units(
     value: str,
 ) -> None:
     """Catches silently reinterpreting unsupported memory or duration syntax."""
-    from shoal_run.config.errors import ConfigError
-    from shoal_run.config.experiments import load_experiment
+    from rundra.config.errors import ConfigError
+    from rundra.config.experiments import load_experiment
 
     source = tmp_path / "experiment.yaml"
     source.write_text(
@@ -270,7 +270,7 @@ def test_load_experiment_normalizes_each_supported_memory_unit(
     expected: int,
 ) -> None:
     """Catches wrong binary-unit factors or accidental decimal-unit conversion."""
-    from shoal_run.config.experiments import load_experiment
+    from rundra.config.experiments import load_experiment
 
     source = tmp_path / "experiment.yaml"
     source.write_text(
@@ -312,8 +312,8 @@ def test_load_experiment_translates_nested_value_errors(
     path: tuple[str | int, ...],
 ) -> None:
     """Catches raw domain exceptions and non-namespaced native options."""
-    from shoal_run.config.errors import ConfigError
-    from shoal_run.config.experiments import load_experiment
+    from rundra.config.errors import ConfigError
+    from rundra.config.experiments import load_experiment
 
     command = "command: {argv: [x]}"
     resources = "resources: {}"
@@ -338,8 +338,8 @@ def test_load_experiment_rejects_credentials_hidden_in_native_options(
     tmp_path: Path,
 ) -> None:
     """Catches persisting credentials through auditable native resource options."""
-    from shoal_run.config.errors import ConfigError
-    from shoal_run.config.experiments import load_experiment
+    from rundra.config.errors import ConfigError
+    from rundra.config.experiments import load_experiment
 
     source = tmp_path / "experiment.yaml"
     source.write_text(
@@ -364,7 +364,7 @@ resources:
 
 def test_load_config_snapshot_preserves_exact_opaque_yaml(tmp_path: Path) -> None:
     """Catches interpreting or re-serializing application-specific configuration."""
-    from shoal_run.config.experiments import load_config_snapshot
+    from rundra.config.experiments import load_config_snapshot
 
     source = tmp_path / "scientific.yaml"
     content = "# keep this comment\npopulation:\n  size: 100\nnoise: 0.10\n"
@@ -385,7 +385,7 @@ def test_load_config_snapshot_preserves_newlines_and_end_of_file_exactly(
     content: bytes,
 ) -> None:
     """Catches universal-newline conversion or adding a final newline."""
-    from shoal_run.config.experiments import load_config_snapshot
+    from rundra.config.experiments import load_config_snapshot
 
     source = tmp_path / "scientific.yaml"
     source.write_bytes(content)
@@ -397,8 +397,8 @@ def test_load_config_snapshot_rejects_invalid_yaml_without_interpreting_schema(
     tmp_path: Path,
 ) -> None:
     """Catches accepting malformed input while still permitting arbitrary keys."""
-    from shoal_run.config.errors import ConfigError
-    from shoal_run.config.experiments import load_config_snapshot
+    from rundra.config.errors import ConfigError
+    from rundra.config.experiments import load_config_snapshot
 
     source = tmp_path / "scientific.yaml"
     source.write_text("application_specific: [\n", encoding="utf-8")
@@ -414,8 +414,8 @@ def test_load_config_snapshot_translates_complex_mapping_key_errors(
     tmp_path: Path,
 ) -> None:
     """Catches leaking an unhashable-key TypeError through the YAML boundary."""
-    from shoal_run.config.errors import ConfigError
-    from shoal_run.config.experiments import load_config_snapshot
+    from rundra.config.errors import ConfigError
+    from rundra.config.experiments import load_config_snapshot
 
     source = tmp_path / "scientific.yaml"
     source.write_text("? [a, b]\n: value\n", encoding="utf-8")
@@ -431,8 +431,8 @@ def test_load_config_snapshot_reports_the_full_nested_duplicate_path(
     tmp_path: Path,
 ) -> None:
     """Catches losing the containing path for duplicate nested fields."""
-    from shoal_run.config.errors import ConfigError
-    from shoal_run.config.experiments import load_config_snapshot
+    from rundra.config.errors import ConfigError
+    from rundra.config.experiments import load_config_snapshot
 
     source = tmp_path / "scientific.yaml"
     source.write_text("outer:\n  repeated: 1\n  repeated: 2\n", encoding="utf-8")
@@ -453,8 +453,8 @@ def test_load_experiment_rejects_common_credential_environment_names(
     field: str,
 ) -> None:
     """Catches storing common credential fields in ExperimentSpec environment."""
-    from shoal_run.config.errors import ConfigError
-    from shoal_run.config.experiments import load_experiment
+    from rundra.config.errors import ConfigError
+    from rundra.config.experiments import load_experiment
 
     source = tmp_path / "experiment.yaml"
     source.write_text(
@@ -473,8 +473,8 @@ def test_load_experiment_rejects_common_credential_environment_names(
 
 def test_load_experiment_translates_walltime_overflow(tmp_path: Path) -> None:
     """Catches leaking OverflowError for syntactically valid extreme hours."""
-    from shoal_run.config.errors import ConfigError
-    from shoal_run.config.experiments import load_experiment
+    from rundra.config.errors import ConfigError
+    from rundra.config.experiments import load_experiment
 
     source = tmp_path / "experiment.yaml"
     source.write_text(
@@ -496,8 +496,8 @@ def test_load_experiment_translates_integer_digit_limit_errors(
     field: str,
 ) -> None:
     """Catches leaking Python's integer conversion limit for huge unit values."""
-    from shoal_run.config.errors import ConfigError
-    from shoal_run.config.experiments import load_experiment
+    from rundra.config.errors import ConfigError
+    from rundra.config.experiments import load_experiment
 
     value = "9" * 5000 + ("GiB" if field == "memory" else ":00:00")
     source = tmp_path / "experiment.yaml"
@@ -516,8 +516,8 @@ def test_load_experiment_translates_integer_digit_limit_errors(
 
 def test_load_experiment_rejects_blank_native_namespaces(tmp_path: Path) -> None:
     """Catches native options that are not explicitly namespaced to a backend."""
-    from shoal_run.config.errors import ConfigError
-    from shoal_run.config.experiments import load_experiment
+    from rundra.config.errors import ConfigError
+    from rundra.config.experiments import load_experiment
 
     source = tmp_path / "experiment.yaml"
     source.write_text(
@@ -538,8 +538,8 @@ def test_load_experiment_rejects_nonfinite_native_numbers(
     tmp_path: Path, value: str
 ) -> None:
     """Keeps every accepted native option representable in strict JSON."""
-    from shoal_run.config.errors import ConfigError
-    from shoal_run.config.experiments import load_experiment
+    from rundra.config.errors import ConfigError
+    from rundra.config.experiments import load_experiment
 
     source = tmp_path / "experiment.yaml"
     source.write_text(
@@ -564,7 +564,7 @@ def test_load_config_snapshot_accepts_safe_recursive_aliases(
     content: str,
 ) -> None:
     """Catches duplicate-path validation changing SafeLoader YAML semantics."""
-    from shoal_run.config.experiments import load_config_snapshot
+    from rundra.config.experiments import load_config_snapshot
 
     source = tmp_path / "scientific.yaml"
     source.write_text(content, encoding="utf-8")
@@ -588,7 +588,7 @@ def test_load_config_snapshot_preserves_safe_yaml_merge_semantics(
     content: str,
 ) -> None:
     """Catches duplicate validation preempting SafeLoader merge flattening."""
-    from shoal_run.config.experiments import load_config_snapshot
+    from rundra.config.experiments import load_config_snapshot
 
     source = tmp_path / "scientific.yaml"
     source.write_text(content, encoding="utf-8")
@@ -598,8 +598,8 @@ def test_load_config_snapshot_preserves_safe_yaml_merge_semantics(
 
 def test_load_config_snapshot_rejects_duplicate_merge_keys(tmp_path: Path) -> None:
     """Catches merge tags bypassing the strict duplicate-key rule."""
-    from shoal_run.config.errors import ConfigError
-    from shoal_run.config.experiments import load_config_snapshot
+    from rundra.config.errors import ConfigError
+    from rundra.config.experiments import load_config_snapshot
 
     source = tmp_path / "scientific.yaml"
     source.write_text(

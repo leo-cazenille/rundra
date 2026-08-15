@@ -215,7 +215,7 @@ wheels = [
 ]
 
 [[package]]
-name = "shoal-run"
+name = "rundra"
 version = "0.1.0.dev0"
 source = { editable = "." }
 dependencies = [

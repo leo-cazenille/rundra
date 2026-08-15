@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Never, cast
 
-from shoal_run.config.errors import ConfigError
+from rundra.config.errors import ConfigError
 
 type ConfigPath = tuple[str | int, ...]
 

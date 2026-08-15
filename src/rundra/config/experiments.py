@@ -5,7 +5,7 @@ from datetime import timedelta
 from math import isfinite
 from pathlib import Path, PurePath
 
-from shoal_run.config._schema import (
+from rundra.config._schema import (
     check_fields,
     expect_boolean,
     expect_integer,
@@ -16,12 +16,12 @@ from shoal_run.config._schema import (
     is_credential_field,
     require_version_one,
 )
-from shoal_run.config._yaml import (
+from rundra.config._yaml import (
     parse_yaml_document,
     read_yaml_document,
     read_yaml_text,
 )
-from shoal_run.domain.models import (
+from rundra.domain.models import (
     Command,
     ConfigSnapshot,
     ContainerSpec,

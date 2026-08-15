@@ -6,7 +6,7 @@ from pathlib import PurePosixPath
 
 import pytest
 
-from shoal_run.domain.models import RunId
+from rundra.domain.models import RunId
 
 
 def test_run_id_new_generates_portable_unique_values() -> None:
@@ -29,7 +29,7 @@ def test_run_id_rejects_values_outside_its_public_format(value: str) -> None:
 
 def test_task_id_from_ordinal_is_deterministic_and_zero_padded() -> None:
     try:
-        from shoal_run.domain.models import TaskId
+        from rundra.domain.models import TaskId
     except ImportError:
         pytest.fail("TaskId is not implemented")
 
@@ -40,7 +40,7 @@ def test_task_id_from_ordinal_is_deterministic_and_zero_padded() -> None:
 
 @pytest.mark.parametrize("ordinal", [True, 1.5, "1"])
 def test_task_id_rejects_non_integer_ordinals(ordinal: object) -> None:
-    from shoal_run.domain.models import TaskId
+    from rundra.domain.models import TaskId
 
     with pytest.raises(TypeError, match="ordinal"):
         TaskId.from_ordinal(ordinal)
@@ -48,7 +48,7 @@ def test_task_id_rejects_non_integer_ordinals(ordinal: object) -> None:
 
 def test_command_copies_argv_and_environment_into_immutable_values() -> None:
     try:
-        from shoal_run.domain.models import Command
+        from rundra.domain.models import Command
     except ImportError:
         pytest.fail("Command is not implemented")
 
@@ -72,7 +72,7 @@ def test_command_copies_argv_and_environment_into_immutable_values() -> None:
 
 @pytest.mark.parametrize("argv", [(), ("python", "")])
 def test_command_rejects_missing_or_empty_arguments(argv: tuple[str, ...]) -> None:
-    from shoal_run.domain.models import Command
+    from rundra.domain.models import Command
 
     with pytest.raises(ValueError, match="argv"):
         Command(argv=argv)
@@ -80,7 +80,7 @@ def test_command_rejects_missing_or_empty_arguments(argv: tuple[str, ...]) -> No
 
 @pytest.mark.parametrize("argv", ["python", (1,)])
 def test_command_rejects_non_string_argument_vectors(argv: object) -> None:
-    from shoal_run.domain.models import Command
+    from rundra.domain.models import Command
 
     with pytest.raises(TypeError, match="argv"):
         Command(argv=argv)
@@ -91,14 +91,14 @@ def test_command_rejects_non_string_argument_vectors(argv: object) -> None:
     [[("SEED", "17")], {1: "17"}, {"SEED": 17}],
 )
 def test_command_rejects_invalid_environment_values(environment: object) -> None:
-    from shoal_run.domain.models import Command
+    from rundra.domain.models import Command
 
     with pytest.raises(TypeError, match="environment"):
         Command(argv=("python",), environment=environment)
 
 
 def test_command_rejects_invalid_working_directory() -> None:
-    from shoal_run.domain.models import Command
+    from rundra.domain.models import Command
 
     with pytest.raises(TypeError, match="working_directory"):
         Command(argv=("python",), working_directory="/work")
@@ -106,7 +106,7 @@ def test_command_rejects_invalid_working_directory() -> None:
 
 def test_resource_request_preserves_portable_and_namespaced_native_values() -> None:
     try:
-        from shoal_run.domain.models import ResourceRequest
+        from rundra.domain.models import ResourceRequest
     except ImportError:
         pytest.fail("ResourceRequest is not implemented")
 
@@ -145,7 +145,7 @@ def test_resource_request_rejects_non_positive_portable_values(
     field: str,
     value: object,
 ) -> None:
-    from shoal_run.domain.models import ResourceRequest
+    from rundra.domain.models import ResourceRequest
 
     with pytest.raises(ValueError, match=field):
         ResourceRequest(**{field: value})
@@ -166,7 +166,7 @@ def test_resource_request_rejects_wrong_portable_value_types(
     field: str,
     value: object,
 ) -> None:
-    from shoal_run.domain.models import ResourceRequest
+    from rundra.domain.models import ResourceRequest
 
     with pytest.raises(TypeError, match=field):
         ResourceRequest(**{field: value})
@@ -183,7 +183,7 @@ def test_resource_request_rejects_wrong_portable_value_types(
     ],
 )
 def test_resource_request_rejects_invalid_native_options(native: object) -> None:
-    from shoal_run.domain.models import ResourceRequest
+    from rundra.domain.models import ResourceRequest
 
     with pytest.raises(TypeError, match="native"):
         ResourceRequest(native=native)
@@ -192,7 +192,7 @@ def test_resource_request_rejects_invalid_native_options(native: object) -> None
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
 def test_resource_request_rejects_nonfinite_native_numbers(value: float) -> None:
     """Keeps portable resource values representable in strict JSON."""
-    from shoal_run.domain.models import ResourceRequest
+    from rundra.domain.models import ResourceRequest
 
     with pytest.raises(ValueError, match="finite"):
         ResourceRequest(native={"slurm": {"priority": value}})
@@ -200,7 +200,7 @@ def test_resource_request_rejects_nonfinite_native_numbers(value: float) -> None
 
 def test_artifact_represents_only_raw_execution_categories() -> None:
     try:
-        from shoal_run.domain.models import Artifact, ArtifactKind
+        from rundra.domain.models import Artifact, ArtifactKind
     except ImportError:
         pytest.fail("Artifact domain values are not implemented")
 
@@ -226,7 +226,7 @@ def test_artifact_represents_only_raw_execution_categories() -> None:
     ],
 )
 def test_artifact_rejects_wrong_value_types(field: str, value: object) -> None:
-    from shoal_run.domain.models import Artifact, ArtifactKind
+    from rundra.domain.models import Artifact, ArtifactKind
 
     values = {"kind": ArtifactKind.RAW_RESULT, "path": PurePosixPath("result")}
     values[field] = value
@@ -236,7 +236,7 @@ def test_artifact_rejects_wrong_value_types(field: str, value: object) -> None:
 
 def test_target_keeps_backend_selection_and_site_options_outside_experiment() -> None:
     try:
-        from shoal_run.domain.models import BackendConfig, Target
+        from rundra.domain.models import BackendConfig, Target
     except ImportError:
         pytest.fail("Target domain values are not implemented")
 
@@ -247,7 +247,7 @@ def test_target_keeps_backend_selection_and_site_options_outside_experiment() ->
         scheduler=BackendConfig(kind="slurm"),
         staging=BackendConfig(kind="rsync"),
         container=BackendConfig(kind="apptainer"),
-        workspace=PurePosixPath("/shoalhome/user/.shoal-run"),
+        workspace=PurePosixPath("/shoalhome/user/.rundra"),
     )
     ssh_options["host"] = "unexpected"
 
@@ -259,7 +259,7 @@ def test_target_keeps_backend_selection_and_site_options_outside_experiment() ->
 
 
 def test_backend_config_rejects_blank_kind() -> None:
-    from shoal_run.domain.models import BackendConfig
+    from rundra.domain.models import BackendConfig
 
     with pytest.raises(ValueError, match="kind"):
         BackendConfig(kind=" ")
@@ -270,7 +270,7 @@ def test_backend_config_rejects_blank_kind() -> None:
     [[("host", "cluster")], {1: "cluster"}, {"host": object()}],
 )
 def test_backend_config_rejects_invalid_options(options: object) -> None:
-    from shoal_run.domain.models import BackendConfig
+    from rundra.domain.models import BackendConfig
 
     with pytest.raises(TypeError, match="options"):
         BackendConfig(kind="ssh", options=options)
@@ -278,7 +278,7 @@ def test_backend_config_rejects_invalid_options(options: object) -> None:
 
 def test_experiment_spec_contains_only_portable_scientific_execution_values() -> None:
     try:
-        from shoal_run.domain.models import (
+        from rundra.domain.models import (
             Command,
             ContainerSpec,
             ExperimentSpec,
@@ -328,7 +328,7 @@ def test_experiment_spec_rejects_invalid_identity(
     name: str,
     message: str,
 ) -> None:
-    from shoal_run.domain.models import Command, ExperimentSpec, ResourceRequest
+    from rundra.domain.models import Command, ExperimentSpec, ResourceRequest
 
     with pytest.raises(ValueError, match=message):
         ExperimentSpec(
@@ -354,7 +354,7 @@ def test_experiment_spec_rejects_invalid_identity(
     ],
 )
 def test_experiment_spec_rejects_wrong_value_types(field: str, value: object) -> None:
-    from shoal_run.domain.models import Command, ExperimentSpec, ResourceRequest
+    from rundra.domain.models import Command, ExperimentSpec, ResourceRequest
 
     values = {
         "version": 1,
@@ -369,7 +369,7 @@ def test_experiment_spec_rejects_wrong_value_types(field: str, value: object) ->
 
 @pytest.mark.parametrize("field, value", [("image", []), ("gpu", 1)])
 def test_container_spec_rejects_wrong_value_types(field: str, value: object) -> None:
-    from shoal_run.domain.models import ContainerSpec
+    from rundra.domain.models import ContainerSpec
 
     values = {"image": PurePosixPath("image.sif"), "gpu": False}
     values[field] = value
@@ -379,7 +379,7 @@ def test_container_spec_rejects_wrong_value_types(field: str, value: object) -> 
 
 def test_run_groups_logical_tasks_with_explicit_seeds_and_stable_ids() -> None:
     try:
-        from shoal_run.domain.models import (
+        from rundra.domain.models import (
             BackendConfig,
             ConfigSnapshot,
             ResourceRequest,
@@ -389,7 +389,7 @@ def test_run_groups_logical_tasks_with_explicit_seeds_and_stable_ids() -> None:
             Task,
             TaskId,
         )
-        from shoal_run.domain.states import ExecutionState
+        from rundra.domain.states import ExecutionState
     except ImportError:
         pytest.fail("Run and Task domain values are not implemented")
 
@@ -412,7 +412,7 @@ def test_run_groups_logical_tasks_with_explicit_seeds_and_stable_ids() -> None:
         scheduler=BackendConfig(kind="local"),
         staging=BackendConfig(kind="local"),
         container=BackendConfig(kind="apptainer"),
-        workspace=PurePosixPath("/tmp/shoal-run"),
+        workspace=PurePosixPath("/tmp/rundra"),
     )
     run = Run(
         id=run_id,
@@ -433,8 +433,8 @@ def test_run_groups_logical_tasks_with_explicit_seeds_and_stable_ids() -> None:
 
 
 def test_run_tracks_execution_and_retrieval_states_independently() -> None:
-    from shoal_run.domain.models import Run, RunId
-    from shoal_run.domain.states import ExecutionState, RetrievalState
+    from rundra.domain.models import Run, RunId
+    from rundra.domain.states import ExecutionState, RetrievalState
 
     run_id = RunId.new()
     run = Run(
@@ -453,12 +453,12 @@ def test_run_tracks_execution_and_retrieval_states_independently() -> None:
 
 @pytest.mark.parametrize("model", ["task", "run"])
 def test_run_and_task_reject_non_enum_execution_states(model: str) -> None:
-    from shoal_run.domain.models import Run, RunId
+    from rundra.domain.models import Run, RunId
 
     run_id = RunId.new()
     task = _task_for_run_tests(run_id)
     if model == "task":
-        from shoal_run.domain.models import Task
+        from rundra.domain.models import Task
 
         with pytest.raises(TypeError, match="state"):
             Task(
@@ -484,7 +484,7 @@ def test_run_and_task_reject_non_enum_execution_states(model: str) -> None:
 
 @pytest.mark.parametrize("seed", [None, 1.5, True, "17"])
 def test_task_requires_an_explicit_integer_seed(seed: object) -> None:
-    from shoal_run.domain.models import (
+    from rundra.domain.models import (
         ConfigSnapshot,
         ResourceRequest,
         RunId,
@@ -517,7 +517,7 @@ def test_task_requires_an_explicit_integer_seed(seed: object) -> None:
     ],
 )
 def test_task_rejects_wrong_nested_value_types(field: str, value: object) -> None:
-    from shoal_run.domain.models import (
+    from rundra.domain.models import (
         ConfigSnapshot,
         ResourceRequest,
         RunId,
@@ -540,7 +540,7 @@ def test_task_rejects_wrong_nested_value_types(field: str, value: object) -> Non
 
 @pytest.mark.parametrize("field, value", [("source", []), ("content", [])])
 def test_config_snapshot_rejects_wrong_value_types(field: str, value: object) -> None:
-    from shoal_run.domain.models import ConfigSnapshot
+    from rundra.domain.models import ConfigSnapshot
 
     values = {"source": PurePosixPath("config.yaml"), "content": "value: 1\n"}
     values[field] = value
@@ -549,7 +549,7 @@ def test_config_snapshot_rejects_wrong_value_types(field: str, value: object) ->
 
 
 def _target_for_run_tests():
-    from shoal_run.domain.models import BackendConfig, Target
+    from rundra.domain.models import BackendConfig, Target
 
     local = BackendConfig(kind="local")
     return Target(
@@ -558,7 +558,7 @@ def _target_for_run_tests():
         scheduler=local,
         staging=local,
         container=BackendConfig(kind="apptainer"),
-        workspace=PurePosixPath("/tmp/shoal-run"),
+        workspace=PurePosixPath("/tmp/rundra"),
     )
 
 
@@ -574,7 +574,7 @@ def _target_for_run_tests():
     ],
 )
 def test_target_rejects_wrong_value_types(field: str, value: object) -> None:
-    from shoal_run.domain.models import BackendConfig, Target
+    from rundra.domain.models import BackendConfig, Target
 
     local = BackendConfig(kind="local")
     values = {
@@ -591,7 +591,7 @@ def test_target_rejects_wrong_value_types(field: str, value: object) -> None:
 
 
 def _task_for_run_tests(run_id, ordinal: int = 0):
-    from shoal_run.domain.models import (
+    from rundra.domain.models import (
         ConfigSnapshot,
         ResourceRequest,
         Task,
@@ -609,7 +609,7 @@ def _task_for_run_tests(run_id, ordinal: int = 0):
 
 
 def test_run_requires_at_least_one_task() -> None:
-    from shoal_run.domain.models import Run, RunId
+    from rundra.domain.models import Run, RunId
 
     with pytest.raises(ValueError, match="at least one Task"):
         Run(
@@ -633,7 +633,7 @@ def test_run_requires_at_least_one_task() -> None:
     ],
 )
 def test_run_rejects_wrong_value_types(field: str, value: object) -> None:
-    from shoal_run.domain.models import Run, RunId
+    from rundra.domain.models import Run, RunId
 
     run_id = RunId.new()
     values = {
@@ -650,7 +650,7 @@ def test_run_rejects_wrong_value_types(field: str, value: object) -> None:
 
 @pytest.mark.parametrize("id_type", ["run", "task"])
 def test_identifiers_reject_non_string_values(id_type: str) -> None:
-    from shoal_run.domain.models import RunId, TaskId
+    from rundra.domain.models import RunId, TaskId
 
     cls = RunId if id_type == "run" else TaskId
     with pytest.raises(TypeError, match="value"):
@@ -658,7 +658,7 @@ def test_identifiers_reject_non_string_values(id_type: str) -> None:
 
 
 def test_run_rejects_task_from_another_run() -> None:
-    from shoal_run.domain.models import Run, RunId
+    from rundra.domain.models import Run, RunId
 
     with pytest.raises(ValueError, match="same Run ID"):
         Run(
@@ -671,7 +671,7 @@ def test_run_rejects_task_from_another_run() -> None:
 
 
 def test_run_rejects_duplicate_task_ids() -> None:
-    from shoal_run.domain.models import Run, RunId
+    from rundra.domain.models import Run, RunId
 
     run_id = RunId.new()
     with pytest.raises(ValueError, match="unique Task IDs"):
@@ -690,7 +690,7 @@ def test_run_rejects_duplicate_task_ids() -> None:
 def test_run_rejects_task_from_another_experiment() -> None:
     from dataclasses import replace
 
-    from shoal_run.domain.models import Run, RunId
+    from rundra.domain.models import Run, RunId
 
     run_id = RunId.new()
     task = replace(
@@ -708,7 +708,7 @@ def test_run_rejects_task_from_another_experiment() -> None:
 
 
 def test_run_requires_timezone_aware_creation_time() -> None:
-    from shoal_run.domain.models import Run, RunId
+    from rundra.domain.models import Run, RunId
 
     run_id = RunId.new()
     with pytest.raises(ValueError, match="timezone-aware"):

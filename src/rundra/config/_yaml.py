@@ -5,7 +5,7 @@ from typing import Any
 
 import yaml
 
-from shoal_run.config.errors import ConfigError
+from rundra.config.errors import ConfigError
 
 _YAML_MERGE_TAG = "tag:yaml.org,2002:merge"
 

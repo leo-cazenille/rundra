@@ -6,19 +6,19 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from shoal_run.cli.operations import (
+from rundra.cli.operations import (
     plan_operation,
     targets_operation,
     validate_operation,
 )
-from shoal_run.cli.render import render_human, render_json
-from shoal_run.results import OperationResult
+from rundra.cli.render import render_human, render_json
+from rundra.results import OperationResult
 
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the top-level command-line parser."""
     parser = argparse.ArgumentParser(
-        prog="shoal-run",
+        prog="rundr",
         description="Portable experiment execution for scientific computing.",
     )
     subparsers = parser.add_subparsers(dest="command")
@@ -48,11 +48,11 @@ def _add_json_option(parser: argparse.ArgumentParser) -> None:
 
 
 def _default_targets_file() -> Path:
-    return Path("~/.config/shoal-run/targets.yaml").expanduser()
+    return Path("~/.config/rundra/targets.yaml").expanduser()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the shoal-run command-line interface."""
+    """Run the rundr command-line interface."""
     parser = build_parser()
     arguments = parser.parse_args(argv)
     if arguments.command is None:

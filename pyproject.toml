@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "shoal-run"
+name = "rundra"
 version = "0.1.0.dev0"
 description = "Portable experiment execution for scientific computing"
 readme = "README.md"
@@ -13,10 +13,10 @@ dependencies = [
 ]
 
 [project.scripts]
-shoal-run = "shoal_run.cli.main:main"
+rundr = "rundra.cli.main:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/shoal_run"]
+packages = ["src/rundra"]
 
 [dependency-groups]
 dev = [

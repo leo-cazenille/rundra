@@ -1,0 +1,102 @@
+{
+  "allocated_nodes": [],
+  "artifacts": [],
+  "completed_at": null,
+  "container_digest": null,
+  "experiment": {
+    "command": {
+      "argv": [
+        "python",
+        "main.py",
+        "--config",
+        "{config}",
+        "--seed",
+        "{seed}"
+      ],
+      "environment": {},
+      "working_directory": null
+    },
+    "container": {
+      "gpu": false,
+      "image": "containers/project.sif"
+    },
+    "name": "minimal",
+    "outputs": [
+      "results/**"
+    ],
+    "resources": {
+      "cpus_per_task": 1,
+      "gpus_per_task": 0,
+      "memory_bytes": 1073741824,
+      "native": {},
+      "nodes": 1,
+      "tasks": 1,
+      "walltime_microseconds": 300000000
+    },
+    "sync_excludes": [],
+    "version": 1
+  },
+  "experiment_source": "examples/minimal/experiment.yaml",
+  "format_version": 1,
+  "framework_version": "0.1.0.dev0",
+  "git_branch": null,
+  "git_commit": null,
+  "git_diff": null,
+  "git_dirty": null,
+  "initiator": null,
+  "native_state": null,
+  "run": {
+    "created_at": "2026-08-15T08:00:00+00:00",
+    "experiment_name": "minimal",
+    "id": "run_0123456789abcdef0123456789abcdef",
+    "retrieval_state": "NOT_REQUESTED",
+    "state": "CREATED",
+    "target": {
+      "container": {
+        "kind": "apptainer",
+        "options": {}
+      },
+      "name": "local",
+      "scheduler": {
+        "kind": "local",
+        "options": {}
+      },
+      "staging": {
+        "kind": "local",
+        "options": {}
+      },
+      "transport": {
+        "kind": "local",
+        "options": {}
+      },
+      "workspace": ".rundra"
+    },
+    "tasks": [
+      {
+        "config": {
+          "content": "population:\n  size: 100\n",
+          "source": "examples/minimal/config.yaml"
+        },
+        "experiment_name": "minimal",
+        "id": "task_000000",
+        "resources": {
+          "cpus_per_task": 1,
+          "gpus_per_task": 0,
+          "memory_bytes": 1073741824,
+          "native": {},
+          "nodes": 1,
+          "tasks": 1,
+          "walltime_microseconds": 300000000
+        },
+        "run_id": "run_0123456789abcdef0123456789abcdef",
+        "seed": 17,
+        "state": "CREATED"
+      }
+    ]
+  },
+  "scheduler_job_ids": [],
+  "source_root": "/work/minimal",
+  "started_at": null,
+  "submitted_at": null,
+  "task_exit_codes": {}
+}
