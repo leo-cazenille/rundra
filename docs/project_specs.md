@@ -2021,16 +2021,31 @@ actually runs commands.
 
 ## 36. SSH transport
 
-The SSH transport should rely on normal user SSH configuration.
+The OpenSSH transport relies on normal user SSH configuration. Its constructor
+accepts one host or host alias and, optionally, an alternate `ssh` executable.
+Capability checking confirms that executable is discoverable without making a
+network connection. Command execution invokes OpenSSH with a local subprocess
+argument array and `shell=False`, disables pseudo-terminal allocation, and
+returns the same typed `CommandResult` used by local transport.
 
-It should support:
+The adapter deliberately supplies no authentication, jump-host, host-key, or
+user options of its own. OpenSSH therefore continues to use:
 
 - host aliases;
 - SSH agent authentication;
 - standard `~/.ssh/config`;
 - existing jump hosts when supported transparently by SSH.
 
-Do not build a parallel SSH configuration system unless required.
+Rundra does not disable host-key verification or build a parallel SSH
+configuration system. Authentication material is neither accepted by the
+adapter nor included in its start-failure diagnostics. Nonzero remote exits are
+returned as command results; inability to discover or start the local OpenSSH
+client raises a transport-specific error.
+
+OpenSSH necessarily passes its remote command through the login shell. Rundra
+quotes each command argument, environment assignment, and working directory at
+that single boundary. The reusable quoting boundary and its exhaustive
+cross-adapter hardening remain M2.2 work.
 
 The transport should not require inbound connectivity from the cluster to the client.
 

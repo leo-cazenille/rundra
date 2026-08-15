@@ -16,6 +16,13 @@ from rundra.adapters.local import (
     WorkspaceCollisionError,
 )
 from rundra.adapters.native import NativeRuntime, NativeRuntimeError
+from rundra.adapters.ssh import (
+    SSHCommandError,
+    SSHExecutionError,
+    SSHTransport,
+    SSHTransportError,
+    SSHUnavailableError,
+)
 
 __all__ = [
     "ApptainerConfigurationError",
@@ -30,5 +37,10 @@ __all__ = [
     "LocalTransportError",
     "NativeRuntime",
     "NativeRuntimeError",
+    "SSHCommandError",
+    "SSHExecutionError",
+    "SSHTransport",
+    "SSHTransportError",
+    "SSHUnavailableError",
     "WorkspaceCollisionError",
 ]

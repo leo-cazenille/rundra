@@ -7,6 +7,7 @@ from pathlib import PurePosixPath
 
 import pytest
 
+from rundra.adapters import SSHTransport as PublicSSHTransport
 from rundra.adapters.ssh import (
     SSHCommandError,
     SSHExecutionError,
@@ -33,6 +34,10 @@ def test_ssh_transport_check_uses_the_configured_openssh_executable(
     assert capability.name == "ssh"
     assert capability.version is None
     assert calls == ["openssh"]
+
+
+def test_ssh_transport_is_exported_from_the_adapter_package() -> None:
+    assert PublicSSHTransport is SSHTransport
 
 
 def test_ssh_transport_reports_an_unavailable_client(

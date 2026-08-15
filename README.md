@@ -11,12 +11,18 @@ The project, GitHub repository, Python package, and PyPI distribution are named
 
 ## Development status
 
-M1 and M1E are complete. Rundra has portable domain and configuration models,
+M1 and M1E are complete, and M2 remote transport work is in progress. Rundra
+has portable domain and configuration models,
 deterministic planning, isolated local staging, durable versioned Run records,
 shell-free local execution, Apptainer command construction, Git provenance,
 artifact retrieval, and common human/JSON lifecycle interfaces. The checked
 minimal experiment runs through the same planner, ports, orchestration service,
 and persistence path intended for later remote execution.
+
+M2.1 adds a typed OpenSSH transport adapter that honors normal user SSH
+configuration, agent authentication, jump-host configuration, and host-key
+verification. Remote staging and CLI execution are not yet implemented, so an
+SSH target is not yet runnable through `rundr run`.
 
 M1E adds strict project launch profiles, optional user defaults, deterministic
 resolution precedence, concise `run`/`plan` commands, and generated seeds that
