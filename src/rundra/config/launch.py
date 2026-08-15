@@ -21,6 +21,27 @@ _PROJECT_FIELDS = frozenset({"version", "default_profile", "defaults", "profiles
 _LAUNCH_VALUE_FIELDS = frozenset(
     {"config", "seed", "target", "source_root", "destination"}
 )
+_USER_FIELDS = frozenset({"version", "defaults"})
+_USER_VALUE_FIELDS = frozenset(
+    {
+        "config",
+        "seed",
+        "target",
+        "source_root",
+        "destination",
+        "targets_file",
+        "data_dir",
+    }
+)
+_VALUE_NAMES = (
+    "config",
+    "seed",
+    "target",
+    "source_root",
+    "destination",
+    "targets_file",
+    "data_dir",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,9 +53,17 @@ class LaunchValues:
     target: str | None = None
     source_root: Path | None = None
     destination: Path | None = None
+    targets_file: Path | None = None
+    data_dir: Path | None = None
 
     def __post_init__(self) -> None:
-        for name in ("config", "source_root", "destination"):
+        for name in (
+            "config",
+            "source_root",
+            "destination",
+            "targets_file",
+            "data_dir",
+        ):
             value = getattr(self, name)
             if value is not None and not isinstance(value, Path):
                 raise TypeError(f"LaunchValues {name} must be a Path or None")
@@ -85,6 +114,58 @@ class ProjectLaunchConfig:
     def project_root(self) -> Path:
         """Return the directory that owns relative project launch paths."""
         return self.source.parent
+
+
+@dataclass(frozen=True, slots=True)
+class UserLaunchConfig:
+    """Strict version-1 per-user launch defaults, separate from targets."""
+
+    version: int
+    source: Path
+    defaults: LaunchValues
+
+    def __post_init__(self) -> None:
+        if type(self.version) is not int or self.version != 1:
+            raise ValueError("UserLaunchConfig version must be 1")
+        if not isinstance(self.source, Path) or not self.source.is_absolute():
+            raise ValueError("UserLaunchConfig source must be an absolute Path")
+        if type(self.defaults) is not LaunchValues:
+            raise TypeError("UserLaunchConfig defaults must be LaunchValues")
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedLaunch:
+    """Resolved launch values plus the layer selected for every present field."""
+
+    values: LaunchValues
+    sources: Mapping[str, str]
+    profile: str | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.values) is not LaunchValues:
+            raise TypeError("ResolvedLaunch values must be LaunchValues")
+        if not isinstance(self.sources, Mapping):
+            raise TypeError("ResolvedLaunch sources must be a mapping")
+        sources = dict(self.sources)
+        if any(
+            name not in _VALUE_NAMES or type(source) is not str or not source
+            for name, source in sources.items()
+        ):
+            raise ValueError("ResolvedLaunch sources are invalid")
+        if self.profile is not None and (
+            type(self.profile) is not str or not self.profile
+        ):
+            raise ValueError("ResolvedLaunch profile must be nonblank or None")
+        object.__setattr__(self, "sources", MappingProxyType(sources))
+
+
+class LaunchResolutionError(Exception):
+    """A stable failure while selecting layered launch inputs."""
+
+    def __init__(self, code: str, message: str) -> None:
+        self.code = code
+        self.message = message
+        super().__init__(message)
 
 
 def load_project_launch(source: Path) -> ProjectLaunchConfig:
@@ -168,16 +249,115 @@ def discover_project_launch(
     return load_project_launch(candidate)
 
 
+def load_user_launch(source: Path) -> UserLaunchConfig:
+    """Load strict per-user defaults without reading target definitions."""
+    normalized_source = source.expanduser().resolve()
+    document = expect_mapping(
+        read_yaml_document(normalized_source), source=normalized_source, path=()
+    )
+    _reject_credential_fields(document, normalized_source, ())
+    check_fields(
+        document,
+        allowed=_USER_FIELDS,
+        required=frozenset({"version", "defaults"}),
+        source=normalized_source,
+        path=(),
+    )
+    version = require_version_one(document["version"], source=normalized_source)
+    defaults = _launch_values(
+        document["defaults"],
+        normalized_source,
+        ("defaults",),
+        allowed=_USER_VALUE_FIELDS,
+    )
+    if defaults == LaunchValues():
+        fail(
+            source=normalized_source,
+            path=("defaults",),
+            code="EMPTY_LAUNCH_CONFIG",
+            message="User launch defaults must not be empty",
+        )
+    return UserLaunchConfig(version, normalized_source, defaults)
+
+
+def discover_user_launch(source: Path | None = None) -> UserLaunchConfig | None:
+    """Load optional user defaults from the standard or caller-selected path."""
+    candidate = (
+        Path("~/.config/rundra/config.yaml").expanduser()
+        if source is None
+        else source.expanduser()
+    ).resolve()
+    if not candidate.exists():
+        return None
+    return load_user_launch(candidate)
+
+
+def resolve_launch(
+    *,
+    cli: LaunchValues | None = None,
+    project: ProjectLaunchConfig | None = None,
+    user: UserLaunchConfig | None = None,
+    builtins: LaunchValues | None = None,
+    profile: str | None = None,
+) -> ResolvedLaunch:
+    """Resolve launch layers without I/O, prompting, planning, or entropy."""
+    cli = cli or LaunchValues()
+    builtins = builtins or LaunchValues()
+    for name, value, expected in (
+        ("cli", cli, LaunchValues),
+        ("project", project, ProjectLaunchConfig),
+        ("user", user, UserLaunchConfig),
+        ("builtins", builtins, LaunchValues),
+    ):
+        if value is not None and type(value) is not expected:
+            raise TypeError(f"resolve_launch {name} has an invalid type")
+    if profile is not None and (type(profile) is not str or not profile.strip()):
+        raise LaunchResolutionError("INVALID_PROFILE", "Profile must be nonblank")
+    selected_profile = profile
+    if selected_profile is None and project is not None:
+        selected_profile = project.default_profile
+    if selected_profile is not None:
+        if project is None or selected_profile not in project.profiles:
+            raise LaunchResolutionError(
+                "PROFILE_NOT_FOUND",
+                f"Launch profile '{selected_profile}' is not defined",
+            )
+
+    values = LaunchValues()
+    sources: dict[str, str] = {}
+    layers: list[tuple[str, LaunchValues]] = [("built_in", builtins)]
+    if user is not None:
+        layers.append(("user", user.defaults))
+    if project is not None:
+        layers.append(("project", project.defaults))
+        if selected_profile is not None:
+            layers.append(
+                (
+                    f"project_profile:{selected_profile}",
+                    project.profiles[selected_profile],
+                )
+            )
+    layers.append(("cli", cli))
+    for source_name, layer in layers:
+        values = _overlay(values, layer)
+        for field in _VALUE_NAMES:
+            if getattr(layer, field) is not None:
+                sources[field] = source_name
+    return ResolvedLaunch(values, sources, selected_profile)
+
+
 def _launch_values(
     value: object,
     source: Path,
     path: ConfigPath,
+    *,
+    allowed: frozenset[str] = _LAUNCH_VALUE_FIELDS,
 ) -> LaunchValues:
     section = expect_mapping(value, source=source, path=path)
     _reject_credential_fields(section, source, path)
     check_fields(
         section,
-        allowed=_LAUNCH_VALUE_FIELDS,
+        allowed=allowed,
         required=frozenset(),
         source=source,
         path=path,
@@ -203,6 +383,8 @@ def _launch_values(
         ),
         source_root=_optional_path(section, "source_root", source, path),
         destination=_optional_path(section, "destination", source, path),
+        targets_file=_optional_path(section, "targets_file", source, path),
+        data_dir=_optional_path(section, "data_dir", source, path),
     )
 
 
@@ -236,3 +418,27 @@ def _reject_credential_fields(
                 code="FORBIDDEN_FIELD",
                 message="Credentials must not be stored in launch configuration",
             )
+
+
+def _overlay(base: LaunchValues, override: LaunchValues) -> LaunchValues:
+    return LaunchValues(
+        config=override.config if override.config is not None else base.config,
+        seed=override.seed if override.seed is not None else base.seed,
+        target=override.target if override.target is not None else base.target,
+        source_root=(
+            override.source_root
+            if override.source_root is not None
+            else base.source_root
+        ),
+        destination=(
+            override.destination
+            if override.destination is not None
+            else base.destination
+        ),
+        targets_file=(
+            override.targets_file
+            if override.targets_file is not None
+            else base.targets_file
+        ),
+        data_dir=override.data_dir if override.data_dir is not None else base.data_dir,
+    )
