@@ -24,10 +24,38 @@ from rundra.cli.operations import (
     status_operation,
 )
 from rundra.cli.render import result_document
-from rundra.domain.models import ArtifactKind
+from rundra.domain.mappings import ArrayTaskMapping
+from rundra.domain.models import Artifact, ArtifactKind, BackendConfig, TaskId
 from rundra.domain.states import ExecutionState, RetrievalState
 from rundra.persistence import JsonRunStore, record_from_dict
-from rundra.ports import CapabilityCheck, ContainerRequest
+from rundra.ports import (
+    CapabilityCheck,
+    ContainerRequest,
+    FetchRequest,
+    FetchResult,
+)
+
+
+class RecordingFetchStager:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.requests: list[FetchRequest] = []
+
+    def fetch(self, request: FetchRequest) -> FetchResult:
+        self.requests.append(request)
+        if self.fail:
+            raise RuntimeError("temporary retrieval failure")
+        artifacts = tuple(
+            Artifact(
+                ArtifactKind.RAW_RESULT,
+                request.destination
+                / "output"
+                / pattern.split("/", 1)[0]
+                / "result.json",
+            )
+            for pattern in request.patterns
+        )
+        return FetchResult(artifacts)
 
 
 def _stored_record(tmp_path: Path) -> tuple[JsonRunStore, str]:
@@ -71,6 +99,52 @@ def _stored_record(tmp_path: Path) -> tuple[JsonRunStore, str]:
         original, run=replace(original.run, target=target), artifacts=artifacts
     )
     store = JsonRunStore(tmp_path / "records")
+    store.create(record)
+    return store, str(record.run.id)
+
+
+def _stored_array_record(tmp_path: Path) -> tuple[JsonRunStore, str]:
+    single_store, _ = _stored_record(tmp_path / "source-record")
+    original = single_store.list()[0]
+    first = replace(
+        original.run.tasks[0],
+        state=ExecutionState.SUCCEEDED,
+    )
+    second = replace(first, id=TaskId.from_ordinal(1), seed=23)
+    tasks = (first, second)
+    target = replace(
+        original.run.target,
+        transport=BackendConfig("ssh", {"host": "cluster"}),
+        scheduler=BackendConfig("slurm"),
+        staging=BackendConfig("rsync"),
+        workspace=Path("/remote/work"),
+    )
+    record = replace(
+        original,
+        run=replace(
+            original.run,
+            target=target,
+            tasks=tasks,
+            state=ExecutionState.SUCCEEDED,
+            retrieval_state=RetrievalState.NOT_REQUESTED,
+        ),
+        scheduler_job_ids=("777",),
+        task_array_mapping=tuple(
+            ArrayTaskMapping(task.id, task.seed, index)
+            for index, task in enumerate(tasks)
+        ),
+        task_scheduler_ids={first.id: "777_0", second.id: "777_1"},
+        task_native_states={first.id: "COMPLETED", second.id: "COMPLETED"},
+        task_retrieval_states={
+            first.id: RetrievalState.NOT_REQUESTED,
+            second.id: RetrievalState.NOT_REQUESTED,
+        },
+        task_exit_codes={first.id: 0, second.id: 0},
+        artifacts=tuple(
+            artifact for artifact in original.artifacts if artifact.task_id is None
+        ),
+    )
+    store = JsonRunStore(tmp_path / "array-records")
     store.create(record)
     return store, str(record.run.id)
 
@@ -130,6 +204,109 @@ def test_fetch_is_idempotent_and_preserves_successful_retrieval_state(
         store.load(first.value.run_id).run.retrieval_state is RetrievalState.SUCCEEDED
     )
     assert result_document(second)["fetch"]["artifacts"][0]["kind"] == "raw_result"
+
+
+def test_partial_array_fetch_tracks_tasks_and_becomes_complete_incrementally(
+    tmp_path: Path,
+) -> None:
+    store, run_id = _stored_array_record(tmp_path)
+    stager = RecordingFetchStager()
+
+    first = fetch_operation(
+        run_id,
+        store,
+        tmp_path / "retrieved",
+        tasks=("0",),
+        stager=stager,
+    )
+    second = fetch_operation(
+        run_id,
+        store,
+        tmp_path / "retrieved",
+        tasks=("task_000001",),
+        stager=stager,
+    )
+    repeated = fetch_operation(
+        run_id,
+        store,
+        tmp_path / "retrieved",
+        tasks=("0",),
+        stager=stager,
+    )
+
+    assert first.ok and isinstance(first.value, FetchValue)
+    assert first.value.task_ids == (TaskId.from_ordinal(0),)
+    assert first.value.retrieval_state is RetrievalState.PENDING
+    assert second.ok and isinstance(second.value, FetchValue)
+    assert second.value.retrieval_state is RetrievalState.SUCCEEDED
+    assert repeated.ok and isinstance(repeated.value, FetchValue)
+    assert repeated.value.retrieval_state is RetrievalState.SUCCEEDED
+    assert [request.patterns for request in stager.requests] == [
+        ("task_000000/results/**",),
+        ("task_000001/results/**",),
+        ("task_000000/results/**",),
+    ]
+    record = store.list()[0]
+    assert record.task_retrieval_states == {
+        TaskId.from_ordinal(0): RetrievalState.SUCCEEDED,
+        TaskId.from_ordinal(1): RetrievalState.SUCCEEDED,
+    }
+
+
+def test_failed_partial_fetch_is_retryable_without_losing_other_task_state(
+    tmp_path: Path,
+) -> None:
+    store, run_id = _stored_array_record(tmp_path)
+    failing = RecordingFetchStager(fail=True)
+
+    failed = fetch_operation(
+        run_id,
+        store,
+        tmp_path / "retrieved",
+        tasks=("1",),
+        stager=failing,
+    )
+    retried = fetch_operation(
+        run_id,
+        store,
+        tmp_path / "retrieved",
+        tasks=("1",),
+        stager=RecordingFetchStager(),
+    )
+
+    assert failed.error is not None
+    assert failed.error.code == "RESULT_RETRIEVAL_FAILED"
+    assert retried.ok and isinstance(retried.value, FetchValue)
+    assert retried.value.retrieval_state is RetrievalState.PENDING
+    record = store.list()[0]
+    assert record.task_retrieval_states == {
+        TaskId.from_ordinal(0): RetrievalState.NOT_REQUESTED,
+        TaskId.from_ordinal(1): RetrievalState.SUCCEEDED,
+    }
+
+
+def test_partial_fetch_rejects_duplicate_or_unknown_task_selection(
+    tmp_path: Path,
+) -> None:
+    store, run_id = _stored_array_record(tmp_path)
+
+    duplicate = fetch_operation(
+        run_id,
+        store,
+        tmp_path / "retrieved",
+        tasks=("0", "task_000000"),
+        stager=RecordingFetchStager(),
+    )
+    unknown = fetch_operation(
+        run_id,
+        store,
+        tmp_path / "retrieved",
+        tasks=("7",),
+        stager=RecordingFetchStager(),
+    )
+
+    assert duplicate.error is not None and duplicate.error.code == "DUPLICATE_TASK"
+    assert unknown.error is not None and unknown.error.code == "TASK_NOT_FOUND"
 
 
 def test_lifecycle_operations_return_structured_not_found_and_task_errors(

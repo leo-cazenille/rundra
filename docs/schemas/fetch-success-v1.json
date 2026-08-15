@@ -10,7 +10,10 @@
     ],
     "destination": "retrieved",
     "retrieval_state": "SUCCEEDED",
-    "run_id": "run_0123456789abcdef0123456789abcdef"
+    "run_id": "run_0123456789abcdef0123456789abcdef",
+    "task_ids": [
+      "task_000000"
+    ]
   },
   "format_version": 1,
   "ok": true,

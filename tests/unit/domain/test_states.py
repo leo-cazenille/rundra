@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from rundra.domain.states import ExecutionState, aggregate_execution_state
+from rundra.domain.states import (
+    ExecutionState,
+    RetrievalState,
+    aggregate_execution_state,
+    aggregate_retrieval_state,
+)
 
 
 @pytest.mark.parametrize(
@@ -46,6 +51,25 @@ def test_aggregate_execution_state_rejects_empty_or_nonportable_values() -> None
         aggregate_execution_state(())
     with pytest.raises(TypeError, match="ExecutionState"):
         aggregate_execution_state(("RUNNING",))  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("states", "expected"),
+    [
+        ((RetrievalState.NOT_REQUESTED,) * 2, RetrievalState.NOT_REQUESTED),
+        ((RetrievalState.SUCCEEDED,) * 2, RetrievalState.SUCCEEDED),
+        (
+            (RetrievalState.SUCCEEDED, RetrievalState.NOT_REQUESTED),
+            RetrievalState.PENDING,
+        ),
+        ((RetrievalState.SUCCEEDED, RetrievalState.PENDING), RetrievalState.PENDING),
+        ((RetrievalState.SUCCEEDED, RetrievalState.FAILED), RetrievalState.FAILED),
+    ],
+)
+def test_aggregate_retrieval_state_preserves_partial_and_failed_outcomes(
+    states: tuple[RetrievalState, ...], expected: RetrievalState
+) -> None:
+    assert aggregate_retrieval_state(states) is expected
 
 
 def test_execution_transition_table_is_explicit_and_complete() -> None:

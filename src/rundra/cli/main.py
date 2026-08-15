@@ -100,6 +100,12 @@ def build_parser() -> argparse.ArgumentParser:
     fetch = subparsers.add_parser("fetch", help="retrieve a Run's outputs")
     fetch.add_argument("run_id")
     fetch.add_argument("--destination", required=True, type=Path)
+    fetch.add_argument(
+        "--task",
+        action="append",
+        metavar="TASK_ID_OR_INDEX",
+        help="retrieve only this Task; repeat to select multiple Tasks",
+    )
     _add_store_option(fetch)
     _add_json_option(fetch)
 
@@ -276,6 +282,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             arguments.run_id,
             JsonRunStore(arguments.data_dir),
             arguments.destination,
+            tasks=arguments.task,
         )
     elif arguments.command == "inspect":
         result = inspect_operation(arguments.run_id, JsonRunStore(arguments.data_dir))

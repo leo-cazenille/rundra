@@ -83,6 +83,24 @@ def aggregate_execution_state(states: Sequence[ExecutionState]) -> ExecutionStat
     return ExecutionState.UNKNOWN
 
 
+def aggregate_retrieval_state(states: Sequence[RetrievalState]) -> RetrievalState:
+    """Summarize per-Task retrieval without claiming partial work is complete."""
+    if not isinstance(states, Sequence) or isinstance(states, (str, bytes)):
+        raise TypeError("Aggregate retrieval states must be a sequence")
+    normalized = tuple(states)
+    if not normalized:
+        raise ValueError("Aggregate retrieval states must not be empty")
+    if any(type(state) is not RetrievalState for state in normalized):
+        raise TypeError("Aggregate retrieval states must contain RetrievalState values")
+    if all(state is RetrievalState.NOT_REQUESTED for state in normalized):
+        return RetrievalState.NOT_REQUESTED
+    if all(state is RetrievalState.SUCCEEDED for state in normalized):
+        return RetrievalState.SUCCEEDED
+    if RetrievalState.FAILED in normalized:
+        return RetrievalState.FAILED
+    return RetrievalState.PENDING
+
+
 _ALLOWED_EXECUTION_TRANSITIONS: dict[ExecutionState, frozenset[ExecutionState]] = {
     ExecutionState.CREATED: frozenset(
         {ExecutionState.STAGING, ExecutionState.FAILED, ExecutionState.CANCELLED}

@@ -89,6 +89,7 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
             "run_id": str(value.run_id),
             "destination": str(value.destination),
             "retrieval_state": value.retrieval_state.value,
+            "task_ids": [str(task_id) for task_id in value.task_ids],
             "artifacts": [_artifact_document(item) for item in value.artifacts],
         }
     elif isinstance(value, InspectValue):

@@ -139,6 +139,7 @@ _CANCELLED_STATUS = StatusValue(
                     PurePosixPath("retrieved"),
                     _RECORD.run.retrieval_state,
                     _RAW_ARTIFACTS,
+                    (_RECORD.run.tasks[0].id,),
                 ),
             ),
             "fetch-success-v1.json",

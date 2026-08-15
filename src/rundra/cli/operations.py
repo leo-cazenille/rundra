@@ -39,7 +39,11 @@ from rundra.domain.models import (
     TaskId,
 )
 from rundra.domain.records import RunRecord
-from rundra.domain.states import ExecutionState, RetrievalState
+from rundra.domain.states import (
+    ExecutionState,
+    RetrievalState,
+    aggregate_retrieval_state,
+)
 from rundra.orchestration.models import ExecutionPlan, PlanningError
 from rundra.orchestration.planner import create_plan, expand_seeds
 from rundra.orchestration.service import (
@@ -166,6 +170,7 @@ class FetchValue:
     destination: PurePath
     retrieval_state: RetrievalState
     artifacts: tuple[Artifact, ...]
+    task_ids: tuple[TaskId, ...] = ()
 
 
 type LaunchOutputValue = str | int | None
@@ -931,29 +936,35 @@ def fetch_operation(
     run_id: str,
     store: RunStore,
     destination: Path,
+    *,
+    tasks: Sequence[str] | None = None,
+    stager: Stager | None = None,
 ) -> OperationResult[FetchValue]:
     record, error = _load_record(run_id, store)
     if error is not None:
         return OperationResult.failure("fetch", error)
     assert record is not None
-    if record.run.target.staging.kind != "local" or len(record.run.tasks) != 1:
-        return OperationResult.failure(
-            "fetch",
-            OperationError(
-                "FETCH_UNSUPPORTED",
-                "M1 fetch supports only one-Task Runs with local staging",
-                {"run_id": str(record.run.id)},
-            ),
-        )
-    original_state = record.run.retrieval_state
-    pending = original_state in {
-        RetrievalState.NOT_REQUESTED,
-        RetrievalState.FAILED,
-    }
-    if pending:
+    selected = _selected_task_ids(record, tasks)
+    if isinstance(selected, OperationError):
+        return OperationResult.failure("fetch", selected)
+    retrieval_states = _task_retrieval_states(record)
+    transitioning = tuple(
+        task_id
+        for task_id in selected
+        if retrieval_states[task_id] is not RetrievalState.SUCCEEDED
+    )
+    if transitioning:
+        for task_id in transitioning:
+            retrieval_states[task_id] = RetrievalState.PENDING
         record = replace(
             record,
-            run=replace(record.run, retrieval_state=RetrievalState.PENDING),
+            run=replace(
+                record.run,
+                retrieval_state=aggregate_retrieval_state(
+                    tuple(retrieval_states.values())
+                ),
+            ),
+            task_retrieval_states=retrieval_states,
         )
         try:
             store.update(record)
@@ -961,18 +972,31 @@ def fetch_operation(
             return OperationResult.failure(
                 "fetch", OperationError("RUN_STORE_ERROR", str(error))
             )
-    workspace = _local_workspace(record)
+    workspace = _record_workspace(record)
     try:
-        fetched = LocalStager().fetch(
-            FetchRequest(workspace, record.experiment.outputs, destination)
+        active_stager = stager or _record_stager(record)
+        fetched = active_stager.fetch(
+            FetchRequest(
+                workspace,
+                _selected_fetch_patterns(record, selected),
+                destination,
+            )
         )
     except (OSError, RuntimeError, ValueError) as error:
-        if pending:
+        if transitioning:
+            for task_id in transitioning:
+                retrieval_states[task_id] = RetrievalState.FAILED
             try:
                 store.update(
                     replace(
                         record,
-                        run=replace(record.run, retrieval_state=RetrievalState.FAILED),
+                        run=replace(
+                            record.run,
+                            retrieval_state=aggregate_retrieval_state(
+                                tuple(retrieval_states.values())
+                            ),
+                        ),
+                        task_retrieval_states=retrieval_states,
                     )
                 )
             except RunStoreError:
@@ -985,14 +1009,43 @@ def fetch_operation(
                 {"run_id": str(record.run.id)},
             ),
         )
-    task_id = record.run.tasks[0].id
-    artifacts = tuple(
-        replace(artifact, task_id=task_id) for artifact in fetched.artifacts
-    )
+    try:
+        artifacts = _selected_fetch_artifacts(record, selected, fetched.artifacts)
+    except ValueError as error:
+        if transitioning:
+            for task_id in transitioning:
+                retrieval_states[task_id] = RetrievalState.FAILED
+            try:
+                store.update(
+                    replace(
+                        record,
+                        run=replace(
+                            record.run,
+                            retrieval_state=aggregate_retrieval_state(
+                                tuple(retrieval_states.values())
+                            ),
+                        ),
+                        task_retrieval_states=retrieval_states,
+                    )
+                )
+            except RunStoreError:
+                pass
+        return OperationResult.failure(
+            "fetch",
+            OperationError(
+                "RESULT_RETRIEVAL_FAILED",
+                f"Run {record.run.id} returned invalid fetched artifacts: {error}",
+                {"run_id": str(record.run.id)},
+            ),
+        )
+    for task_id in selected:
+        retrieval_states[task_id] = RetrievalState.SUCCEEDED
+    retrieval_state = aggregate_retrieval_state(tuple(retrieval_states.values()))
     merged = _merge_artifacts(record.artifacts, artifacts)
     succeeded = replace(
         record,
-        run=replace(record.run, retrieval_state=RetrievalState.SUCCEEDED),
+        run=replace(record.run, retrieval_state=retrieval_state),
+        task_retrieval_states=retrieval_states,
         artifacts=merged,
     )
     try:
@@ -1003,7 +1056,7 @@ def fetch_operation(
         )
     return OperationResult.success(
         "fetch",
-        FetchValue(record.run.id, destination, RetrievalState.SUCCEEDED, artifacts),
+        FetchValue(record.run.id, destination, retrieval_state, artifacts, selected),
     )
 
 
@@ -1065,6 +1118,88 @@ def _selected_task_id(record: RunRecord, value: str | None) -> TaskId | Operatio
     return selected
 
 
+def _selected_task_ids(
+    record: RunRecord, values: Sequence[str] | None
+) -> tuple[TaskId, ...] | OperationError:
+    if values is None:
+        return tuple(task.id for task in record.run.tasks)
+    if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+        return OperationError("INVALID_TASK_ID", "Task selectors must be a sequence")
+    if not values:
+        return OperationError("TASK_REQUIRED", "Select at least one Task to fetch")
+    selected: list[TaskId] = []
+    for value in values:
+        task_id = _selected_task_id(record, value)
+        if isinstance(task_id, OperationError):
+            return task_id
+        if task_id in selected:
+            return OperationError(
+                "DUPLICATE_TASK",
+                f"Task {task_id} was selected more than once",
+                {"run_id": str(record.run.id), "task_id": str(task_id)},
+            )
+        selected.append(task_id)
+    return tuple(selected)
+
+
+def _task_retrieval_states(record: RunRecord) -> dict[TaskId, RetrievalState]:
+    if record.task_retrieval_states:
+        return dict(record.task_retrieval_states)
+    return {task.id: record.run.retrieval_state for task in record.run.tasks}
+
+
+def _selected_fetch_patterns(
+    record: RunRecord, task_ids: tuple[TaskId, ...]
+) -> tuple[str, ...]:
+    if len(record.run.tasks) == 1:
+        return record.experiment.outputs
+    return tuple(
+        f"{task_id}/{pattern}"
+        for task_id in task_ids
+        for pattern in record.experiment.outputs
+    )
+
+
+def _selected_fetch_artifacts(
+    record: RunRecord,
+    task_ids: tuple[TaskId, ...],
+    artifacts: tuple[Artifact, ...],
+) -> tuple[Artifact, ...]:
+    allowed = {
+        ArtifactKind.RAW_RESULT,
+        ArtifactKind.STDOUT,
+        ArtifactKind.STDERR,
+        ArtifactKind.SCHEDULER_METADATA,
+    }
+    selected = set(task_ids)
+    result: list[Artifact] = []
+    for artifact in artifacts:
+        if artifact.kind not in allowed:
+            raise ValueError(f"unsupported artifact kind {artifact.kind.value}")
+        task_id = artifact.task_id
+        if task_id is None and artifact.kind is ArtifactKind.RAW_RESULT:
+            if len(record.run.tasks) == 1:
+                task_id = record.run.tasks[0].id
+            else:
+                task_id = next(
+                    (
+                        candidate
+                        for candidate in task_ids
+                        if str(candidate) in artifact.path.parts
+                    ),
+                    None,
+                )
+                if task_id is None:
+                    raise ValueError(
+                        f"raw artifact path {artifact.path} does not identify a Task"
+                    )
+            artifact = replace(artifact, task_id=task_id)
+        if task_id is not None and task_id not in selected:
+            continue
+        result.append(artifact)
+    return tuple(result)
+
+
 def _artifact_for(
     record: RunRecord,
     kind: ArtifactKind,
@@ -1080,12 +1215,15 @@ def _artifact_for(
     )
 
 
-def _local_workspace(record: RunRecord) -> StagedWorkspace:
-    root = (
-        Path(str(record.run.target.workspace)).expanduser().resolve()
-        / "runs"
-        / str(record.run.id)
-    )
+def _record_workspace(record: RunRecord) -> StagedWorkspace:
+    if record.run.target.staging.kind == "local":
+        root: PurePath = (
+            Path(str(record.run.target.workspace)).expanduser().resolve()
+            / "runs"
+            / str(record.run.id)
+        )
+    else:
+        root = record.run.target.workspace / "runs" / str(record.run.id)
     return StagedWorkspace(
         root=root,
         source=root / "source",
@@ -1095,6 +1233,20 @@ def _local_workspace(record: RunRecord) -> StagedWorkspace:
         outputs=root / "output",
         logs=root / "logs",
         metadata=root / "metadata",
+    )
+
+
+def _record_stager(record: RunRecord) -> Stager:
+    if record.run.target.staging.kind == "local":
+        return LocalStager()
+    if record.run.target.staging.kind == "rsync":
+        transport = _record_ssh_transport(record)
+        host = record.run.target.transport.options.get("host")
+        if type(host) is not str:
+            raise ValueError("Persisted rsync target host is unavailable")
+        return RsyncStager(transport, host=host)
+    raise ValueError(
+        f"Persisted staging backend {record.run.target.staging.kind!r} cannot fetch"
     )
 
 
