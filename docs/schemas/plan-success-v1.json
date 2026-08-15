@@ -7,7 +7,7 @@
     "staging_backend": "local",
     "strategy": "one_unit_per_task",
     "target": {
-      "container": {"options": {}, "type": "apptainer"},
+      "container": {"options": {}, "type": "native"},
       "name": "local",
       "scheduler": {"options": {}, "type": "local"},
       "staging": {"options": {}, "type": "local"},

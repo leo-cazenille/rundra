@@ -11,23 +11,17 @@ The project, GitHub repository, Python package, and PyPI distribution are named
 
 ## Development status
 
-The repository contains the M0 foundation: portable domain values, strict
-version-1 YAML loaders, pure deterministic planning, narrow backend contracts,
-and fake-driven contract tests. M1.1 adds strict versioned RunRecord
-serialization and atomic, collision-safe local JSON persistence. M1.2 adds
-isolated local source/config staging, sealed input snapshots, explicit mutable
-runtime locations, and idempotent output retrieval. M1.3 adds pure, shell-free
-Apptainer/Singularity-compatible command construction with explicit bind,
-environment, working-directory, and GPU handling. The CLI can validate
-configuration, inspect a non-submitting plan, and list configured targets.
-M1.4 adds the port-driven single-task local lifecycle: shell-free process
-execution, synchronous local scheduling, durable state reconciliation, separate
-stdout/stderr artifacts, and partial-output retrieval after task failure. M1.5
-exposes that service through synchronous `run` and persisted `status`, `list`,
-`logs`, `fetch`, and `inspect` commands with version-1 JSON contracts.
-Asynchronous `submit` reports an explicit capability error until durable async
-semantics exist. M1.6 captures available Git commit, branch, dirty state, and a
-bounded safe dirty patch before staging, while remaining usable outside Git.
+M1 is complete. Rundra has portable domain and configuration models,
+deterministic planning, isolated local staging, durable versioned Run records,
+shell-free local execution, Apptainer command construction, Git provenance,
+artifact retrieval, and common human/JSON lifecycle interfaces. The checked
+minimal experiment runs through the same planner, ports, orchestration service,
+and persistence path intended for later remote execution.
+
+Local execution is synchronous. `submit` reports `ASYNC_UNAVAILABLE` until a
+durable asynchronous backend exists. An explicit `native` runtime supports only
+an all-local target and an experiment without a container request; experiments
+that declare a container image require the `apptainer` runtime.
 
 Implementation progress is tracked in
 [`.agent/plans/v0.1.md`](.agent/plans/v0.1.md).
@@ -54,7 +48,27 @@ uv run mypy src
 Do not install project dependencies globally or use a different package
 manager.
 
-## Non-executing CLI
+## Minimal local example
+
+Run the checked example with an explicit seed:
+
+```bash
+uv run rundr run examples/minimal/experiment.yaml \
+  --config examples/minimal/config.yaml \
+  --seed 17 \
+  --target local \
+  --targets-file examples/minimal/targets.yaml \
+  --source-root examples/minimal \
+  --destination examples/minimal/retrieved
+```
+
+For the same source, effective config, seed, Python 3.12 environment, and
+runtime, repeated runs must produce byte-identical
+`retrieved/results/result.json`. The integration suite runs this example twice
+and checks that criterion. It does not claim byte identity across different
+Python/runtime versions.
+
+## Inspecting without execution
 
 The checked example can be inspected without executing an experiment:
 

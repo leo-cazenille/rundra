@@ -12,10 +12,6 @@ command:
     - --seed
     - "{seed}"
 
-container:
-  image: containers/project.sif
-  gpu: false
-
 resources:
   nodes: 1
   tasks: 1
@@ -27,3 +23,7 @@ resources:
 outputs:
   include:
     - results/**
+
+sync:
+  exclude:
+    - retrieved/

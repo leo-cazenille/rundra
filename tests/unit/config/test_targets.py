@@ -144,3 +144,45 @@ def test_load_targets_rejects_known_backend_in_the_wrong_role(
 
     assert caught.value.code == "UNKNOWN_BACKEND"
     assert caught.value.path == ("targets", "bad", role, "type")
+
+
+def test_native_runtime_is_explicit_and_limited_to_an_all_local_target(
+    tmp_path: Path,
+) -> None:
+    from rundra.config.errors import ConfigError
+    from rundra.config.targets import load_targets
+
+    local = tmp_path / "local.yaml"
+    local.write_text(
+        """\
+version: 1
+targets:
+  local:
+    transport: {type: local}
+    scheduler: {type: local}
+    staging: {type: local}
+    container: {type: native}
+    workspace: /tmp/rundra
+""",
+        encoding="utf-8",
+    )
+    assert load_targets(local)["local"].container.kind == "native"
+
+    remote = tmp_path / "remote.yaml"
+    remote.write_text(
+        """\
+version: 1
+targets:
+  bad:
+    transport: {type: ssh, host: cluster}
+    scheduler: {type: slurm}
+    staging: {type: rsync}
+    container: {type: native}
+    workspace: /remote/rundra
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError) as caught:
+        load_targets(remote)
+    assert caught.value.code == "INVALID_BACKEND_COMBINATION"
+    assert caught.value.path == ("targets", "bad", "container", "type")

@@ -22,7 +22,7 @@ _BACKENDS_BY_ROLE = {
     "transport": frozenset({"local", "ssh"}),
     "scheduler": frozenset({"local", "slurm"}),
     "staging": frozenset({"local", "rsync"}),
-    "container": frozenset({"apptainer"}),
+    "container": frozenset({"apptainer", "native"}),
 }
 
 
@@ -58,7 +58,7 @@ def load_targets(source: Path) -> Mapping[str, Target]:
                 nonblank=True,
             )
         )
-        targets[name] = Target(
+        target = Target(
             name=name,
             transport=_backend_config(section["transport"], "transport", source, path),
             scheduler=_backend_config(section["scheduler"], "scheduler", source, path),
@@ -66,6 +66,18 @@ def load_targets(source: Path) -> Mapping[str, Target]:
             container=_backend_config(section["container"], "container", source, path),
             workspace=workspace,
         )
+        if target.container.kind == "native" and (
+            target.transport.kind,
+            target.scheduler.kind,
+            target.staging.kind,
+        ) != ("local", "local", "local"):
+            fail(
+                source=source,
+                path=(*path, "container", "type"),
+                code="INVALID_BACKEND_COMBINATION",
+                message="Native runtime is supported only for an all-local target",
+            )
+        targets[name] = target
     return MappingProxyType(targets)
 
 

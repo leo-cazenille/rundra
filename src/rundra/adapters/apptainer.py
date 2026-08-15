@@ -62,6 +62,10 @@ class ApptainerRuntime:
             raise TypeError(
                 "ApptainerRuntime.build_command requires a ContainerRequest"
             )
+        if request.image is None:
+            raise ApptainerConfigurationError(
+                "Apptainer execution requires a container image"
+            )
         image = str(request.image)
         _validate_argument(image, name="container image")
         if image.startswith("-"):

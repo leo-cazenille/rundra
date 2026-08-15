@@ -664,7 +664,7 @@ targets:
       type: local
 
     container:
-      type: apptainer
+      type: native
 
     workspace: "~/.local/share/rundra"
 
@@ -1751,12 +1751,21 @@ It provides no asynchronous cancellation or local resource enforcement in M1.
 `OrchestrationService` implements the first common vertical slice for exactly
 one planned Task. It rejects a plan that does not reproduce from the recorded
 experiment, config, target, and seed; creates the `RunRecord` before capability
-checks; stages the immutable snapshot; constructs the container command; and
+checks; stages the immutable snapshot; constructs the runtime command; and
 submits it through `Scheduler`. The staged source and input directories are
 bound read-only at `/workspace/source` and `/workspace/input`; output and
 runtime directories are bound read-write at `/workspace/output` and
 `/workspace/runtime`. Relative experiment working directories are rooted below
-the container source directory.
+the semantic source directory.
+
+M1 also provides an explicit no-container `native` runtime for the checked
+minimal example because the development environment has an Apptainer executable
+but no usable, pinned local image. Native execution is valid only when
+transport, scheduler, and staging are all local and the experiment declares no
+container image or GPU passthrough. It maps the same staged semantic paths to
+their host paths and still uses the common planner, orchestration service,
+scheduler, transport, store, and artifact path; it is not a CLI shortcut.
+Containerized experiments continue to require the Apptainer runtime.
 
 After reconciliation, stdout and stderr are written as separate Task artifacts
 and the terminal state, native state, timestamps, scheduler reference, and exit
@@ -1764,8 +1773,8 @@ code are persisted. Requested outputs are fetched even after a non-zero task
 exit. The versioned `RunRecord.artifacts` collection is the M1 artifact
 manifest. Computation and retrieval state are updated independently, so a
 retrieval failure after successful execution leaves computation `SUCCEEDED`.
-The M1.4 service does not add lifecycle CLI commands, asynchronous local runs,
-Git provenance, or a no-container execution path.
+Local asynchronous submission remains unavailable until it has durable
+post-process semantics.
 
 ---
 
@@ -2173,6 +2182,7 @@ Required infrastructure:
 - Slurm scheduler;
 - rsync staging;
 - Apptainer runtime;
+- explicit native runtime for all-local, no-container experiments;
 - local run persistence;
 - shoal target.
 
@@ -2438,6 +2448,7 @@ Deliver:
 - config + explicit seed;
 - command construction;
 - Apptainer runtime;
+- explicit native runtime for all-local, no-container experiments;
 - local Run lifecycle;
 - isolated Run directory;
 - RunRecord;
@@ -2451,6 +2462,12 @@ rundr run ... --target local
 ```
 
 works for the minimal example.
+
+The checked minimal example uses an explicit integer seed and emits canonical
+JSON. Repeating it with the same source snapshot, effective configuration,
+seed, Python 3.12 environment, and runtime must produce byte-identical raw
+result bytes. This criterion does not assert byte identity across different
+interpreter or runtime versions.
 
 ---
 

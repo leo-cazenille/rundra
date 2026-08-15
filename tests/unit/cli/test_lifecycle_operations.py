@@ -171,7 +171,7 @@ def test_run_operation_returns_a_durable_structured_capability_failure(
         def build_command(self, request: ContainerRequest) -> object:
             raise AssertionError("build must not follow failed capability check")
 
-    monkeypatch.setattr(operations, "ApptainerRuntime", MissingRuntime)
+    monkeypatch.setattr(operations, "NativeRuntime", MissingRuntime)
     targets = tmp_path / "targets.yaml"
     targets.write_text(
         f"""\
@@ -185,7 +185,7 @@ targets:
     staging:
       type: local
     container:
-      type: apptainer
+      type: native
     workspace: {tmp_path / "workspace"}
 """,
         encoding="utf-8",

@@ -15,6 +15,7 @@ from rundra.adapters.local import (
     LocalTransportError,
     WorkspaceCollisionError,
 )
+from rundra.adapters.native import NativeRuntime, NativeRuntimeError
 
 __all__ = [
     "ApptainerConfigurationError",
@@ -27,5 +28,7 @@ __all__ = [
     "LocalStagerError",
     "LocalTransport",
     "LocalTransportError",
+    "NativeRuntime",
+    "NativeRuntimeError",
     "WorkspaceCollisionError",
 ]

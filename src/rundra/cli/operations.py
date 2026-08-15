@@ -11,6 +11,7 @@ from rundra.adapters import (
     LocalScheduler,
     LocalStager,
     LocalTransport,
+    NativeRuntime,
 )
 from rundra.config.errors import ConfigError
 from rundra.config.experiments import load_config_snapshot, load_experiment
@@ -186,7 +187,7 @@ def run_operation(
                 ),
             )
         target = targets[target_name]
-        unsupported = _unsupported_local_target(target)
+        unsupported = _unsupported_local_target(target, experiment)
         if unsupported is not None:
             return OperationResult.failure("run", unsupported)
         plan = create_plan(
@@ -196,10 +197,13 @@ def run_operation(
             seeds=expand_seeds(seed=seed),
         )
         transport = LocalTransport()
+        runtime = (
+            NativeRuntime() if target.container.kind == "native" else ApptainerRuntime()
+        )
         service = OrchestrationService(
             store=store,
             stager=LocalStager(),
-            runtime=ApptainerRuntime(),
+            runtime=runtime,
             scheduler=LocalScheduler(transport),
             transport=transport,
             framework_version=version("rundra"),
@@ -515,15 +519,32 @@ def _merge_artifacts(
     )
 
 
-def _unsupported_local_target(target: Target) -> OperationError | None:
+def _unsupported_local_target(
+    target: Target,
+    experiment: ExperimentSpec,
+) -> OperationError | None:
     actual = (
         target.transport.kind,
         target.scheduler.kind,
         target.staging.kind,
         target.container.kind,
     )
-    expected = ("local", "local", "local", "apptainer")
-    if actual == expected:
+    if actual[:3] == ("local", "local", "local") and actual[3] in {
+        "apptainer",
+        "native",
+    }:
+        if actual[3] == "native" and experiment.container is not None:
+            return OperationError(
+                "CONTAINER_CONFLICT",
+                "Native target cannot satisfy an experiment container request",
+                {"target": target.name},
+            )
+        if actual[3] == "apptainer" and experiment.container is None:
+            return OperationError(
+                "CONTAINER_REQUIRED",
+                "Apptainer target requires an experiment container image",
+                {"target": target.name},
+            )
         return None
     return OperationError(
         "TARGET_UNSUPPORTED",

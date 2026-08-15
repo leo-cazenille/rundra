@@ -362,11 +362,6 @@ class OrchestrationService:
                 code="PLAN_MISMATCH",
                 message="Execution plan does not match the experiment and Task input",
             )
-        if request.experiment.container is None:
-            raise OrchestrationError(
-                code="CONTAINER_REQUIRED",
-                message="M1.4 execution requires an explicit container",
-            )
 
     def _created_record(
         self,
@@ -439,8 +434,6 @@ def _container_request(
     workspace: StagedWorkspace,
 ) -> ContainerRequest:
     container = experiment.container
-    if container is None:
-        raise ValueError("Container specification is required")
     command = Command(
         tuple(
             argument.replace("{config}", str(_CONTAINER_CONFIG)).replace(
@@ -451,15 +444,19 @@ def _container_request(
         environment=unit.command.environment,
         working_directory=_container_working_directory(unit.command.working_directory),
     )
-    image = (
-        container.image
-        if container.image.is_absolute()
-        else workspace.source / container.image
-    )
+    image = None
+    gpu = False
+    if container is not None:
+        image = (
+            container.image
+            if container.image.is_absolute()
+            else workspace.source / container.image
+        )
+        gpu = container.gpu
     return ContainerRequest(
         command=command,
         image=image,
-        gpu=container.gpu,
+        gpu=gpu,
         binds=(
             BindMount(workspace.source, _CONTAINER_SOURCE, read_only=True),
             BindMount(workspace.inputs, _CONTAINER_INPUTS, read_only=True),

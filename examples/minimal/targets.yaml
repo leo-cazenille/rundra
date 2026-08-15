@@ -9,5 +9,5 @@ targets:
     staging:
       type: local
     container:
-      type: apptainer
+      type: native
     workspace: .rundra

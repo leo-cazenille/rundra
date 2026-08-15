@@ -258,18 +258,18 @@ class BindMount:
 
 @dataclass(frozen=True, slots=True)
 class ContainerRequest:
-    """Normalized input for pure container argv construction."""
+    """Normalized input for pure execution-runtime command construction."""
 
     command: Command
-    image: PurePath
+    image: PurePath | None
     gpu: bool
     binds: tuple[BindMount, ...] = ()
 
     def __post_init__(self) -> None:
         if type(self.command) is not Command:
             raise TypeError("ContainerRequest command must be a Command")
-        if not isinstance(self.image, PurePath):
-            raise TypeError("ContainerRequest image must be a PurePath")
+        if self.image is not None and not isinstance(self.image, PurePath):
+            raise TypeError("ContainerRequest image must be a PurePath or None")
         if type(self.gpu) is not bool:
             raise TypeError("ContainerRequest gpu must be a boolean")
         if not isinstance(self.binds, Sequence) or isinstance(self.binds, (str, bytes)):
