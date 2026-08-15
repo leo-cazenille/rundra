@@ -26,7 +26,8 @@ stdout/stderr artifacts, and partial-output retrieval after task failure. M1.5
 exposes that service through synchronous `run` and persisted `status`, `list`,
 `logs`, `fetch`, and `inspect` commands with version-1 JSON contracts.
 Asynchronous `submit` reports an explicit capability error until durable async
-semantics exist.
+semantics exist. M1.6 captures available Git commit, branch, dirty state, and a
+bounded safe dirty patch before staging, while remaining usable outside Git.
 
 Implementation progress is tracked in
 [`.agent/plans/v0.1.md`](.agent/plans/v0.1.md).

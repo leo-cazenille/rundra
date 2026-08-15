@@ -34,6 +34,7 @@ from rundra.orchestration.service import (
 )
 from rundra.persistence import RunNotFoundError, RunStore, RunStoreError
 from rundra.ports import FetchRequest, StagedWorkspace
+from rundra.provenance import GitProvenanceCapture
 from rundra.results import OperationError, OperationResult
 
 
@@ -202,6 +203,7 @@ def run_operation(
             scheduler=LocalScheduler(transport),
             transport=transport,
             framework_version=version("rundra"),
+            provenance=GitProvenanceCapture(),
         )
         result = service.execute_one(
             RunExecutionRequest(

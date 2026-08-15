@@ -36,6 +36,7 @@ from rundra.ports import (
     StagedWorkspace,
     StageRequest,
 )
+from rundra.provenance import GitProvenance
 
 _RUN_ID = RunId("run_0123456789abcdef0123456789abcdef")
 
@@ -175,6 +176,7 @@ def _service(
     runtime: HostMappedRuntime,
     *,
     stager: object | None = None,
+    provenance: object | None = None,
 ) -> OrchestrationService:
     transport = LocalTransport()
     return OrchestrationService(
@@ -187,6 +189,7 @@ def _service(
         transport=transport,
         run_id_factory=lambda: _RUN_ID,
         framework_version="0.1.0.dev0",
+        provenance=provenance,
     )
 
 
@@ -390,3 +393,29 @@ def test_capability_failure_is_persisted_as_a_failed_run(tmp_path: Path) -> None
     assert record.run.tasks[0].state is ExecutionState.FAILED
     assert record.native_state == "CAPABILITY_CHECK_FAILED"
     assert not (tmp_path / "workspace/runs" / str(_RUN_ID)).exists()
+
+
+def test_available_source_provenance_is_persisted_before_execution(
+    tmp_path: Path,
+) -> None:
+    class StaticProvenance:
+        def capture(self, source_root: PurePath) -> GitProvenance:
+            return GitProvenance(
+                commit="0123456789abcdef",
+                branch="feature/m1.6",
+                dirty=True,
+                diff="diff --git a/main.py b/main.py\n",
+            )
+
+    runtime = HostMappedRuntime()
+    request, _ = _request(tmp_path, exit_code=0)
+    service = _service(tmp_path, runtime, provenance=StaticProvenance())
+
+    result = service.execute_one(request)
+
+    assert result.record.git_commit == "0123456789abcdef"
+    assert result.record.git_branch == "feature/m1.6"
+    assert result.record.git_dirty is True
+    assert result.record.git_diff == "diff --git a/main.py b/main.py\n"
+    _restore_writes(Path(result.workspace.source))
+    _restore_writes(Path(result.workspace.inputs))

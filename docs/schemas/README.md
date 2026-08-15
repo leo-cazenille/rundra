@@ -14,7 +14,8 @@ fabricated while loading. Computation state is stored in `run.state`, while
 result-transfer state is independently stored in `run.retrieval_state`.
 The M1.4 example represents a completed local Run and demonstrates its artifact
 manifest, scheduler reference, timestamps, Task exit code, and independent
-successful retrieval state.
+successful retrieval state. It also demonstrates the optional M1.6 Git commit,
+branch, dirty flag, and bounded dirty patch fields.
 
 M1.5 adds checked success envelopes for synchronous `run`, `status`, `list`,
 `logs`, and `fetch`. The `inspect` contract embeds `run-record-v1.json` unchanged

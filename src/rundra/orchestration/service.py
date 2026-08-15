@@ -32,6 +32,7 @@ from rundra.ports import (
     StageRequest,
     Transport,
 )
+from rundra.provenance import GitProvenance, ProvenanceProvider
 
 _CONTAINER_SOURCE = PurePosixPath("/workspace/source")
 _CONTAINER_INPUTS = PurePosixPath("/workspace/input")
@@ -123,6 +124,7 @@ class OrchestrationService:
         run_id_factory: Callable[[], RunId] = RunId.new,
         clock: Callable[[], datetime] | None = None,
         framework_version: str,
+        provenance: ProvenanceProvider | None = None,
     ) -> None:
         for name, value, protocol in (
             ("store", store, RunStore),
@@ -141,6 +143,10 @@ class OrchestrationService:
             raise TypeError("OrchestrationService clock must be callable")
         if type(framework_version) is not str or not framework_version.strip():
             raise ValueError("OrchestrationService framework_version must be nonblank")
+        if provenance is not None and not isinstance(provenance, ProvenanceProvider):
+            raise TypeError(
+                "OrchestrationService provenance must implement ProvenanceProvider"
+            )
         self.store = store
         self._stager = stager
         self._runtime = runtime
@@ -149,6 +155,7 @@ class OrchestrationService:
         self._run_id_factory = run_id_factory
         self._clock = clock or (lambda: datetime.now(UTC))
         self._framework_version = framework_version
+        self._provenance = provenance
 
     def execute_one(self, request: RunExecutionRequest) -> RunExecutionResult:
         """Execute and fetch one planned Task while durably recording each phase."""
@@ -157,7 +164,15 @@ class OrchestrationService:
         run_id = self._run_id_factory()
         if type(run_id) is not RunId:
             raise TypeError("Run ID factory must return a RunId")
-        record = self._created_record(request, unit, run_id)
+        provenance = GitProvenance()
+        if self._provenance is not None:
+            try:
+                captured = self._provenance.capture(request.source_root)
+                if type(captured) is GitProvenance:
+                    provenance = captured
+            except Exception:
+                provenance = GitProvenance()
+        record = self._created_record(request, unit, run_id, provenance)
         self.store.create(record)
 
         try:
@@ -358,6 +373,7 @@ class OrchestrationService:
         request: RunExecutionRequest,
         unit: ExecutionUnit,
         run_id: RunId,
+        provenance: GitProvenance,
     ) -> RunRecord:
         task = Task(
             id=unit.task_id,
@@ -382,6 +398,10 @@ class OrchestrationService:
             source_root=request.source_root,
             experiment_source=request.experiment_source,
             initiator=request.initiator,
+            git_commit=provenance.commit,
+            git_branch=provenance.branch,
+            git_dirty=provenance.dirty,
+            git_diff=provenance.diff,
         )
 
     def _fail_before_completion(self, record: RunRecord, native_state: str) -> None:

@@ -950,6 +950,19 @@ An experiment must still be executable from a non-Git source directory.
 
 Missing optional Git provenance must not prevent execution.
 
+The M1 Git provider invokes Git only through bounded argument-array subprocesses
+against the original source root before staging. It records the current commit
+when one exists, the symbolic branch when attached, and porcelain dirty state
+including untracked files. A tracked dirty patch is included only when it is
+valid UTF-8, at most 1 MiB by default, and contains none of the provider's common
+credential markers. Untracked file contents are never added to the patch.
+
+Missing Git, a non-repository source, an unborn or detached reference, timeout,
+oversized/non-UTF-8 output, a credential marker, or another capture failure
+leaves only the affected optional values unavailable. It does not prevent the
+Run. Marker screening is defense in depth, not semantic secret detection;
+credentials remain prohibited in source/configuration values and Run data.
+
 ---
 
 ## 14. Container provenance
@@ -1465,6 +1478,10 @@ an already successful retrieval keeps its successful state. Asynchronous
 `submit` is present only as the structured `ASYNC_UNAVAILABLE` capability error
 in M1.5. `cancel` remains unavailable because there is no active asynchronous
 local process to cancel.
+
+Synchronous `run` wires the Git provenance provider into the same orchestration
+service. `inspect` exposes the persisted optional fields through the existing
+RunRecord contract; no CLI-specific Git command path exists.
 
 ---
 
