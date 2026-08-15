@@ -7,6 +7,7 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
+from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import (
     Artifact,
     ArtifactKind,
@@ -196,6 +197,63 @@ def test_run_record_round_trips_ordered_multi_task_identity_and_artifacts() -> N
         "task_000001",
     ]
     assert record_from_dict(document) == multi
+
+
+def test_run_record_round_trips_explicit_array_mapping() -> None:
+    record = _record()
+    first = record.run.tasks[0]
+    second = replace(first, id=TaskId.from_ordinal(1), seed=23)
+    slurm_run = replace(
+        record.run,
+        target=replace(
+            record.run.target,
+            scheduler=BackendConfig("slurm"),
+        ),
+        tasks=(first, second),
+    )
+    mapped = replace(
+        record,
+        run=slurm_run,
+        task_array_mapping=(
+            ArrayTaskMapping(first.id, first.seed, 0),
+            ArrayTaskMapping(second.id, second.seed, 1),
+        ),
+    )
+
+    document = record_to_dict(mapped)
+
+    assert document["task_array_mapping"] == [
+        {"task_id": "task_000000", "seed": 17, "array_index": 0},
+        {"task_id": "task_000001", "seed": 23, "array_index": 1},
+    ]
+    assert record_from_dict(document) == mapped
+
+
+def test_run_record_accepts_pre_m52_version_one_document() -> None:
+    document = record_to_dict(_record())
+    del document["task_array_mapping"]
+
+    loaded = record_from_dict(document)
+
+    assert loaded.task_array_mapping == ()
+
+
+def test_run_record_rejects_array_mapping_identity_mismatches() -> None:
+    record = _record()
+    mapping = ArrayTaskMapping(record.run.tasks[0].id, 999, 0)
+
+    with pytest.raises(ValueError, match="requires a Slurm target"):
+        replace(record, task_array_mapping=(mapping,))
+
+    slurm = replace(
+        record,
+        run=replace(
+            record.run,
+            target=replace(record.run.target, scheduler=BackendConfig("slurm")),
+        ),
+    )
+    with pytest.raises(ValueError, match="match Task order and seeds"):
+        replace(slurm, task_array_mapping=(mapping,))
 
 
 def test_run_record_round_trips_absent_optional_provenance_without_fabrication() -> (

@@ -6,6 +6,7 @@ from math import isfinite
 from pathlib import PurePosixPath
 from typing import NoReturn, cast
 
+from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import (
     Artifact,
     ArtifactKind,
@@ -49,6 +50,7 @@ _RECORD_FIELDS = frozenset(
         "completed_at",
         "native_state",
         "scheduler_metadata",
+        "task_array_mapping",
         "task_exit_codes",
         "artifacts",
     }
@@ -79,6 +81,14 @@ def record_to_dict(record: RunRecord) -> JsonObject:
         "completed_at": _datetime_or_none(record.completed_at),
         "native_state": record.native_state,
         "scheduler_metadata": dict(sorted(record.scheduler_metadata.items())),
+        "task_array_mapping": [
+            {
+                "task_id": str(item.task_id),
+                "seed": item.seed,
+                "array_index": item.array_index,
+            }
+            for item in record.task_array_mapping
+        ],
         "task_exit_codes": {
             str(task_id): exit_code
             for task_id, exit_code in sorted(
@@ -97,6 +107,7 @@ def record_from_dict(value: object) -> RunRecord:
         raise RunRecordFormatError("record.format_version must be an integer")
     if version != 1:
         raise RunRecordFormatError(f"unsupported format_version {version}")
+    document.setdefault("task_array_mapping", [])
     _exact_fields(document, _RECORD_FIELDS, path="record")
     run = _parse_run(document["run"], path="run")
     try:
@@ -137,6 +148,9 @@ def record_from_dict(value: object) -> RunRecord:
             ),
             scheduler_metadata=_scalar_mapping(
                 document["scheduler_metadata"], path="scheduler_metadata"
+            ),
+            task_array_mapping=_parse_task_array_mapping(
+                document["task_array_mapping"]
             ),
             task_exit_codes=_parse_exit_codes(document["task_exit_codes"]),
             artifacts=_parse_artifacts(document["artifacts"]),
@@ -547,6 +561,34 @@ def _parse_exit_codes(value: object) -> dict[TaskId, int]:
             _invalid(f"task_exit_codes.{task_id}", error)
         result[parsed_task_id] = _integer(exit_code, path=f"task_exit_codes.{task_id}")
     return result
+
+
+def _parse_task_array_mapping(value: object) -> tuple[ArrayTaskMapping, ...]:
+    values = _sequence(value, path="task_array_mapping")
+    result: list[ArrayTaskMapping] = []
+    for index, item in enumerate(values):
+        path = f"task_array_mapping[{index}]"
+        document = _object(item, path=path)
+        _exact_fields(
+            document,
+            frozenset({"task_id", "seed", "array_index"}),
+            path=path,
+        )
+        try:
+            result.append(
+                ArrayTaskMapping(
+                    task_id=TaskId(
+                        _string(document["task_id"], path=f"{path}.task_id")
+                    ),
+                    seed=_integer(document["seed"], path=f"{path}.seed"),
+                    array_index=_integer(
+                        document["array_index"], path=f"{path}.array_index"
+                    ),
+                )
+            )
+        except (TypeError, ValueError) as error:
+            _invalid(path, error)
+    return tuple(result)
 
 
 def _object(value: object, *, path: str) -> dict[str, object]:

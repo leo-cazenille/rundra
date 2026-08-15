@@ -134,6 +134,7 @@
   "source_root": "/work/minimal",
   "started_at": "2026-08-15T08:01:00+00:00",
   "submitted_at": "2026-08-15T08:01:00+00:00",
+  "task_array_mapping": [],
   "task_exit_codes": {
     "task_000000": 0
   }

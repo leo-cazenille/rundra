@@ -7,6 +7,7 @@ from math import isfinite
 from pathlib import PurePath
 from types import MappingProxyType
 
+from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import Artifact, ExperimentSpec, NativeValue, Run, TaskId
 
 
@@ -62,6 +63,7 @@ class RunRecord:
     completed_at: datetime | None = None
     native_state: str | None = None
     scheduler_metadata: Mapping[str, NativeValue] = field(default_factory=dict)
+    task_array_mapping: tuple[ArrayTaskMapping, ...] = ()
     task_exit_codes: Mapping[TaskId, int] = field(default_factory=dict)
     artifacts: tuple[Artifact, ...] = ()
 
@@ -137,6 +139,23 @@ class RunRecord:
         ):
             raise ValueError("RunRecord timestamps must be chronological")
         task_ids = {task.id for task in self.run.tasks}
+        task_array_mapping = tuple(self.task_array_mapping)
+        if any(type(item) is not ArrayTaskMapping for item in task_array_mapping):
+            raise TypeError(
+                "RunRecord task_array_mapping must contain ArrayTaskMappings"
+            )
+        if task_array_mapping:
+            if self.run.target.scheduler.kind != "slurm":
+                raise ValueError("RunRecord task_array_mapping requires a Slurm target")
+            expected_mapping = tuple(
+                ArrayTaskMapping(task.id, task.seed, index)
+                for index, task in enumerate(self.run.tasks)
+            )
+            if task_array_mapping != expected_mapping:
+                raise ValueError(
+                    "RunRecord task_array_mapping must match Task order and seeds"
+                )
+        object.__setattr__(self, "task_array_mapping", task_array_mapping)
         if not isinstance(self.task_exit_codes, Mapping):
             raise TypeError("RunRecord task_exit_codes must be a mapping")
         exit_codes = dict(self.task_exit_codes)

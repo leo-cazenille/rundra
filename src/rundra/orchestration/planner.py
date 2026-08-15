@@ -4,6 +4,7 @@ import re
 from collections.abc import Sequence
 from typing import cast
 
+from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import (
     Command,
     ConfigSnapshot,
@@ -16,7 +17,6 @@ from rundra.domain.models import (
 from rundra.orchestration.models import (
     ONE_UNIT_PER_TASK,
     SLURM_ARRAY,
-    ArrayTaskMapping,
     ExecutionGroup,
     ExecutionPlan,
     ExecutionUnit,

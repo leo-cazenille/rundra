@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
+from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import (
     Command,
     ConfigSnapshot,
@@ -71,25 +72,6 @@ class ExecutionGroup:
         if len(set(task_ids)) != len(task_ids):
             raise ValueError("ExecutionGroup Task IDs must be unique")
         object.__setattr__(self, "task_ids", task_ids)
-
-
-@dataclass(frozen=True, slots=True)
-class ArrayTaskMapping:
-    """Explicit planned identity for one logical Task in a scheduler array."""
-
-    task_id: TaskId
-    seed: int
-    array_index: int
-
-    def __post_init__(self) -> None:
-        if type(self.task_id) is not TaskId:
-            raise TypeError("ArrayTaskMapping task_id must be a TaskId")
-        if type(self.seed) is not int:
-            raise TypeError("ArrayTaskMapping seed must be an integer")
-        if type(self.array_index) is not int:
-            raise TypeError("ArrayTaskMapping array_index must be an integer")
-        if self.array_index < 0:
-            raise ValueError("ArrayTaskMapping array_index must be non-negative")
 
 
 @dataclass(frozen=True, slots=True)

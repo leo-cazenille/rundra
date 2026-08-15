@@ -222,6 +222,7 @@ def _immutable_definition(record: RunRecord) -> tuple[object, ...]:
         record.experiment,
         record.source_root,
         record.experiment_source,
+        record.task_array_mapping,
     )
 
 

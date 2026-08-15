@@ -310,8 +310,9 @@ def test_execution_plan_rejects_invalid_group_partitions_and_strategies() -> Non
 def test_execution_plan_rejects_array_mapping_that_changes_task_identity() -> None:
     from dataclasses import replace
 
+    from rundra.domain.mappings import ArrayTaskMapping
     from rundra.domain.models import BackendConfig
-    from rundra.orchestration.models import ArrayTaskMapping, ExecutionPlan
+    from rundra.orchestration.models import ExecutionPlan
     from rundra.orchestration.planner import create_plan
 
     target = replace(_target(), scheduler=BackendConfig("slurm"))
