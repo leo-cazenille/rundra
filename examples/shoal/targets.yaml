@@ -1,0 +1,14 @@
+version: 1
+
+targets:
+  shoal:
+    transport:
+      type: ssh
+      host: fishvision
+    scheduler:
+      type: slurm
+    staging:
+      type: rsync
+    container:
+      type: apptainer
+    workspace: /shoalhome/YOUR_USERNAME/.rundra

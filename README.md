@@ -46,6 +46,10 @@ The default integration suite validates this remote transport/staging path with
 executable SSH and rsync shims. It requires neither a network connection nor an
 installed scheduler. Real-cluster checks remain explicitly opt-in.
 
+A non-secret Shoal target template and its configuration guidance are in
+[`docs/shoal.md`](docs/shoal.md). The template is setup documentation, not a
+claim that real-cluster validation has passed.
+
 M1E adds strict project launch profiles, optional user defaults, deterministic
 resolution precedence, concise `run`/`plan` commands, and generated seeds that
 are displayed and durably recorded before execution.
