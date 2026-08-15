@@ -210,7 +210,7 @@ tempCodeRunnerFile.py
 .pypirc
 
 # Editor swap files
-*.swp
+*.sw?
 
 # Marimo
 marimo/_static/
