@@ -14,12 +14,12 @@ from rundra.domain.models import (
     ConfigSnapshot,
     ExperimentSpec,
     NativeValue,
+    ResourceRequest,
     RunId,
     Target,
     TaskId,
 )
 from rundra.domain.states import ExecutionState
-from rundra.orchestration.models import ExecutionUnit
 
 
 def _freeze_metadata(
@@ -82,6 +82,42 @@ class CommandResult:
                 raise ValueError(f"CommandResult {name} must be timezone-aware")
         if self.finished_at < self.started_at:
             raise ValueError("CommandResult cannot finish before it starts")
+
+
+@dataclass(frozen=True, slots=True)
+class SchedulerUnit:
+    """Minimal normalized command and resources for one logical Task."""
+
+    task_id: TaskId
+    command: Command
+    resources: ResourceRequest
+
+    def __post_init__(self) -> None:
+        if type(self.task_id) is not TaskId:
+            raise TypeError("SchedulerUnit task_id must be a TaskId")
+        if type(self.command) is not Command:
+            raise TypeError("SchedulerUnit command must be a Command")
+        if type(self.resources) is not ResourceRequest:
+            raise TypeError("SchedulerUnit resources must be a ResourceRequest")
+
+
+@dataclass(frozen=True, slots=True)
+class SchedulerGroup:
+    """One nonempty scheduler submission with explicit logical Task members."""
+
+    units: tuple[SchedulerUnit, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.units, Sequence) or isinstance(self.units, (str, bytes)):
+            raise TypeError("SchedulerGroup units must be a sequence")
+        units = tuple(self.units)
+        if any(type(unit) is not SchedulerUnit for unit in units):
+            raise TypeError("SchedulerGroup units must contain SchedulerUnits")
+        if not units:
+            raise ValueError("SchedulerGroup must contain at least one unit")
+        if len({unit.task_id for unit in units}) != len(units):
+            raise ValueError("SchedulerGroup Task IDs must be unique")
+        object.__setattr__(self, "units", units)
 
 
 @dataclass(frozen=True, slots=True)
@@ -293,7 +329,7 @@ class Transport(Protocol):
 
 @runtime_checkable
 class Scheduler(Protocol):
-    def submit(self, units: tuple[ExecutionUnit, ...]) -> SchedulerSubmission: ...
+    def submit(self, group: SchedulerGroup) -> SchedulerSubmission: ...
 
     def query(
         self, references: tuple[SchedulerReference, ...]

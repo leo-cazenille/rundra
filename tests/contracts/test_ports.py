@@ -6,9 +6,8 @@ import pytest
 
 from rundra.config.experiments import load_config_snapshot, load_experiment
 from rundra.config.targets import load_targets
-from rundra.domain.models import Command, RunId
+from rundra.domain.models import Command, ResourceRequest, RunId, TaskId
 from rundra.domain.states import ExecutionState
-from rundra.orchestration.models import ExecutionUnit
 from rundra.orchestration.planner import create_plan
 from rundra.ports import (
     BindMount,
@@ -19,9 +18,11 @@ from rundra.ports import (
     FetchRequest,
     FetchResult,
     Scheduler,
+    SchedulerGroup,
     SchedulerObservation,
     SchedulerReference,
     SchedulerSubmission,
+    SchedulerUnit,
     StagedWorkspace,
     Stager,
     StageRequest,
@@ -35,12 +36,41 @@ from tests.fakes import (
 )
 
 
-def _units() -> tuple[ExecutionUnit, ...]:
+def _group() -> SchedulerGroup:
     root = Path(__file__).parents[2]
     spec = load_experiment(root / "examples/minimal/experiment.yaml")
     config = load_config_snapshot(root / "examples/minimal/config.yaml")
     target = load_targets(root / "examples/minimal/targets.yaml")["local"]
-    return create_plan(spec, config, target, seeds=(7,)).units
+    planned = create_plan(spec, config, target, seeds=(7,)).units
+    return SchedulerGroup(
+        tuple(
+            SchedulerUnit(unit.task_id, unit.command, unit.resources)
+            for unit in planned
+        )
+    )
+
+
+def test_scheduler_group_is_minimal_immutable_and_task_explicit() -> None:
+    first = SchedulerUnit(
+        TaskId.from_ordinal(0), Command(("program", "one")), ResourceRequest()
+    )
+    second = SchedulerUnit(
+        TaskId.from_ordinal(1), Command(("program", "two")), ResourceRequest()
+    )
+    supplied = [first, second]
+
+    group = SchedulerGroup(supplied)  # type: ignore[arg-type]
+    supplied.clear()
+
+    assert group.units == (first, second)
+    assert not hasattr(first, "seed")
+    assert not hasattr(first, "config")
+    with pytest.raises(ValueError, match="at least one"):
+        SchedulerGroup(())
+    with pytest.raises(ValueError, match="unique"):
+        SchedulerGroup((first, first))
+    with pytest.raises(TypeError, match="SchedulerUnits"):
+        SchedulerGroup((object(),))  # type: ignore[arg-type]
 
 
 def test_fake_transport_scripts_results_failures_and_call_history() -> None:
@@ -63,8 +93,8 @@ def test_fake_transport_scripts_results_failures_and_call_history() -> None:
 
 def test_fake_scheduler_scripts_observation_failure_and_cancellation() -> None:
     reference = SchedulerReference("native-17")
-    units = _units()
-    submission = SchedulerSubmission(reference, {units[0].task_id: "native-17_0"})
+    group = _group()
+    submission = SchedulerSubmission(reference, {group.units[0].task_id: "native-17_0"})
     queued = SchedulerObservation(reference, ExecutionState.QUEUED, "PENDING")
     cancelled = SchedulerObservation(reference, ExecutionState.CANCELLED, "CANCELLED")
     scheduler = FakeScheduler(
@@ -74,12 +104,12 @@ def test_fake_scheduler_scripts_observation_failure_and_cancellation() -> None:
     )
 
     assert isinstance(scheduler, Scheduler)
-    assert scheduler.submit(units) == submission
+    assert scheduler.submit(group) == submission
     with pytest.raises(RuntimeError, match="submission failed"):
-        scheduler.submit(units)
+        scheduler.submit(group)
     assert scheduler.query((reference,)) == (queued,)
     assert scheduler.cancel((reference,)) == (cancelled,)
-    assert scheduler.submit_calls == [units, units]
+    assert scheduler.submit_calls == [group, group]
     assert scheduler.query_calls == [(reference,)]
     assert scheduler.cancel_calls == [(reference,)]
 

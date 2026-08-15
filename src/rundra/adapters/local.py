@@ -13,12 +13,12 @@ from uuid import uuid4
 
 from rundra.domain.models import Artifact, ArtifactKind, Command
 from rundra.domain.states import ExecutionState
-from rundra.orchestration.models import ExecutionUnit
 from rundra.ports import (
     CapabilityCheck,
     CommandResult,
     FetchRequest,
     FetchResult,
+    SchedulerGroup,
     SchedulerObservation,
     SchedulerReference,
     SchedulerSubmission,
@@ -122,18 +122,15 @@ class LocalScheduler:
         self._reference_factory = reference_factory or _new_local_reference
         self._observations: dict[SchedulerReference, SchedulerObservation] = {}
 
-    def submit(self, units: tuple[ExecutionUnit, ...]) -> SchedulerSubmission:
+    def submit(self, group: SchedulerGroup) -> SchedulerSubmission:
         """Execute exactly one M1 unit synchronously and return its reference."""
-        if not isinstance(units, Sequence) or isinstance(units, (str, bytes)):
-            raise TypeError("LocalScheduler units must be a sequence")
-        normalized = tuple(units)
-        if any(type(unit) is not ExecutionUnit for unit in normalized):
-            raise TypeError("LocalScheduler units must contain ExecutionUnits")
-        if len(normalized) != 1:
+        if type(group) is not SchedulerGroup:
+            raise TypeError("LocalScheduler submit requires a SchedulerGroup")
+        if len(group.units) != 1:
             raise LocalSchedulerError(
                 "M1 LocalScheduler requires exactly one execution unit"
             )
-        unit = normalized[0]
+        unit = group.units[0]
         reference_value = self._reference_factory()
         if type(reference_value) is not str or not reference_value:
             raise LocalSchedulerError(

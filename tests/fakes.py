@@ -4,13 +4,13 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from rundra.domain.models import Command
-from rundra.orchestration.models import ExecutionUnit
 from rundra.ports import (
     CapabilityCheck,
     CommandResult,
     ContainerRequest,
     FetchRequest,
     FetchResult,
+    SchedulerGroup,
     SchedulerObservation,
     SchedulerReference,
     SchedulerSubmission,
@@ -49,12 +49,12 @@ class FakeScheduler:
     submit_script: deque[SchedulerSubmission | Exception]
     query_script: deque[tuple[SchedulerObservation, ...] | Exception]
     cancel_script: deque[tuple[SchedulerObservation, ...] | Exception]
-    submit_calls: list[tuple[ExecutionUnit, ...]] = field(default_factory=list)
+    submit_calls: list[SchedulerGroup] = field(default_factory=list)
     query_calls: list[tuple[SchedulerReference, ...]] = field(default_factory=list)
     cancel_calls: list[tuple[SchedulerReference, ...]] = field(default_factory=list)
 
-    def submit(self, units: tuple[ExecutionUnit, ...]) -> SchedulerSubmission:
-        self.submit_calls.append(units)
+    def submit(self, group: SchedulerGroup) -> SchedulerSubmission:
+        self.submit_calls.append(group)
         return _next(self.submit_script, operation="scheduler submit")
 
     def query(

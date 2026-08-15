@@ -26,7 +26,9 @@ from rundra.ports import (
     ContainerRuntime,
     FetchRequest,
     Scheduler,
+    SchedulerGroup,
     SchedulerObservation,
+    SchedulerUnit,
     StagedWorkspace,
     Stager,
     StageRequest,
@@ -224,7 +226,17 @@ class OrchestrationService:
             ) from error
 
         try:
-            submission = self._scheduler.submit((scheduled_unit,))
+            submission = self._scheduler.submit(
+                SchedulerGroup(
+                    (
+                        SchedulerUnit(
+                            scheduled_unit.task_id,
+                            scheduled_unit.command,
+                            scheduled_unit.resources,
+                        ),
+                    )
+                )
+            )
             observation = _single_observation(
                 self._scheduler.query((submission.reference,)),
                 submission.reference,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 from datetime import UTC, datetime
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 import pytest
 
@@ -12,17 +12,14 @@ from rundra.adapters.local import (
     LocalTransport,
     LocalTransportError,
 )
-from rundra.domain.models import Command, ConfigSnapshot, ResourceRequest, TaskId
+from rundra.domain.models import Command, ResourceRequest, TaskId
 from rundra.domain.states import ExecutionState
-from rundra.orchestration.models import ExecutionUnit
-from rundra.ports import Scheduler, Transport
+from rundra.ports import Scheduler, SchedulerGroup, SchedulerUnit, Transport
 
 
-def _unit(command: Command, ordinal: int = 0) -> ExecutionUnit:
-    return ExecutionUnit(
+def _unit(command: Command, ordinal: int = 0) -> SchedulerUnit:
+    return SchedulerUnit(
         task_id=TaskId.from_ordinal(ordinal),
-        seed=17 + ordinal,
-        config=ConfigSnapshot(PurePosixPath("config.yaml"), "value: 1\n"),
         command=command,
         resources=ResourceRequest(),
     )
@@ -77,7 +74,7 @@ def test_local_scheduler_executes_one_unit_and_reports_terminal_observation() ->
     )
     unit = _unit(Command((sys.executable, "-c", "print('done')")))
 
-    submission = scheduler.submit((unit,))
+    submission = scheduler.submit(SchedulerGroup((unit,)))
     observations = scheduler.query((submission.reference,))
 
     assert isinstance(scheduler, Scheduler)
@@ -98,13 +95,13 @@ def test_local_scheduler_maps_nonzero_exit_and_rejects_unsupported_requests() ->
     )
     failed = _unit(Command((sys.executable, "-c", "raise SystemExit(9)")))
 
-    submission = scheduler.submit((failed,))
+    submission = scheduler.submit(SchedulerGroup((failed,)))
 
     observation = scheduler.query((submission.reference,))[0]
     assert observation.state is ExecutionState.FAILED
     assert observation.exit_code == 9
     with pytest.raises(LocalSchedulerError, match="exactly one"):
-        scheduler.submit((failed, _unit(failed.command, ordinal=1)))
+        scheduler.submit(SchedulerGroup((failed, _unit(failed.command, ordinal=1))))
     with pytest.raises(LocalSchedulerError, match="Unknown local scheduler"):
         scheduler.query((type(submission.reference)("missing"),))
 
@@ -112,10 +109,11 @@ def test_local_scheduler_maps_nonzero_exit_and_rejects_unsupported_requests() ->
 def test_local_scheduler_rejects_duplicate_native_references() -> None:
     scheduler = LocalScheduler(LocalTransport(), reference_factory=lambda: "same")
     unit = _unit(Command((sys.executable, "-c", "pass")))
-    scheduler.submit((unit,))
+    group = SchedulerGroup((unit,))
+    scheduler.submit(group)
 
     with pytest.raises(LocalSchedulerError, match="already exists"):
-        scheduler.submit((unit,))
+        scheduler.submit(group)
 
 
 def test_local_scheduler_timestamps_come_from_the_transport_result() -> None:
@@ -124,7 +122,9 @@ def test_local_scheduler_timestamps_come_from_the_transport_result() -> None:
     )
     before = datetime.now(UTC)
 
-    submission = scheduler.submit((_unit(Command((sys.executable, "-c", "pass"))),))
+    submission = scheduler.submit(
+        SchedulerGroup((_unit(Command((sys.executable, "-c", "pass"))),))
+    )
     result = scheduler.query((submission.reference,))[0].result
 
     assert result is not None
