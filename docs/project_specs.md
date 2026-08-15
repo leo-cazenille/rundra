@@ -1904,7 +1904,11 @@ remote laptop/workstation
  experiment processes
 ```
 
-`/shoalhome` is available on fishvision and the compute nodes through NFSv4.
+`/shoalhome` is the intended shared workspace root for fishvision and the
+compute nodes. During the M4.2 login-side preflight on 2026-08-15, both `stat`
+and `findmnt` identified it as `zfs`, not NFSv4. Compute-node visibility remains
+to be verified by the bounded M4.3 CPU run; the framework must not infer shared
+visibility from a filesystem-type label alone.
 
 Shoal currently supports CPU and NVIDIA GPU workloads.
 
@@ -2341,6 +2345,14 @@ Examples:
 ### 42.4 System tests
 
 Tests requiring a real cluster must be opt-in.
+
+The M4.2 Shoal harness adds a second explicit command-line opt-in in addition
+to its registered marker. It first constructs a bounded pure plan, then checks
+local OpenSSH/rsync discovery, SSH connectivity, the remote workspace, Slurm
+commands, Apptainer and its configured image, requested resources through
+`sbatch --test-only`, and the login-side `/shoalhome` filesystem identity. It
+does not allocate a Run, stage source, execute a container, or submit a job.
+Arbitrary remote stderr is excluded from its layer-specific diagnostics.
 
 Shoal system tests should eventually cover:
 

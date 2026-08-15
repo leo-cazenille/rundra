@@ -43,19 +43,29 @@ def _experiment(*, image: str = "/shoalhome/test/image.sif") -> ExperimentSpec:
     )
 
 
-def _result(command: Command, exit_code: int = 0, *, stderr: str = "") -> CommandResult:
+def _result(
+    command: Command,
+    exit_code: int = 0,
+    *,
+    stdout: str = "",
+    stderr: str = "",
+) -> CommandResult:
     now = datetime(2026, 8, 15, tzinfo=UTC)
-    return CommandResult(command, exit_code, "", stderr, now, now)
+    return CommandResult(command, exit_code, stdout, stderr, now, now)
 
 
 def _transport(exit_codes: tuple[int, ...]) -> FakeTransport:
     commands = [Command(("scripted", str(index))) for index in range(len(exit_codes))]
+    results = [
+        _result(command, code)
+        for command, code in zip(commands, exit_codes, strict=True)
+    ]
+    if results:
+        last = results[-1]
+        results[-1] = _result(last.command, last.exit_code, stdout="zfs\n")
     return FakeTransport(
         deque((CapabilityCheck("ssh"),)),
-        deque(
-            _result(command, code)
-            for command, code in zip(commands, exit_codes, strict=True)
-        ),
+        deque(results),
     )
 
 
@@ -96,6 +106,8 @@ def test_remote_preflight_checks_every_layer_without_submitting() -> None:
     assert all(
         "sbatch --parsable" not in " ".join(call.argv) for call in transport.run_calls
     )
+    filesystem = report.checks[-1]
+    assert filesystem.details == {"filesystem_type": "zfs"}
 
 
 def test_connectivity_failure_blocks_remote_checks_and_redacts_diagnostics() -> None:

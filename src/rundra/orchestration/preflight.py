@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import PurePosixPath
 from types import MappingProxyType
 
 from rundra.adapters.slurm import SlurmScriptError, render_sbatch_script
@@ -16,6 +18,7 @@ from rundra.ports import (
 )
 
 _REMOTE_BACKENDS = ("ssh", "slurm", "rsync", "apptainer")
+_FILESYSTEM_TYPE = re.compile(r"[A-Za-z0-9._+-]+\Z")
 _RESOURCE_CHECK_SCRIPT = """\
 set -eu
 script=$(mktemp "${TMPDIR:-/tmp}/rundra-preflight.XXXXXX")
@@ -330,20 +333,42 @@ class RemotePreflight:
         )
 
     def _shared_filesystem_check(self) -> PreflightCheck:
-        return self._remote_check(
+        shared_root = PurePosixPath("/shoalhome")
+        workspace = PurePosixPath(self._target.workspace)
+        if not workspace.is_relative_to(shared_root) or workspace == shared_root:
+            return _failed(
+                "shared_filesystem",
+                "staging",
+                "Remote workspace is not beneath the documented /shoalhome shared root",
+                "Use a user-owned workspace below /shoalhome for the Shoal target.",
+            )
+        command = Command(("stat", "-f", "-c", "%T", "--", str(workspace)))
+        try:
+            result = self._transport.run(command)
+        except Exception:
+            return _failed(
+                "shared_filesystem",
+                "staging",
+                "Could not inspect the remote workspace filesystem",
+                "Verify stat is available and the /shoalhome workspace is accessible.",
+            )
+        file_system_type = result.stdout.strip()
+        if (
+            result.exit_code != 0
+            or _FILESYSTEM_TYPE.fullmatch(file_system_type) is None
+        ):
+            return _failed(
+                "shared_filesystem",
+                "staging",
+                "Remote workspace filesystem could not be identified safely",
+                "Verify the /shoalhome mount and rerun preflight.",
+                exit_code=result.exit_code,
+            )
+        return _passed(
             "shared_filesystem",
             "staging",
-            Command(
-                (
-                    "/bin/sh",
-                    "-c",
-                    'case "$(stat -f -c %T -- "$1")" in nfs|nfs4) exit 0;; *) exit 1;; esac',
-                    "rundra-filesystem-check",
-                    str(self._target.workspace),
-                )
-            ),
-            "Remote workspace is on an NFS filesystem",
-            "Use a /shoalhome workspace shared with compute nodes or verify the site mount.",
+            "Remote workspace is beneath /shoalhome and its filesystem is readable",
+            filesystem_type=file_system_type,
         )
 
     def _capability_check(

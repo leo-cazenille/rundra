@@ -2,7 +2,7 @@
 
 Shoal is Rundra's first real-cluster validation target. Its known path is a
 local client through the `fishvision` SSH host, then Slurm and Apptainer on the
-compute nodes, with `/shoalhome` shared between the login and compute nodes.
+compute nodes, with `/shoalhome` intended as the shared workspace root.
 
 The checked target example is
 [`examples/shoal/targets.yaml`](../examples/shoal/targets.yaml). Copy it to an
@@ -76,7 +76,7 @@ After the pure plan passes, preflight checks these layers independently:
 - remote `sbatch`, `squeue`, `sacct`, and `scancel` commands;
 - remote Apptainer availability and image inspection;
 - requested Slurm resources through `sbatch --test-only`;
-- an NFS filesystem beneath the configured workspace.
+- a safely identified filesystem beneath the documented `/shoalhome` root.
 
 `sbatch --test-only` writes a temporary script, asks Slurm to validate the
 request, and removes the script. It does not submit a job. The M4.2 harness does
@@ -85,7 +85,22 @@ not allocate a Rundra workspace or Run ID, stage source, invoke `rundr run` or
 provide a corrective action without copying arbitrary remote stderr into test
 output.
 
-The NFS check observes the login-side mount only. Compute-node visibility is
-not claimed until the bounded CPU execution in M4.3. Ordinary `uv run pytest`
-continues to skip every marked Shoal test and never contacts the cluster. GPU
-submission remains a later, separately authorized checkpoint.
+The filesystem check observes the login-side mount only. Compute-node
+visibility is not claimed until the bounded CPU execution in M4.3. Ordinary
+`uv run pytest` continues to skip every marked Shoal test and never contacts
+the cluster. GPU submission remains a later, separately authorized checkpoint.
+
+### Recorded M4.2 observation
+
+On 2026-08-15, the explicitly enabled harness passed against `fishvision` with
+the owner-only `/shoalhome/shoal/.rundra` workspace and the readable
+`/shoalhome/shoal/test_slurm_jobs/alpine.sif` image. The one-Task plan requested
+one CPU, no GPU, 1 GiB, and five minutes. OpenSSH, local rsync, the required
+remote Slurm commands, remote Apptainer, image inspection, and
+`sbatch --test-only` all passed. No Run ID or scheduler job ID was created.
+
+Both `stat` and `findmnt` reported the login-side `/shoalhome` filesystem as
+`zfs`, contrary to the earlier NFS-specific assumption. Preflight therefore
+records a safely bounded filesystem-type value while requiring the workspace
+to remain below `/shoalhome`; it does not infer compute-node visibility from a
+login-side filesystem label.
