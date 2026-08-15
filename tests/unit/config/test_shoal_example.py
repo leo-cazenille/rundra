@@ -67,3 +67,23 @@ def test_checked_shoal_gpu_example_is_bounded_and_enables_both_gpu_layers() -> N
     script = render_sbatch_script(SchedulerGroup((unit,)))
     assert "#SBATCH --gpus-per-task=1\n" in script
     assert "apptainer --nv" in script
+
+
+def test_checked_shoal_failure_example_is_bounded_and_cpu_only() -> None:
+    from rundra.config.experiments import load_experiment
+
+    experiment = load_experiment(
+        _REPOSITORY_ROOT / "examples/shoal/failure/experiment.yaml"
+    )
+
+    assert experiment.name == "shoal-failure"
+    assert experiment.container is not None
+    assert not experiment.container.gpu
+    assert experiment.resources.nodes == 1
+    assert experiment.resources.tasks == 1
+    assert experiment.resources.cpus_per_task == 1
+    assert experiment.resources.gpus_per_task == 0
+    assert experiment.resources.memory_bytes == 1024**3
+    assert experiment.resources.walltime is not None
+    assert experiment.resources.walltime.total_seconds() == 300
+    assert experiment.outputs == ("results/**",)
