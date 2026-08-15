@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from rundra.adapters._remote_shell import (
     RemoteShellSerializationError,
+    redacted_remote_command_summary,
     serialize_remote_command,
 )
 from rundra.domain.models import Command
@@ -71,6 +72,8 @@ class SSHTransport:
             raise SSHCommandError(str(error)) from error
         ssh_argv = (self._executable, "-T", "--", self._host, remote_command)
         started_at = datetime.now(UTC)
+        completed: subprocess.CompletedProcess[str] | None = None
+        failure_detail: str | None = None
         try:
             completed = subprocess.run(
                 ssh_argv,
@@ -81,10 +84,16 @@ class SSHTransport:
                 shell=False,
             )
         except (OSError, ValueError) as error:
+            failure_detail = _safe_failure_detail(error)
+        if failure_detail is not None:
+            summary = redacted_remote_command_summary(command)
             raise SSHExecutionError(
                 "Could not start SSH executable "
-                f"{self._executable!r} for host {self._host!r}: {error}"
-            ) from error
+                f"{self._executable!r} for host {self._host!r} while executing "
+                f"{summary}: {failure_detail}"
+            ) from None
+        if completed is None:  # pragma: no cover - defensive subprocess boundary
+            raise SSHExecutionError("SSH subprocess returned no result")
         finished_at = datetime.now(UTC)
         return CommandResult(
             command=command,
@@ -94,3 +103,10 @@ class SSHTransport:
             started_at=started_at,
             finished_at=finished_at,
         )
+
+
+def _safe_failure_detail(error: OSError | ValueError) -> str:
+    detail = type(error).__name__
+    if isinstance(error, OSError) and error.errno is not None:
+        detail = f"{detail} (errno {error.errno})"
+    return detail

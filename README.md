@@ -24,6 +24,10 @@ configuration, agent authentication, jump-host configuration, and host-key
 verification. Remote staging and CLI execution are not yet implemented, so an
 SSH target is not yet runnable through `rundr run`.
 
+M2.2 centralizes the unavoidable remote-shell serialization boundary. Literal
+arguments, environment values, and working directories are POSIX-shell quoted;
+diagnostics expose only structurally redacted command summaries.
+
 M1E adds strict project launch profiles, optional user defaults, deterministic
 resolution precedence, concise `run`/`plan` commands, and generated seeds that
 are displayed and durably recorded before execution.

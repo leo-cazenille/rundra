@@ -10,6 +10,7 @@ import yaml
 
 from rundra.adapters._remote_shell import (
     RemoteShellSerializationError,
+    redacted_remote_command_summary,
     serialize_remote_command,
 )
 from rundra.config.experiments import load_experiment
@@ -138,6 +139,41 @@ def test_remote_shell_serialization_orders_environment_deterministically() -> No
     assert serialize_remote_command(command) == (
         "exec env -- A_FIRST=a Z_LAST=z program"
     )
+
+
+def test_remote_command_summary_structurally_redacts_every_literal() -> None:
+    command = Command(
+        ("secret-program", "secret-argument"),
+        environment={"SECRET_NAME": "secret-environment-value"},
+        working_directory=PurePosixPath("/secret/working-directory"),
+    )
+
+    summary = redacted_remote_command_summary(command)
+
+    assert summary == (
+        "remote command (argv=<redacted:2>, environment=<redacted:1>, "
+        "working_directory=<redacted>)"
+    )
+    for sensitive in (
+        "secret-program",
+        "secret-argument",
+        "SECRET_NAME",
+        "secret-environment-value",
+        "/secret/working-directory",
+    ):
+        assert sensitive not in summary
+
+
+def test_remote_command_summary_reports_absent_optional_values() -> None:
+    assert redacted_remote_command_summary(Command(("program",))) == (
+        "remote command (argv=<redacted:1>, environment=<redacted:0>, "
+        "working_directory=unset)"
+    )
+
+
+def test_remote_command_summary_rejects_non_commands() -> None:
+    with pytest.raises(TypeError, match="requires a Command"):
+        redacted_remote_command_summary(object())  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(

@@ -2044,8 +2044,16 @@ client raises a transport-specific error.
 
 OpenSSH necessarily passes its remote command through the login shell. Rundra
 quotes each command argument, environment assignment, and working directory at
-that single boundary. The reusable quoting boundary and its exhaustive
-cross-adapter hardening remain M2.2 work.
+one focused, reusable serialization boundary. The boundary rejects values that
+cannot cross a process or POSIX-shell interface, orders environment assignments
+deterministically, and preserves spaces, quotes, metacharacters, backslashes,
+and newlines as literal data.
+
+The executable remote string contains the command's literal values and must not
+be used as diagnostic text. Transport diagnostics use only a structural summary
+containing redaction markers and value counts. Process-start exception text and
+exception chaining are omitted because either could echo arguments or
+environment data supplied to the subprocess boundary.
 
 The transport should not require inbound connectivity from the cluster to the client.
 

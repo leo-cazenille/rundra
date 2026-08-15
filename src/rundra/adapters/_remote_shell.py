@@ -32,6 +32,21 @@ def serialize_remote_command(command: Command) -> str:
     return " ".join(words)
 
 
+def redacted_remote_command_summary(command: Command) -> str:
+    """Describe command shape for diagnostics without exposing literal values."""
+    if type(command) is not Command:
+        raise TypeError("redacted_remote_command_summary requires a Command")
+    working_directory = (
+        "<redacted>" if command.working_directory is not None else "unset"
+    )
+    return (
+        "remote command "
+        f"(argv=<redacted:{len(command.argv)}>, "
+        f"environment=<redacted:{len(command.environment)}>, "
+        f"working_directory={working_directory})"
+    )
+
+
 def _validate_literal(value: str, *, kind: str) -> None:
     if "\x00" in value:
         raise RemoteShellSerializationError(f"Remote {kind} must not contain NUL")

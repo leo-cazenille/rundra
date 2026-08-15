@@ -154,12 +154,16 @@ def test_ssh_transport_does_not_leak_command_or_environment_on_start_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fail_start(argv: tuple[str, ...], **options: object) -> None:
-        raise OSError("process unavailable")
+        raise OSError(
+            "credential-command super-secret-value "
+            "API_TOKEN=another-secret-value /secret/work"
+        )
 
     monkeypatch.setattr(subprocess, "run", fail_start)
     command = Command(
         ("credential-command", "super-secret-value"),
         environment={"API_TOKEN": "another-secret-value"},
+        working_directory=PurePosixPath("/secret/work"),
     )
 
     with pytest.raises(SSHExecutionError) as captured:
@@ -171,6 +175,13 @@ def test_ssh_transport_does_not_leak_command_or_environment_on_start_failure(
     assert "super-secret-value" not in diagnostic
     assert "API_TOKEN" not in diagnostic
     assert "another-secret-value" not in diagnostic
+    assert "/secret/work" not in diagnostic
+    assert "argv=<redacted:2>" in diagnostic
+    assert "environment=<redacted:1>" in diagnostic
+    assert "working_directory=<redacted>" in diagnostic
+    assert "OSError" in diagnostic
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
 
 
 @pytest.mark.parametrize(
