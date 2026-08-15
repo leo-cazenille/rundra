@@ -32,6 +32,7 @@ from rundra.config.targets import load_targets
 from rundra.domain.models import (
     Artifact,
     ArtifactKind,
+    Command,
     ExperimentSpec,
     RunId,
     Target,
@@ -842,11 +843,28 @@ def logs_operation(
     store: RunStore,
     *,
     task: str | None = None,
+    scheduler: Scheduler | None = None,
+    transport: Transport | None = None,
 ) -> OperationResult[LogsValue]:
     record, error = _load_record(run_id, store)
     if error is not None:
         return OperationResult.failure("logs", error)
     assert record is not None
+    if record.run.target.scheduler.kind == "slurm":
+        try:
+            active_scheduler = scheduler or _record_slurm_scheduler(record)
+            record = SchedulerLifecycleService(
+                store=store, scheduler=active_scheduler
+            ).refresh(record)
+        except (OrchestrationError, RuntimeError, TypeError, ValueError) as error:
+            return OperationResult.failure(
+                "logs",
+                OperationError(
+                    "SCHEDULER_QUERY_FAILED",
+                    f"Run {record.run.id} scheduler query failed: {error}",
+                    {"run_id": str(record.run.id)},
+                ),
+            )
     task_id = _selected_task_id(record, task)
     if isinstance(task_id, OperationError):
         return OperationResult.failure("logs", task_id)
@@ -862,9 +880,14 @@ def logs_operation(
             ),
         )
     try:
-        stdout_text = Path(str(stdout.path)).read_text(encoding="utf-8")
-        stderr_text = Path(str(stderr.path)).read_text(encoding="utf-8")
-    except OSError as error:
+        if record.run.target.transport.kind == "ssh":
+            active_transport = transport or _record_ssh_transport(record)
+            stdout_text = _read_remote_log(active_transport, stdout.path)
+            stderr_text = _read_remote_log(active_transport, stderr.path)
+        else:
+            stdout_text = Path(str(stdout.path)).read_text(encoding="utf-8")
+            stderr_text = Path(str(stderr.path)).read_text(encoding="utf-8")
+    except (OSError, RuntimeError) as error:
         return OperationResult.failure(
             "logs",
             OperationError(
@@ -1158,15 +1181,35 @@ def _execution_adapters(
         remote_transport,
         RsyncStager(remote_transport, host=host),
         RemoteApptainerRuntime(remote_transport),
-        SlurmScheduler(remote_transport),
+        SlurmScheduler(
+            remote_transport,
+            log_directory=target.workspace / ".rundra-scheduler-logs",
+        ),
     )
 
 
 def _record_slurm_scheduler(record: RunRecord) -> SlurmScheduler:
+    transport = _record_ssh_transport(record)
+    return SlurmScheduler(
+        transport,
+        log_directory=record.run.target.workspace / ".rundra-scheduler-logs",
+    )
+
+
+def _record_ssh_transport(record: RunRecord) -> SSHTransport:
     host = record.run.target.transport.options.get("host")
     if type(host) is not str:
         raise ValueError("Persisted SSH target host is unavailable")
-    return SlurmScheduler(SSHTransport(host))
+    return SSHTransport(host)
+
+
+def _read_remote_log(transport: Transport, path: PurePath) -> str:
+    result = transport.run(Command(("cat", "--", str(path))))
+    if result.exit_code != 0:
+        raise RuntimeError(
+            f"Remote log {path} is unavailable (exit code {result.exit_code})"
+        )
+    return result.stdout
 
 
 def _config_error(error: ConfigError) -> OperationError:

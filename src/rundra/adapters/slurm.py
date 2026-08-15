@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta, tzinfo
+from pathlib import PurePath
 
 from rundra.adapters._remote_shell import serialize_remote_command
 from rundra.domain.models import Command, NativeValue, ResourceRequest
@@ -22,6 +24,14 @@ _ALLOWED_OPTIONS = frozenset((*_VALUE_OPTIONS, *_FLAG_OPTIONS))
 _PARSABLE_SUBMISSION = re.compile(r"(?P<job_id>[0-9]+)(?:;(?P<cluster>[^;\r\n]+))?\Z")
 _SUBMIT_SCRIPT = """\
 set -eu
+script=$(mktemp "${TMPDIR:-/tmp}/rundra-sbatch.XXXXXX")
+trap 'rm -f "$script"' EXIT HUP INT TERM
+printf '%s' "$1" > "$script"
+"$2" --parsable "$script"
+"""
+_SUBMIT_WITH_LOG_DIR_SCRIPT = """\
+set -eu
+mkdir -p -- "$3"
 script=$(mktemp "${TMPDIR:-/tmp}/rundra-sbatch.XXXXXX")
 trap 'rm -f "$script"' EXIT HUP INT TERM
 printf '%s' "$1" > "$script"
@@ -57,6 +67,7 @@ class SlurmScheduler:
         sacct: str = "sacct",
         scancel: str = "scancel",
         timezone: tzinfo = UTC,
+        log_directory: PurePath | None = None,
     ) -> None:
         if not isinstance(transport, Transport):
             raise TypeError("SlurmScheduler transport must implement Transport")
@@ -76,26 +87,44 @@ class SlurmScheduler:
                 )
         if not isinstance(timezone, tzinfo):
             raise TypeError("SlurmScheduler timezone must be a tzinfo")
+        if log_directory is not None:
+            if not isinstance(log_directory, PurePath):
+                raise TypeError("SlurmScheduler log_directory must be a path or None")
+            rendered_log_directory = str(log_directory)
+            if (
+                not log_directory.is_absolute()
+                or "\x00" in rendered_log_directory
+                or any(character.isspace() for character in rendered_log_directory)
+            ):
+                raise ValueError(
+                    "SlurmScheduler log_directory must be absolute and safe"
+                )
         self._transport = transport
         self._sbatch = sbatch
         self._squeue = squeue
         self._sacct = sacct
         self._scancel = scancel
         self._timezone = timezone
+        self._log_directory = log_directory
 
     def submit(self, group: SchedulerGroup) -> SchedulerSubmission:
         """Submit one generated script and retain opaque Slurm identity."""
-        script = render_sbatch_script(group)
-        command = Command(
-            (
-                "/bin/sh",
-                "-c",
-                _SUBMIT_SCRIPT,
-                "rundra-slurm-submit",
-                script,
-                self._sbatch,
-            )
+        stdout_path, stderr_path = self._log_paths("%j")
+        script = render_sbatch_script(
+            group, stdout_path=stdout_path, stderr_path=stderr_path
         )
+        command_arguments = [
+            "/bin/sh",
+            "-c",
+            _SUBMIT_SCRIPT,
+            "rundra-slurm-submit",
+            script,
+            self._sbatch,
+        ]
+        if self._log_directory is not None:
+            command_arguments[2] = _SUBMIT_WITH_LOG_DIR_SCRIPT
+            command_arguments.append(str(self._log_directory))
+        command = Command(tuple(command_arguments))
         try:
             result = self._transport.run(command)
         except Exception as error:
@@ -157,14 +186,16 @@ class SlurmScheduler:
                 _parse_sacct(accounting.stdout, missing, self._timezone)
             )
         return tuple(
-            observations.get(
-                reference,
-                SchedulerObservation(
+            self._with_log_metadata(
+                observations.get(
                     reference,
-                    ExecutionState.UNKNOWN,
-                    "ACCOUNTING_PENDING",
-                    metadata={"accounting_pending": True},
-                ),
+                    SchedulerObservation(
+                        reference,
+                        ExecutionState.UNKNOWN,
+                        "ACCOUNTING_PENDING",
+                        metadata={"accounting_pending": True},
+                    ),
+                )
             )
             for reference in normalized
         )
@@ -210,8 +241,36 @@ class SlurmScheduler:
             )
         return result
 
+    def _log_paths(self, job_id: str) -> tuple[PurePath | None, PurePath | None]:
+        if self._log_directory is None:
+            return None, None
+        return (
+            self._log_directory / f"{job_id}.stdout",
+            self._log_directory / f"{job_id}.stderr",
+        )
 
-def render_sbatch_script(group: SchedulerGroup) -> str:
+    def _with_log_metadata(
+        self, observation: SchedulerObservation
+    ) -> SchedulerObservation:
+        stdout_path, stderr_path = self._log_paths(observation.reference.native_id)
+        if stdout_path is None or stderr_path is None:
+            return observation
+        return replace(
+            observation,
+            metadata={
+                **observation.metadata,
+                "stdout_path": str(stdout_path),
+                "stderr_path": str(stderr_path),
+            },
+        )
+
+
+def render_sbatch_script(
+    group: SchedulerGroup,
+    *,
+    stdout_path: PurePath | None = None,
+    stderr_path: PurePath | None = None,
+) -> str:
     """Render one deterministic, inspectable single-Task sbatch script."""
     if type(group) is not SchedulerGroup:
         raise TypeError("render_sbatch_script requires a SchedulerGroup")
@@ -225,6 +284,17 @@ def render_sbatch_script(group: SchedulerGroup) -> str:
         f"#SBATCH --ntasks={resources.tasks}",
         f"#SBATCH --cpus-per-task={resources.cpus_per_task}",
     ]
+    if (stdout_path is None) != (stderr_path is None):
+        raise SlurmScriptError(
+            "Slurm stdout and stderr paths must be provided together"
+        )
+    if stdout_path is not None and stderr_path is not None:
+        directives.extend(
+            (
+                f"#SBATCH --output={_directive_path(stdout_path, name='stdout')}",
+                f"#SBATCH --error={_directive_path(stderr_path, name='stderr')}",
+            )
+        )
     if resources.gpus_per_task:
         directives.append(f"#SBATCH --gpus-per-task={resources.gpus_per_task}")
     if resources.memory_bytes is not None:
@@ -257,6 +327,19 @@ def _native_directives(resources: ResourceRequest) -> tuple[str, ...]:
             if value:
                 directives.append(f"#SBATCH --{name}")
     return tuple(directives)
+
+
+def _directive_path(value: PurePath, *, name: str) -> str:
+    if not isinstance(value, PurePath):
+        raise TypeError(f"Slurm {name} path must be a path")
+    rendered = str(value)
+    if (
+        not value.is_absolute()
+        or "\x00" in rendered
+        or any(character.isspace() for character in rendered)
+    ):
+        raise SlurmScriptError(f"Slurm {name} path must be absolute and safe")
+    return rendered
 
 
 def _native_value(name: str, value: NativeValue) -> str:

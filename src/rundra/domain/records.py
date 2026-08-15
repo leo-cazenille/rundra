@@ -3,10 +3,11 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
+from math import isfinite
 from pathlib import PurePath
 from types import MappingProxyType
 
-from rundra.domain.models import Artifact, ExperimentSpec, Run, TaskId
+from rundra.domain.models import Artifact, ExperimentSpec, NativeValue, Run, TaskId
 
 
 def _freeze_strings(value: object, *, field_name: str) -> tuple[str, ...]:
@@ -60,6 +61,7 @@ class RunRecord:
     started_at: datetime | None = None
     completed_at: datetime | None = None
     native_state: str | None = None
+    scheduler_metadata: Mapping[str, NativeValue] = field(default_factory=dict)
     task_exit_codes: Mapping[TaskId, int] = field(default_factory=dict)
     artifacts: tuple[Artifact, ...] = ()
 
@@ -145,6 +147,26 @@ class RunRecord:
             raise TypeError("RunRecord task_exit_codes must map TaskIds to integers")
         if not set(exit_codes).issubset(task_ids):
             raise ValueError("RunRecord task_exit_codes contain an unknown TaskId")
+        if not isinstance(self.scheduler_metadata, Mapping) or any(
+            type(key) is not str
+            or not key.strip()
+            or "\x00" in key
+            or type(value) not in (str, int, float, bool)
+            for key, value in self.scheduler_metadata.items()
+        ):
+            raise TypeError(
+                "RunRecord scheduler_metadata must map safe strings to scalar values"
+            )
+        if any(
+            type(value) is float and not isfinite(value)
+            for value in self.scheduler_metadata.values()
+        ):
+            raise ValueError("RunRecord scheduler_metadata floats must be finite")
+        object.__setattr__(
+            self,
+            "scheduler_metadata",
+            MappingProxyType(dict(self.scheduler_metadata)),
+        )
         object.__setattr__(
             self,
             "task_exit_codes",

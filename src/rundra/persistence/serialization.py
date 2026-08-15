@@ -48,6 +48,7 @@ _RECORD_FIELDS = frozenset(
         "started_at",
         "completed_at",
         "native_state",
+        "scheduler_metadata",
         "task_exit_codes",
         "artifacts",
     }
@@ -77,6 +78,7 @@ def record_to_dict(record: RunRecord) -> JsonObject:
         "started_at": _datetime_or_none(record.started_at),
         "completed_at": _datetime_or_none(record.completed_at),
         "native_state": record.native_state,
+        "scheduler_metadata": dict(sorted(record.scheduler_metadata.items())),
         "task_exit_codes": {
             str(task_id): exit_code
             for task_id, exit_code in sorted(
@@ -132,6 +134,9 @@ def record_from_dict(value: object) -> RunRecord:
             ),
             native_state=_optional_string(
                 document["native_state"], path="native_state"
+            ),
+            scheduler_metadata=_scalar_mapping(
+                document["scheduler_metadata"], path="scheduler_metadata"
             ),
             task_exit_codes=_parse_exit_codes(document["task_exit_codes"]),
             artifacts=_parse_artifacts(document["artifacts"]),

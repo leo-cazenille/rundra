@@ -105,8 +105,6 @@ class SchedulerLifecycleService:
     def refresh(self, record: RunRecord) -> RunRecord:
         """Query and durably apply one scheduler observation when active."""
         _require_record(record)
-        if record.run.state in _TERMINAL_STATES:
-            return record
         reference = _record_reference(record)
         observation = _single_observation(
             self._scheduler.query((reference,)), reference
@@ -597,15 +595,34 @@ def _observed_record(
         exit_codes[task_id] = observation.exit_code
     terminal = state in _TERMINAL_STATES
     nodes = observation.metadata.get("allocated_nodes")
+    scheduler_metadata = dict(record.scheduler_metadata)
+    if observation.native_state != "ACCOUNTING_PENDING":
+        scheduler_metadata.pop("accounting_pending", None)
+    scheduler_metadata.update(observation.metadata)
+    artifacts = list(record.artifacts)
+    for metadata_name, kind in (
+        ("stdout_path", ArtifactKind.STDOUT),
+        ("stderr_path", ArtifactKind.STDERR),
+    ):
+        path = observation.metadata.get(metadata_name)
+        if type(path) is str and not any(
+            artifact.kind is kind and artifact.task_id == task_id
+            for artifact in artifacts
+        ):
+            artifacts.append(Artifact(kind, PurePosixPath(path), task_id=task_id))
     return replace(
         updated,
         allocated_nodes=(str(nodes),) if nodes is not None else record.allocated_nodes,
         started_at=record.started_at or observation.started_at,
         completed_at=(
-            observation.finished_at or observed_at if terminal else record.completed_at
+            record.completed_at or observation.finished_at or observed_at
+            if terminal
+            else record.completed_at
         ),
         native_state=observation.native_state,
+        scheduler_metadata=scheduler_metadata,
         task_exit_codes=exit_codes,
+        artifacts=tuple(artifacts),
     )
 
 

@@ -3,10 +3,11 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 import pytest
 
+from rundra.cli.operations import LogsValue, logs_operation
 from rundra.domain.models import (
     BackendConfig,
     Command,
@@ -24,6 +25,8 @@ from rundra.domain.states import ExecutionState
 from rundra.orchestration.service import OrchestrationError, SchedulerLifecycleService
 from rundra.persistence import JsonRunStore
 from rundra.ports import (
+    CapabilityCheck,
+    CommandResult,
     SchedulerGroup,
     SchedulerObservation,
     SchedulerReference,
@@ -65,6 +68,19 @@ class SequenceScheduler:
         if isinstance(outcome, Exception):
             raise outcome
         return (outcome,)
+
+
+class LogTransport:
+    def __init__(self) -> None:
+        self.calls: list[Command] = []
+
+    def check(self) -> CapabilityCheck:
+        return CapabilityCheck("logs")
+
+    def run(self, command: Command) -> CommandResult:
+        self.calls.append(command)
+        content = "remote stdout\n" if str(command.argv[-1]).endswith("stdout") else ""
+        return CommandResult(command, 0, content, "", _CREATED, _CREATED)
 
 
 def _record() -> RunRecord:
@@ -215,3 +231,40 @@ def test_cancel_reconciles_a_race_and_is_idempotent_after_terminal(tmp_path) -> 
     assert repeated == cancelled
     assert scheduler.cancel_calls == 1
     assert scheduler.query_calls == 1
+
+
+def test_logs_use_normalized_artifacts_without_exposing_slurm_filenames(
+    tmp_path: Path,
+) -> None:
+    store = JsonRunStore(tmp_path / "records")
+    store.create(_record())
+    terminal = SchedulerObservation(
+        _REFERENCE,
+        ExecutionState.SUCCEEDED,
+        "COMPLETED",
+        exit_code=0,
+        started_at=_CREATED + timedelta(seconds=2),
+        finished_at=_CREATED + timedelta(seconds=3),
+        metadata={
+            "source": "sacct",
+            "stdout_path": "/remote/logs/12345.stdout",
+            "stderr_path": "/remote/logs/12345.stderr",
+        },
+    )
+    scheduler = SequenceScheduler(deque([terminal]))
+    transport = LogTransport()
+
+    result = logs_operation(
+        str(_RUN_ID), store, scheduler=scheduler, transport=transport
+    )
+
+    assert result.ok and isinstance(result.value, LogsValue)
+    assert result.value.stdout == "remote stdout\n"
+    assert result.value.stderr == ""
+    assert result.value.task_id == _TASK_ID
+    assert transport.calls == [
+        Command(("cat", "--", "/remote/logs/12345.stdout")),
+        Command(("cat", "--", "/remote/logs/12345.stderr")),
+    ]
+    persisted = store.load(_RUN_ID)
+    assert persisted.scheduler_metadata["source"] == "sacct"

@@ -153,6 +153,32 @@ def test_resource_rounding_never_requests_less_than_the_portable_value() -> None
     assert "--exclusive" not in script
 
 
+def test_sbatch_script_uses_explicit_normalized_log_paths() -> None:
+    script = render_sbatch_script(
+        _group(),
+        stdout_path=PurePosixPath("/remote/logs/%j.stdout"),
+        stderr_path=PurePosixPath("/remote/logs/%j.stderr"),
+    )
+
+    assert "#SBATCH --output=/remote/logs/%j.stdout" in script
+    assert "#SBATCH --error=/remote/logs/%j.stderr" in script
+
+
+@pytest.mark.parametrize(
+    ("stdout", "stderr"),
+    [
+        (PurePosixPath("relative.out"), PurePosixPath("/logs/error")),
+        (PurePosixPath("/logs/with space"), PurePosixPath("/logs/error")),
+        (PurePosixPath("/logs/output"), None),
+    ],
+)
+def test_sbatch_log_paths_must_be_complete_absolute_and_directive_safe(
+    stdout: PurePosixPath, stderr: PurePosixPath | None
+) -> None:
+    with pytest.raises(SlurmScriptError, match="path|provided together"):
+        render_sbatch_script(_group(), stdout_path=stdout, stderr_path=stderr)
+
+
 @pytest.mark.parametrize(
     ("options", "message"),
     [
@@ -219,6 +245,22 @@ def test_slurm_scheduler_submits_generated_script_with_parsable_output() -> None
     assert transport.run_calls == [expected_command]
 
 
+def test_slurm_submission_creates_and_uses_configured_log_directory() -> None:
+    transport = ScriptedTransport(deque([]))
+    scheduler = SlurmScheduler(
+        transport, log_directory=PurePosixPath("/remote/work/.scheduler-logs")
+    )
+    transport.results.append(_command_result(Command(("unused",)), 0, "12345\n"))
+
+    scheduler.submit(_group())
+
+    command = transport.run_calls[0]
+    assert "mkdir -p" in command.argv[2]
+    assert command.argv[-1] == "/remote/work/.scheduler-logs"
+    assert "#SBATCH --output=/remote/work/.scheduler-logs/%j.stdout" in command.argv[4]
+    assert "#SBATCH --error=/remote/work/.scheduler-logs/%j.stderr" in command.argv[4]
+
+
 @pytest.mark.parametrize(
     ("exit_code", "stdout", "stderr", "message"),
     [
@@ -265,7 +307,9 @@ def test_slurm_query_combines_queue_and_accounting_in_request_order() -> None:
     first = SchedulerReference("123")
     second = SchedulerReference("456")
     transport = ScriptedTransport(deque([]))
-    scheduler = SlurmScheduler(transport)
+    scheduler = SlurmScheduler(
+        transport, log_directory=PurePosixPath("/remote/work/.scheduler-logs")
+    )
     squeue_command = Command(
         (
             "squeue",
@@ -314,6 +358,8 @@ def test_slurm_query_combines_queue_and_accounting_in_request_order() -> None:
     assert observations[0].metadata == {
         "source": "squeue",
         "allocated_nodes": "node[01-02]",
+        "stdout_path": "/remote/work/.scheduler-logs/123.stdout",
+        "stderr_path": "/remote/work/.scheduler-logs/123.stderr",
     }
     assert observations[1].state is ExecutionState.FAILED
     assert observations[1].native_state == "OUT_OF_MEMORY"
