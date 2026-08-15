@@ -200,3 +200,29 @@ def test_unknown_command_is_a_structured_cli_operation_error() -> None:
     assert result.stderr == ""
     assert document["operation"] == "cli"
     assert document["error"]["code"] == "CLI_USAGE_ERROR"
+
+
+def test_json_without_a_command_is_a_structured_usage_error() -> None:
+    result = _run("--json")
+    document = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert result.stderr == ""
+    assert document == {
+        "error": {
+            "code": "CLI_USAGE_ERROR",
+            "details": {"command": "cli"},
+            "message": "a command is required",
+        },
+        "format_version": 1,
+        "ok": False,
+        "operation": "cli",
+    }
+
+
+def test_no_arguments_remain_successful_human_help() -> None:
+    result = _run()
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert result.stdout.startswith("usage: rundr")

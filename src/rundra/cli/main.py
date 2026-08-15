@@ -226,6 +226,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(output, file=sys.stdout if json_requested else sys.stderr)
         return 1
     if arguments.command is None:
+        if arguments.json:
+            missing_command_result: OperationResult[Any] = OperationResult.failure(
+                "cli",
+                OperationError(
+                    "CLI_USAGE_ERROR",
+                    "a command is required",
+                    {"command": "cli"},
+                ),
+            )
+            print(render_json(missing_command_result))
+            return 1
         parser.print_help()
         return 0
     result: OperationResult[Any]
