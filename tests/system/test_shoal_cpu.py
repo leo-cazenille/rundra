@@ -162,8 +162,9 @@ def test_shoal_cpu_run_preserves_dirty_source_and_retrieves_evidence(
     assert record.scheduler_job_ids[0].isdigit()
     assert record.allocated_nodes
     assert record.submitted_at is not None
-    assert record.started_at is not None
     assert record.completed_at is not None
+    assert record.scheduler_metadata["native_start"]
+    assert record.scheduler_metadata["native_end"]
 
     assert record.git_commit is not None
     assert record.git_branch == "main"

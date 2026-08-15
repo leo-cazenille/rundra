@@ -411,6 +411,60 @@ def test_slurm_query_marks_accounting_lag_explicitly() -> None:
     assert observation.metadata == {"accounting_pending": True}
 
 
+def test_slurm_query_falls_back_to_scontrol_when_accounting_is_disabled() -> None:
+    reference = SchedulerReference("18")
+    transport = ScriptedTransport(
+        deque(
+            (
+                _command_result(Command(("unused",)), 0, ""),
+                _command_result(
+                    Command(("unused",)),
+                    1,
+                    "",
+                    "Slurm accounting storage is disabled",
+                ),
+                _command_result(
+                    Command(("unused",)),
+                    0,
+                    "JobId=18 JobState=COMPLETED ExitCode=0:0 "
+                    "StartTime=2026-08-15T21:13:48 "
+                    "EndTime=2026-08-15T21:13:49 NodeList=shoal1\n",
+                ),
+            )
+        )
+    )
+
+    observation = SlurmScheduler(transport).query((reference,))[0]
+
+    assert observation.state is ExecutionState.SUCCEEDED
+    assert observation.native_state == "COMPLETED"
+    assert observation.exit_code == 0
+    assert observation.started_at is None
+    assert observation.finished_at is None
+    assert observation.metadata == {
+        "source": "scontrol",
+        "native_start": "2026-08-15T21:13:48",
+        "native_end": "2026-08-15T21:13:49",
+        "allocated_nodes": "shoal1",
+    }
+    assert transport.run_calls[-1] == Command(("scontrol", "show", "job", "-o", "18"))
+
+
+def test_slurm_query_reports_failed_scontrol_fallback() -> None:
+    transport = ScriptedTransport(
+        deque(
+            (
+                _command_result(Command(("unused",)), 0, ""),
+                _command_result(Command(("unused",)), 1, "", "accounting disabled"),
+                _command_result(Command(("unused",)), 1, "", "invalid job id"),
+            )
+        )
+    )
+
+    with pytest.raises(SlurmQueryError, match="scontrol fallback failed"):
+        SlurmScheduler(transport).query((SchedulerReference("18"),))
+
+
 @pytest.mark.parametrize(
     ("native", "exit_code", "expected"),
     [

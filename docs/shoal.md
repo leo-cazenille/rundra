@@ -73,7 +73,7 @@ After the pure plan passes, preflight checks these layers independently:
 - local OpenSSH and rsync clients;
 - authenticated SSH connectivity under normal host-key policy;
 - an existing writable/searchable remote workspace or nearest existing parent;
-- remote `sbatch`, `squeue`, `sacct`, and `scancel` commands;
+- remote `sbatch`, `squeue`, `sacct`, `scancel`, and `scontrol` commands;
 - remote Apptainer availability and image inspection;
 - requested Slurm resources through `sbatch --test-only`;
 - a safely identified filesystem beneath the documented `/shoalhome` root.

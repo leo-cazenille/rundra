@@ -66,6 +66,7 @@ class SlurmScheduler:
         squeue: str = "squeue",
         sacct: str = "sacct",
         scancel: str = "scancel",
+        scontrol: str = "scontrol",
         timezone: tzinfo | None = None,
         log_directory: PurePath | None = None,
     ) -> None:
@@ -76,6 +77,7 @@ class SlurmScheduler:
             ("squeue", squeue),
             ("sacct", sacct),
             ("scancel", scancel),
+            ("scontrol", scontrol),
         ):
             if (
                 type(executable) is not str
@@ -104,6 +106,7 @@ class SlurmScheduler:
         self._squeue = squeue
         self._sacct = sacct
         self._scancel = scancel
+        self._scontrol = scontrol
         self._timezone = timezone
         self._log_directory = log_directory
 
@@ -168,23 +171,32 @@ class SlurmScheduler:
             reference for reference in normalized if reference not in observations
         )
         if missing:
-            accounting = self._run_query(
-                Command(
-                    (
-                        self._sacct,
-                        "--noheader",
-                        "--parsable2",
-                        "--jobs",
-                        ",".join(reference.native_id for reference in missing),
-                        "--format",
-                        "JobIDRaw,State%32,ExitCode,Start,End,NodeList",
-                    )
-                ),
-                source="sacct",
-            )
-            observations.update(
-                _parse_sacct(accounting.stdout, missing, self._timezone)
-            )
+            try:
+                accounting = self._run_query(
+                    Command(
+                        (
+                            self._sacct,
+                            "--noheader",
+                            "--parsable2",
+                            "--jobs",
+                            ",".join(reference.native_id for reference in missing),
+                            "--format",
+                            "JobIDRaw,State%32,ExitCode,Start,End,NodeList",
+                        )
+                    ),
+                    source="sacct",
+                )
+            except SlurmQueryError as accounting_error:
+                try:
+                    observations.update(self._query_scontrol(missing))
+                except SlurmQueryError as fallback_error:
+                    raise SlurmQueryError(
+                        f"{accounting_error}; scontrol fallback failed: {fallback_error}"
+                    ) from fallback_error
+            else:
+                observations.update(
+                    _parse_sacct(accounting.stdout, missing, self._timezone)
+                )
         return tuple(
             self._with_log_metadata(
                 observations.get(
@@ -240,6 +252,28 @@ class SlurmScheduler:
                 f"{source} failed with exit code {result.exit_code}: {detail}"
             )
         return result
+
+    def _query_scontrol(
+        self, references: tuple[SchedulerReference, ...]
+    ) -> dict[SchedulerReference, SchedulerObservation]:
+        observations: dict[SchedulerReference, SchedulerObservation] = {}
+        for reference in references:
+            result = self._run_query(
+                Command(
+                    (
+                        self._scontrol,
+                        "show",
+                        "job",
+                        "-o",
+                        reference.native_id,
+                    )
+                ),
+                source="scontrol",
+            )
+            observations[reference] = _parse_scontrol(
+                result.stdout, reference, self._timezone
+            )
+        return observations
 
     def _log_paths(self, job_id: str) -> tuple[PurePath | None, PurePath | None]:
         if self._log_directory is None:
@@ -470,6 +504,61 @@ def _parse_sacct(
             finished_at=(_parse_timestamp(raw_end, timezone) if terminal else None),
         )
     return observations
+
+
+def _parse_scontrol(
+    output: str,
+    reference: SchedulerReference,
+    timezone: tzinfo | None,
+) -> SchedulerObservation:
+    fields = {
+        name: _scontrol_field(output, name)
+        for name in (
+            "JobId",
+            "JobState",
+            "ExitCode",
+            "StartTime",
+            "EndTime",
+            "NodeList",
+        )
+    }
+    if fields["JobId"] != reference.native_id:
+        raise SlurmQueryError("scontrol returned a mismatched job")
+    native_state = fields["JobState"]
+    if native_state is None:
+        raise SlurmQueryError("scontrol did not return JobState")
+    raw_exit = fields["ExitCode"] or "Unknown"
+    exit_code = _parse_exit_code(raw_exit)
+    state = _portable_state(native_state, exit_code)
+    terminal = state in {
+        ExecutionState.SUCCEEDED,
+        ExecutionState.FAILED,
+        ExecutionState.CANCELLED,
+    }
+    raw_start = fields["StartTime"] or "Unknown"
+    raw_end = fields["EndTime"] or "Unknown"
+    nodes = fields["NodeList"] or "Unknown"
+    metadata: dict[str, NativeValue] = {"source": "scontrol"}
+    if raw_start not in {"N/A", "Unknown", "None"}:
+        metadata["native_start"] = raw_start
+    if raw_end not in {"N/A", "Unknown", "None"}:
+        metadata["native_end"] = raw_end
+    if nodes not in {"(null)", "N/A", "Unknown"}:
+        metadata["allocated_nodes"] = nodes
+    return SchedulerObservation(
+        reference,
+        state,
+        native_state,
+        exit_code=exit_code if terminal else None,
+        metadata=metadata,
+        started_at=_parse_timestamp(raw_start, timezone),
+        finished_at=_parse_timestamp(raw_end, timezone) if terminal else None,
+    )
+
+
+def _scontrol_field(output: str, name: str) -> str | None:
+    match = re.search(rf"(?:^|\s){re.escape(name)}=(\S+)", output)
+    return None if match is None else match.group(1)
 
 
 def _portable_state(native_state: str, exit_code: int | None) -> ExecutionState:

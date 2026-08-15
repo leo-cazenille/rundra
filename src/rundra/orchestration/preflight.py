@@ -277,10 +277,11 @@ class RemotePreflight:
                     "squeue",
                     "sacct",
                     "scancel",
+                    "scontrol",
                 )
             ),
             "Required Slurm client commands are available",
-            "Load the site Slurm environment providing sbatch, squeue, sacct, and scancel.",
+            "Load the site Slurm environment providing sbatch, squeue, sacct, scancel, and scontrol.",
         )
 
     def _image_check(self) -> PreflightCheck:
