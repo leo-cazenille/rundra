@@ -2075,6 +2075,31 @@ transport call. Persisting the manifest, submitting it, and reconciling
 per-Task scheduler/accounting observations are completed with the M5.4
 lifecycle work; the pure renderer cannot allocate resources.
 
+M5.4 enables that lifecycle through an additive array-scheduler capability.
+The Slurm adapter reads the controller's positive `MaxArraySize`, constructs
+the bounded M5.3 request, atomically writes a mode-500 manifest under the
+isolated Run metadata directory without overwriting an existing file, and
+submits the separate sbatch script. The root array job ID remains in
+`scheduler_job_ids`; `task_scheduler_ids` durably maps every logical Task to
+its opaque native array-element identity before `submit` returns.
+
+Status reconciliation queries every element in Task order. Each Task retains
+its own portable state in `run.tasks`, native state in `task_native_states`,
+exit in `task_exit_codes`, and stdout/stderr artifacts tagged with its Task ID.
+These two new Task-keyed mappings are additive RunRecord-v1 fields; older
+version-1 documents load them as empty mappings. Run-level allocated nodes and
+timestamps summarize available observations without replacing the per-Task
+facts. When native element states differ, Run-level `native_state` is `MIXED`.
+
+Aggregate portable Run state is deterministic and does not become terminal
+while any Task remains nonterminal. Running work takes precedence; a succeeded
+or failed Task combined with queued/submitted/staging/created siblings also
+keeps the aggregate `RUNNING`. Otherwise active precedence is `QUEUED`, then
+`SUBMITTED`, `STAGING`, and `CREATED`; an otherwise unresolved mixture is
+`UNKNOWN`. Once every Task is terminal, precedence is `FAILED`, then
+`CANCELLED`, then `SUCCEEDED`. Array cancellation, per-Task log selection, and
+partial/repeated fetch behavior remain M5.5 work.
+
 ---
 
 ## 34. Slurm backend

@@ -241,9 +241,7 @@ class SlurmScheduler:
         )
         return self.submit_bounded_array(bounded)
 
-    def submit_bounded_array(
-        self, request: SlurmArrayRequest
-    ) -> SchedulerSubmission:
+    def submit_bounded_array(self, request: SlurmArrayRequest) -> SchedulerSubmission:
         """Persist one immutable manifest and submit its bounded Slurm array."""
         if type(request) is not SlurmArrayRequest:
             raise TypeError(
@@ -294,10 +292,7 @@ class SlurmScheduler:
         job_id = match.group("job_id")
         return SchedulerSubmission(
             SchedulerReference(job_id),
-            {
-                item.task_id: f"{job_id}_{item.array_index}"
-                for item in request.mapping
-            },
+            {item.task_id: f"{job_id}_{item.array_index}" for item in request.mapping},
         )
 
     def query(

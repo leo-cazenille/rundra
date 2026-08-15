@@ -584,9 +584,7 @@ def _parse_exit_codes(value: object) -> dict[TaskId, int]:
     return result
 
 
-def _parse_task_string_mapping(
-    value: object, *, path: str
-) -> dict[TaskId, str]:
+def _parse_task_string_mapping(value: object, *, path: str) -> dict[TaskId, str]:
     document = _object(value, path=path)
     result: dict[TaskId, str] = {}
     for task_id, native_value in document.items():

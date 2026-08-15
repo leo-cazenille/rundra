@@ -931,9 +931,7 @@ def test_slurm_controller_array_limit_is_explicitly_discovered() -> None:
     assert SlurmScheduler(transport).array_limit() == 1001
 
 
-@pytest.mark.parametrize(
-    "output", ["ClusterName = shoal\n", "MaxArraySize = 0\n"]
-)
+@pytest.mark.parametrize("output", ["ClusterName = shoal\n", "MaxArraySize = 0\n"])
 def test_slurm_controller_rejects_missing_or_invalid_array_limit(output: str) -> None:
     transport = ScriptedTransport(
         deque([_command_result(Command(("unused",)), 0, output)])
