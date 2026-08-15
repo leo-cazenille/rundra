@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-import shlex
 import shutil
 import subprocess
 from datetime import UTC, datetime
 
+from rundra.adapters._remote_shell import (
+    RemoteShellSerializationError,
+    serialize_remote_command,
+)
 from rundra.domain.models import Command
 from rundra.ports import CapabilityCheck, CommandResult
 
@@ -62,7 +65,10 @@ class SSHTransport:
         """Run one command through OpenSSH and capture its textual output."""
         if type(command) is not Command:
             raise TypeError("SSHTransport.run requires a Command")
-        remote_command = _remote_command(command)
+        try:
+            remote_command = serialize_remote_command(command)
+        except RemoteShellSerializationError as error:
+            raise SSHCommandError(str(error)) from error
         ssh_argv = (self._executable, "-T", "--", self._host, remote_command)
         started_at = datetime.now(UTC)
         try:
@@ -88,27 +94,3 @@ class SSHTransport:
             started_at=started_at,
             finished_at=finished_at,
         )
-
-
-def _remote_command(command: Command) -> str:
-    """Serialize one Command at OpenSSH's unavoidable remote-shell boundary."""
-    arguments: list[str] = []
-    if command.working_directory is not None:
-        working_directory = str(command.working_directory)
-        _validate_literal(working_directory, name="working directory")
-        arguments.extend(("cd", "--", shlex.quote(working_directory), "&&"))
-    arguments.extend(("exec", "env", "--"))
-    for name, value in sorted(command.environment.items()):
-        if not name or "=" in name or "\x00" in name:
-            raise SSHCommandError("Remote environment variable name is invalid")
-        _validate_literal(value, name="environment value")
-        arguments.append(shlex.quote(f"{name}={value}"))
-    for argument in command.argv:
-        _validate_literal(argument, name="command argument")
-        arguments.append(shlex.quote(argument))
-    return " ".join(arguments)
-
-
-def _validate_literal(value: str, *, name: str) -> None:
-    if "\x00" in value:
-        raise SSHCommandError(f"Remote {name} must not contain NUL")
