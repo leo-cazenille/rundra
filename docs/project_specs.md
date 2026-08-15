@@ -2348,7 +2348,8 @@ Tests requiring a real cluster must be opt-in.
 
 The M4.2 Shoal harness adds a second explicit command-line opt-in in addition
 to its registered marker. It first constructs a bounded pure plan, then checks
-local OpenSSH/rsync discovery, SSH connectivity, the remote workspace, Slurm
+local OpenSSH/rsync discovery, SSH connectivity, the remote workspace or its
+nearest writable existing ancestor, Slurm
 commands, Apptainer and its configured image, requested resources through
 `sbatch --test-only`, and the login-side `/shoalhome` filesystem identity. It
 does not allocate a Run, stage source, execute a container, or submit a job.

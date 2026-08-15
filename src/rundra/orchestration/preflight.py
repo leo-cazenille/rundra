@@ -26,6 +26,18 @@ trap 'rm -f "$script"' EXIT HUP INT TERM
 printf '%s' "$1" > "$script"
 "$2" --test-only "$script" >/dev/null
 """
+_NEAREST_DIRECTORY_SCRIPT = """\
+set -eu
+path=$1
+while [ ! -e "$path" ]; do
+    parent=${path%/*}
+    [ -n "$parent" ] || parent=/
+    [ "$parent" != "$path" ] || exit 1
+    path=$parent
+done
+[ -d "$path" ] && [ -w "$path" ] && [ -x "$path" ]
+"""
+_FILESYSTEM_CHECK_SCRIPT = _NEAREST_DIRECTORY_SCRIPT + 'exec stat -f -c %T -- "$path"\n'
 
 
 class PreflightStatus(StrEnum):
@@ -242,13 +254,13 @@ class RemotePreflight:
                 (
                     "/bin/sh",
                     "-c",
-                    '[ -d "$1" ] && [ -w "$1" ] && [ -x "$1" ]',
+                    _NEAREST_DIRECTORY_SCRIPT,
                     "rundra-workspace-check",
                     str(self._target.workspace),
                 )
             ),
-            "Remote workspace exists and is writable/searchable",
-            "Create the configured workspace with owner-only write access or select a writable path.",
+            "Remote workspace exists or can be created below a writable directory",
+            "Select a workspace with a writable/searchable existing ancestor.",
         )
 
     def _slurm_commands_check(self) -> PreflightCheck:
@@ -342,7 +354,15 @@ class RemotePreflight:
                 "Remote workspace is not beneath the documented /shoalhome shared root",
                 "Use a user-owned workspace below /shoalhome for the Shoal target.",
             )
-        command = Command(("stat", "-f", "-c", "%T", "--", str(workspace)))
+        command = Command(
+            (
+                "/bin/sh",
+                "-c",
+                _FILESYSTEM_CHECK_SCRIPT,
+                "rundra-filesystem-check",
+                str(workspace),
+            )
+        )
         try:
             result = self._transport.run(command)
         except Exception:
@@ -367,7 +387,7 @@ class RemotePreflight:
         return _passed(
             "shared_filesystem",
             "staging",
-            "Remote workspace is beneath /shoalhome and its filesystem is readable",
+            "Remote workspace is beneath /shoalhome and its ancestor filesystem is readable",
             filesystem_type=file_system_type,
         )
 

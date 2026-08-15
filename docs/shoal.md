@@ -72,7 +72,7 @@ After the pure plan passes, preflight checks these layers independently:
 - supported SSH/Slurm/rsync/Apptainer target selection;
 - local OpenSSH and rsync clients;
 - authenticated SSH connectivity under normal host-key policy;
-- an existing writable/searchable remote workspace;
+- an existing writable/searchable remote workspace or nearest existing parent;
 - remote `sbatch`, `squeue`, `sacct`, and `scancel` commands;
 - remote Apptainer availability and image inspection;
 - requested Slurm resources through `sbatch --test-only`;
@@ -85,7 +85,11 @@ not allocate a Rundra workspace or Run ID, stage source, invoke `rundr run` or
 provide a corrective action without copying arbitrary remote stderr into test
 output.
 
-The filesystem check observes the login-side mount only. Compute-node
+Preflight does not create the configured workspace. If it is absent, the check
+walks upward to the nearest existing directory and verifies that Rundra can
+create the workspace there later; normal staging performs the actual
+`mkdir -p WORKSPACE/runs`. The filesystem check inspects that same existing
+ancestor on the login side. Compute-node
 visibility is not claimed until the bounded CPU execution in M4.3. Ordinary
 `uv run pytest` continues to skip every marked Shoal test and never contacts
 the cluster. GPU submission remains a later, separately authorized checkpoint.
@@ -104,3 +108,8 @@ Both `stat` and `findmnt` reported the login-side `/shoalhome` filesystem as
 records a safely bounded filesystem-type value while requiring the workspace
 to remain below `/shoalhome`; it does not infer compute-node visibility from a
 login-side filesystem label.
+
+The follow-up regression used the deliberately absent
+`/shoalhome/shoal/.rundra-preflight-absent-m42` target. All three opt-in checks
+passed, and the path was still absent afterward, confirming that preflight does
+not require or create a per-host `.rundra` directory.

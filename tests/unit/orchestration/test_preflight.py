@@ -98,6 +98,10 @@ def test_remote_preflight_checks_every_layer_without_submitting() -> None:
         "requested_resources",
         "shared_filesystem",
     ]
+    workspace_command = transport.run_calls[1]
+    assert workspace_command.argv[:2] == ("/bin/sh", "-c")
+    assert "while [ ! -e" in workspace_command.argv[2]
+    assert "mkdir" not in workspace_command.argv[2]
     resource_command = transport.run_calls[-2]
     assert resource_command.argv[2].count("--test-only") == 1
     assert "--parsable" not in resource_command.argv[2]
@@ -108,6 +112,10 @@ def test_remote_preflight_checks_every_layer_without_submitting() -> None:
     )
     filesystem = report.checks[-1]
     assert filesystem.details == {"filesystem_type": "zfs"}
+    filesystem_command = transport.run_calls[-1]
+    assert "while [ ! -e" in filesystem_command.argv[2]
+    assert "exec stat -f" in filesystem_command.argv[2]
+    assert "mkdir" not in filesystem_command.argv[2]
 
 
 def test_connectivity_failure_blocks_remote_checks_and_redacts_diagnostics() -> None:
