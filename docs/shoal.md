@@ -73,7 +73,8 @@ After the pure plan passes, preflight checks these layers independently:
 - local OpenSSH and rsync clients;
 - authenticated SSH connectivity under normal host-key policy;
 - an existing writable/searchable remote workspace or nearest existing parent;
-- remote `sbatch`, `squeue`, `sacct`, `scancel`, and `scontrol` commands;
+- remote `sbatch`, `squeue`, `scancel`, and `scontrol` commands, plus whether
+  optional `sacct` is available;
 - remote Apptainer availability and image inspection;
 - requested Slurm resources through `sbatch --test-only`;
 - a safely identified filesystem beneath the documented `/shoalhome` root.
@@ -99,7 +100,7 @@ the cluster. GPU submission remains a later, separately authorized checkpoint.
 On 2026-08-15, the explicitly enabled harness passed against `fishvision` with
 the owner-only `/shoalhome/shoal/.rundra` workspace and the readable
 `/shoalhome/shoal/test_slurm_jobs/alpine.sif` image. The one-Task plan requested
-one CPU, no GPU, 1 GiB, and five minutes. OpenSSH, local rsync, the required
+one CPU, no GPU, 1 GiB, and five minutes. OpenSSH, local rsync, the then-required
 remote Slurm commands, remote Apptainer, image inspection, and
 `sbatch --test-only` all passed. No Run ID or scheduler job ID was created.
 
@@ -268,3 +269,46 @@ Retain the failed experiment's exact Run directory and scheduler logs only as
 long as the evidence is useful, then remove those precise paths after checking
 the terminal record. The staging-failure scenario creates no remote Run
 directory or scheduler logs.
+
+## M4.6 reconciled reference path
+
+M4.6 audited the complete CPU, GPU, and failure evidence against the portable
+ports, target schema/defaults, adapter parsers, fake fixtures, and public
+documentation. The only implementation mismatch was preflight requiring
+`sacct` even though scheduler reconciliation already works without it.
+Preflight now requires `sbatch`, `squeue`, `scancel`, and `scontrol`, reports
+`sacct_available` as structured detail, and accepts either value. When usable,
+`sacct` remains the primary terminal query; otherwise Rundra uses
+`scontrol show job -o`.
+
+### Observed versions and capabilities
+
+These values were sampled on 2026-08-15 from the actual M4 path. They are
+deployment evidence, not minimum supported versions, target defaults, or
+portable schema fields.
+
+| Layer | Observed evidence |
+|---|---|
+| SSH transport client | OpenSSH 9.6p1, using normal host verification and external authentication |
+| Local rsync client | rsync 3.2.7, protocol 31 |
+| Remote rsync peer | rsync 3.2.7, protocol 31 |
+| Slurm | 23.11.4; CPU/GPU submission, `squeue`, accounting-enabled `sacct`, and `scontrol` fallback validated |
+| Apptainer | 1.4.5; `exec --cleanenv --no-eval`, read-only/read-write binds, and NVIDIA `--nv` validated |
+| Shared workspace | `/shoalhome` reported as ZFS on `fishvision`; staged CPU and GPU Runs executed from it on `shoal1` |
+
+No NFS version was observed because the tested deployment reports ZFS. The
+framework relies on configured shared-path behavior and verified execution,
+not an NFS-specific core model or filesystem label. Login-side inspection alone
+still does not prove sharing on an arbitrary deployment.
+
+The M4 evidence did not justify adding account, partition, QOS, constraint, GPU
+model, filesystem type, or runtime versions to the checked target defaults.
+Those site/user-specific scheduler choices remain explicit native experiment
+options when needed. Existing semantic ports represented every live value;
+adapter-owned scheduler metadata retained native states, paths, nodes, and
+available timestamps without fabricating a timezone or container digest.
+
+All seven authorized Shoal checks passed across bounded M4.6 invocations: the
+target/resource harness, pure plan, non-submitting preflight, CPU Run, GPU Run,
+deliberate experiment failure, and safe non-submitting staging failure. Ordinary
+`uv run pytest` continues to skip all seven checks and requires no cluster.

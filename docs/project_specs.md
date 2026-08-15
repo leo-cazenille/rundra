@@ -39,7 +39,7 @@ developer workstation
         v
     fishvision
         |
-        | /shoalhome shared through NFSv4
+        | shared /shoalhome workspace
         | Slurm
         v
  shoal compute nodes
@@ -49,7 +49,9 @@ developer workstation
  scientific executable
 ```
 
-However, the internal architecture must not make shoal, Slurm, SSH, rsync, NFS, or Apptainer inseparable from the core experiment model.
+However, the internal architecture must not make shoal, Slurm, SSH, rsync,
+shared-filesystem implementation details, or Apptainer inseparable from the
+core experiment model.
 
 The long-term goal is a more general execution framework usable across:
 
@@ -1906,19 +1908,24 @@ remote laptop/workstation
 
 `/shoalhome` is the intended shared workspace root for fishvision and the
 compute nodes. During the M4.2 login-side preflight on 2026-08-15, both `stat`
-and `findmnt` identified it as `zfs`, not NFSv4. Compute-node visibility remains
-to be verified by the bounded M4.3 CPU run; the framework must not infer shared
-visibility from a filesystem-type label alone.
+and `findmnt` identified it as `zfs`, not NFSv4. The bounded M4.3 CPU and M4.4
+GPU Runs subsequently executed staged source/config directly from `/shoalhome`
+on `shoal1`, proving compute-node visibility for the tested path. The framework
+must not infer shared visibility from a filesystem-type label alone.
 
 Shoal currently supports CPU and NVIDIA GPU workloads.
 
-A representative GPU allocation uses:
+A direct site-specific GPU allocation may use:
 
 ```bash
 --gres=gpu:1
 ```
 
-This must remain a target/backend detail rather than become part of the portable experiment model.
+Rundra's portable `gpus_per_task: 1` request rendered
+`--gpus-per-task=1` during M4.4, and Slurm recorded `gres/gpu=1` in the actual
+allocation. Direct `--gres` syntax remains a backend/native detail rather than
+part of the portable experiment model. Apptainer `--nv` remains an independent
+container-runtime control.
 
 ---
 
@@ -2349,8 +2356,9 @@ Tests requiring a real cluster must be opt-in.
 The M4.2 Shoal harness adds a second explicit command-line opt-in in addition
 to its registered marker. It first constructs a bounded pure plan, then checks
 local OpenSSH/rsync discovery, SSH connectivity, the remote workspace or its
-nearest writable existing ancestor, Slurm
-commands, Apptainer and its configured image, requested resources through
+nearest writable existing ancestor, mandatory Slurm commands (`sbatch`,
+`squeue`, `scancel`, and `scontrol`), optional `sacct` discovery, Apptainer and
+its configured image, requested resources through
 `sbatch --test-only`, and the login-side `/shoalhome` filesystem identity. It
 does not allocate a Run, stage source, execute a container, or submit a job.
 Arbitrary remote stderr is excluded from its layer-specific diagnostics.
@@ -2387,6 +2395,18 @@ submission. The durable failure must remain `STAGING_FAILED` with retrieval
 The intentional staging failure performs a pure plan but not the normal remote
 preflight, because preflight would prevent creation of the RunRecord whose
 failure semantics the scenario validates.
+
+M4.6 reconciles the complete real-cluster evidence without widening portable
+schemas or ports. Preflight no longer rejects a Slurm installation merely
+because `sacct` is absent: it reports `sacct_available` and relies on the
+already-tested `scontrol` terminal-query fallback. The observed 2026-08-15
+reference stack was local OpenSSH 9.6p1, local and remote rsync 3.2.7 with
+protocol 31, Slurm 23.11.4, Apptainer 1.4.5, and a login-side ZFS identity for
+`/shoalhome`. These are point-in-time observations, not minimum supported
+versions or portable-model fields. CPU/GPU execution, dirty source, exact
+config/seeds, logs/results, accounting-enabled and fallback reconciliation,
+and failure-state separation all fit the existing adapter-owned metadata and
+semantic port values.
 
 Shoal system tests should eventually cover:
 
