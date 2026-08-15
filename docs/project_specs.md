@@ -1348,6 +1348,11 @@ Tasks:
   failed:     0
 ```
 
+Version-1 JSON retains aggregate counts under `tasks` and adds ordered
+`task_details`. Each detail contains the stable Task ID, seed, portable
+execution and retrieval states, native scheduler identity/state when
+available, and exit code when known.
+
 ---
 
 ### 21.6 `logs`
@@ -1359,6 +1364,8 @@ rundr logs <run-id>
 Task selection should be possible:
 
 ```bash
+rundr logs <run-id> --task task_000017
+# zero-based ordinals are also accepted:
 rundr logs <run-id> --task 17
 ```
 
@@ -1377,7 +1384,9 @@ Agents and users should not need to know native scheduler log filenames.
 ### 21.7 `fetch`
 
 ```bash
-rundr fetch <run-id>
+rundr fetch <run-id> --destination retrieved
+rundr fetch <run-id> --destination retrieved --task task_000017
+rundr fetch <run-id> --destination retrieved --task 17 --task 18
 ```
 
 Retrieves configured/requested outputs and relevant metadata.
@@ -1385,6 +1394,10 @@ Retrieves configured/requested outputs and relevant metadata.
 The destination must be deterministic or explicitly reported.
 
 Fetching should be idempotent where practical.
+
+Omitting `--task` fetches every Task. Repeating `--task` selects a subset.
+Per-Task retrieval state is durable, failed transfers may be retried, and a
+Run reports retrieval `SUCCEEDED` only after every Task has succeeded.
 
 ---
 
@@ -1397,6 +1410,10 @@ rundr cancel <run-id>
 Cancels active scheduler jobs associated with the Run.
 
 Cancellation must be recorded in the RunRecord.
+
+For an array, Rundra reconciles first, excludes already terminal elements, and
+cancels only the remaining native Task identities. Elements that finish during
+that race retain their observed terminal result.
 
 ---
 
@@ -2098,7 +2115,23 @@ keeps the aggregate `RUNNING`. Otherwise active precedence is `QUEUED`, then
 `SUBMITTED`, `STAGING`, and `CREATED`; an otherwise unresolved mixture is
 `UNKNOWN`. Once every Task is terminal, precedence is `FAILED`, then
 `CANCELLED`, then `SUCCEEDED`. Array cancellation, per-Task log selection, and
-partial/repeated fetch behavior remain M5.5 work.
+partial/repeated fetch behavior are completed by M5.5.
+
+M5.5 exposes replicated execution through `run --seeds START:STOP` and
+`submit --seeds START:STOP`. Array cancellation first reconciles all elements,
+then sends only active native Task identities to the scheduler and applies
+race outcomes independently. `logs --task` accepts either a stable Task ID or
+zero-based ordinal and terminal logs use durable artifacts without another
+scheduler query.
+
+`fetch --task` is repeatable and selects isolated Task output prefixes; without
+selectors it fetches the whole Run. RunRecord v1 adds the backward-compatible
+`task_retrieval_states` mapping. Older records inherit their Run-level
+retrieval state. Partial success remains globally `PENDING`, any attempted
+failure is `FAILED`, failed Tasks may transition through `PENDING` on retry,
+and only all-Task success is globally `SUCCEEDED`. Public status JSON preserves
+aggregate counts and adds ordered per-Task seed, execution/retrieval, native,
+and exit details. M5.6 remains responsible for opt-in real-cluster proof.
 
 ---
 
