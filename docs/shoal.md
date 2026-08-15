@@ -25,5 +25,37 @@ experiment's explicit `resources.native.slurm` section and must follow Shoal
 policy. The example also does not claim that the placeholder workspace exists,
 is writable, or that any backend is reachable.
 
-M4 system tests are opt-in and are documented here as they are introduced.
-Ordinary `uv run pytest` must never contact Shoal or submit cluster work.
+## Opt-in system-test harness
+
+Shoal tests carry the registered `shoal_system` marker and are skipped unless
+the explicit command-line switch is present. The harness additionally requires
+the path to the operator's edited target file; the target name defaults to
+`shoal` and can be overridden when needed:
+
+```bash
+RUNDRA_SHOAL_TARGETS_FILE=/tmp/rundra-shoal-targets.yaml \
+  uv run pytest tests/system \
+    -m shoal_system \
+    --run-shoal-system-tests \
+    -vv
+```
+
+```bash
+RUNDRA_SHOAL_TARGETS_FILE=/tmp/rundra-shoal-targets.yaml \
+RUNDRA_SHOAL_TARGET=my-shoal \
+  uv run pytest tests/system \
+    -m shoal_system \
+    --run-shoal-system-tests \
+    -vv
+```
+
+M4.1 validates only the explicit target selection and conservative future CPU
+defaults: one node, one task, one CPU, 1 GiB, and a five-minute walltime. It
+makes no SSH connection and submits no work. Missing environment configuration,
+an unknown target, a relative/root workspace, or the unchanged
+`YOUR_USERNAME` placeholder fails with an actionable message after explicit
+opt-in.
+
+Ordinary `uv run pytest` skips marked Shoal tests and never contacts the
+cluster. M4.2 will introduce non-submitting backend preflight checks; CPU and
+GPU submissions remain later, separately authorized checkpoints.

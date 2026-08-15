@@ -29,6 +29,9 @@ dev = [
 [tool.pytest.ini_options]
 addopts = ["--strict-markers", "-ra"]
 testpaths = ["tests"]
+markers = [
+  "shoal_system: opt-in tests that may access the real Shoal cluster",
+]
 
 [tool.ruff]
 line-length = 88
