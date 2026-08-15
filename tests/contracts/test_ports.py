@@ -84,6 +84,38 @@ def test_fake_scheduler_scripts_observation_failure_and_cancellation() -> None:
     assert scheduler.cancel_calls == [(reference,)]
 
 
+def test_scheduler_observation_optionally_carries_a_consistent_command_result() -> None:
+    reference = SchedulerReference("local-17")
+    command = Command(("python", "main.py"))
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    result = CommandResult(command, 0, "done\n", "", now, now)
+
+    observation = SchedulerObservation(
+        reference,
+        ExecutionState.SUCCEEDED,
+        "EXITED",
+        exit_code=0,
+        result=result,
+    )
+
+    assert observation.result == result
+    with pytest.raises(ValueError, match="same exit"):
+        SchedulerObservation(
+            reference,
+            ExecutionState.FAILED,
+            "EXITED",
+            exit_code=1,
+            result=result,
+        )
+    with pytest.raises(TypeError, match="CommandResult"):
+        SchedulerObservation(
+            reference,
+            ExecutionState.SUCCEEDED,
+            "EXITED",
+            result=object(),  # type: ignore[arg-type]
+        )
+
+
 def test_fake_stager_and_recording_runtime_are_structural_ports() -> None:
     root = Path(__file__).parents[2]
     spec = load_experiment(root / "examples/minimal/experiment.yaml")

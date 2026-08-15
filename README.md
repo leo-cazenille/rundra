@@ -20,7 +20,11 @@ runtime locations, and idempotent output retrieval. M1.3 adds pure, shell-free
 Apptainer/Singularity-compatible command construction with explicit bind,
 environment, working-directory, and GPU handling. The CLI can validate
 configuration, inspect a non-submitting plan, and list configured targets.
-Container execution and experiment execution are not implemented yet.
+M1.4 adds the port-driven single-task local lifecycle: shell-free process
+execution, synchronous local scheduling, durable state reconciliation, separate
+stdout/stderr artifacts, and partial-output retrieval after task failure. This
+lifecycle is available as an application service; the `run` and lifecycle CLI
+commands remain M1.5 work.
 
 Implementation progress is tracked in
 [`.agent/plans/v0.1.md`](.agent/plans/v0.1.md).

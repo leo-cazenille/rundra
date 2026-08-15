@@ -3,13 +3,29 @@ from __future__ import annotations
 import os
 import shutil
 import stat
+import subprocess
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePath, PurePosixPath
+from uuid import uuid4
 
-from rundra.domain.models import Artifact, ArtifactKind
-from rundra.ports import FetchRequest, FetchResult, StagedWorkspace, StageRequest
+from rundra.domain.models import Artifact, ArtifactKind, Command
+from rundra.domain.states import ExecutionState
+from rundra.orchestration.models import ExecutionUnit
+from rundra.ports import (
+    CapabilityCheck,
+    CommandResult,
+    FetchRequest,
+    FetchResult,
+    SchedulerObservation,
+    SchedulerReference,
+    SchedulerSubmission,
+    StagedWorkspace,
+    StageRequest,
+    Transport,
+)
 
 _DEFAULT_EXCLUDES = (
     ".git",
@@ -35,6 +51,131 @@ class LocalStagerError(RuntimeError):
 
 class WorkspaceCollisionError(LocalStagerError):
     """Raised when a Run workspace has already been allocated."""
+
+
+class LocalTransportError(RuntimeError):
+    """Raised when a local argument-vector command cannot be started."""
+
+
+class LocalSchedulerError(RuntimeError):
+    """Raised when synchronous local scheduling cannot be represented safely."""
+
+
+class LocalTransport:
+    """Execute argument-vector commands directly on the local host."""
+
+    def check(self) -> CapabilityCheck:
+        """Report local process execution availability."""
+        return CapabilityCheck("local")
+
+    def run(self, command: Command) -> CommandResult:
+        """Run one command without a shell and capture its textual output."""
+        if type(command) is not Command:
+            raise TypeError("LocalTransport.run requires a Command")
+        environment = os.environ.copy()
+        environment.update(command.environment)
+        started_at = datetime.now(UTC)
+        try:
+            completed = subprocess.run(
+                command.argv,
+                cwd=(
+                    None
+                    if command.working_directory is None
+                    else str(command.working_directory)
+                ),
+                env=environment,
+                capture_output=True,
+                check=False,
+                encoding="utf-8",
+                errors="replace",
+                shell=False,
+            )
+        except (OSError, ValueError) as error:
+            raise LocalTransportError(
+                f"Could not execute local command {command.argv[0]!r}: {error}"
+            ) from error
+        finished_at = datetime.now(UTC)
+        return CommandResult(
+            command=command,
+            exit_code=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+            started_at=started_at,
+            finished_at=finished_at,
+        )
+
+
+class LocalScheduler:
+    """Synchronously execute one unit through a Transport and retain its result."""
+
+    def __init__(
+        self,
+        transport: Transport,
+        *,
+        reference_factory: Callable[[], str] | None = None,
+    ) -> None:
+        if not isinstance(transport, Transport):
+            raise TypeError("LocalScheduler transport must implement Transport")
+        if reference_factory is not None and not callable(reference_factory):
+            raise TypeError("LocalScheduler reference_factory must be callable")
+        self._transport = transport
+        self._reference_factory = reference_factory or _new_local_reference
+        self._observations: dict[SchedulerReference, SchedulerObservation] = {}
+
+    def submit(self, units: tuple[ExecutionUnit, ...]) -> SchedulerSubmission:
+        """Execute exactly one M1 unit synchronously and return its reference."""
+        if not isinstance(units, Sequence) or isinstance(units, (str, bytes)):
+            raise TypeError("LocalScheduler units must be a sequence")
+        normalized = tuple(units)
+        if any(type(unit) is not ExecutionUnit for unit in normalized):
+            raise TypeError("LocalScheduler units must contain ExecutionUnits")
+        if len(normalized) != 1:
+            raise LocalSchedulerError(
+                "M1 LocalScheduler requires exactly one execution unit"
+            )
+        unit = normalized[0]
+        reference_value = self._reference_factory()
+        if type(reference_value) is not str or not reference_value:
+            raise LocalSchedulerError(
+                "Local scheduler reference factory must return a nonempty string"
+            )
+        reference = SchedulerReference(reference_value)
+        if reference in self._observations:
+            raise LocalSchedulerError(
+                f"Local scheduler reference already exists: {reference.native_id}"
+            )
+        result = self._transport.run(unit.command)
+        state = (
+            ExecutionState.SUCCEEDED if result.exit_code == 0 else ExecutionState.FAILED
+        )
+        self._observations[reference] = SchedulerObservation(
+            reference=reference,
+            state=state,
+            native_state="EXITED",
+            exit_code=result.exit_code,
+            metadata={"transport": "local"},
+            result=result,
+        )
+        return SchedulerSubmission(reference, {unit.task_id: reference.native_id})
+
+    def query(
+        self, references: tuple[SchedulerReference, ...]
+    ) -> tuple[SchedulerObservation, ...]:
+        """Return retained terminal observations in request order."""
+        normalized = _local_references(references)
+        try:
+            return tuple(self._observations[reference] for reference in normalized)
+        except KeyError as error:
+            missing = error.args[0]
+            raise LocalSchedulerError(
+                f"Unknown local scheduler reference: {missing.native_id}"
+            ) from error
+
+    def cancel(
+        self, references: tuple[SchedulerReference, ...]
+    ) -> tuple[SchedulerObservation, ...]:
+        """Return terminal results; synchronous local work cannot be cancelled."""
+        return self.query(references)
 
 
 class LocalStager:
@@ -302,3 +443,18 @@ def _is_relative_to(path: Path, parent: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _new_local_reference() -> str:
+    return f"local-{uuid4().hex}"
+
+
+def _local_references(value: object) -> tuple[SchedulerReference, ...]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise TypeError("Local scheduler references must be a sequence")
+    references = tuple(value)
+    if any(type(reference) is not SchedulerReference for reference in references):
+        raise TypeError(
+            "Local scheduler references must contain SchedulerReference values"
+        )
+    return references

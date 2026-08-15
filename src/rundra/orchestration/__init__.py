@@ -1,1 +1,1 @@
-"""Pure planning models and functions."""
+"""Planning and execution coordination."""

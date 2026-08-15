@@ -126,6 +126,7 @@ class SchedulerObservation:
     native_state: str
     exit_code: int | None = None
     metadata: Mapping[str, NativeValue] = field(default_factory=dict)
+    result: CommandResult | None = None
 
     def __post_init__(self) -> None:
         if type(self.reference) is not SchedulerReference:
@@ -136,6 +137,18 @@ class SchedulerObservation:
             raise ValueError("SchedulerObservation native_state must be nonblank")
         if self.exit_code is not None and type(self.exit_code) is not int:
             raise TypeError("SchedulerObservation exit_code must be an integer or None")
+        if self.result is not None and type(self.result) is not CommandResult:
+            raise TypeError(
+                "SchedulerObservation result must be a CommandResult or None"
+            )
+        if (
+            self.result is not None
+            and self.exit_code is not None
+            and self.result.exit_code != self.exit_code
+        ):
+            raise ValueError(
+                "SchedulerObservation result and exit_code must describe the same exit"
+            )
         object.__setattr__(self, "metadata", _freeze_metadata(self.metadata))
 
 

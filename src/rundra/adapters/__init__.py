@@ -7,8 +7,12 @@ from rundra.adapters.apptainer import (
     ApptainerUnavailableError,
 )
 from rundra.adapters.local import (
+    LocalScheduler,
+    LocalSchedulerError,
     LocalStager,
     LocalStagerError,
+    LocalTransport,
+    LocalTransportError,
     WorkspaceCollisionError,
 )
 
@@ -17,7 +21,11 @@ __all__ = [
     "ApptainerRuntime",
     "ApptainerRuntimeError",
     "ApptainerUnavailableError",
+    "LocalScheduler",
+    "LocalSchedulerError",
     "LocalStager",
     "LocalStagerError",
+    "LocalTransport",
+    "LocalTransportError",
     "WorkspaceCollisionError",
 ]

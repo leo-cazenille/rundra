@@ -12,6 +12,9 @@ a durable state document rather than an operation result. Optional unavailable
 provenance uses JSON `null` or an empty collection; values are never inferred or
 fabricated while loading. Computation state is stored in `run.state`, while
 result-transfer state is independently stored in `run.retrieval_state`.
+The M1.4 example represents a completed local Run and demonstrates its artifact
+manifest, scheduler reference, timestamps, Task exit code, and independent
+successful retrieval state.
 
 Fields may be added compatibly during v0.1 development. Removing a field,
 changing its meaning, or changing its type requires a new `format_version`.

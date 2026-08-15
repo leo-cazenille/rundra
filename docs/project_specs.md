@@ -786,6 +786,12 @@ Future implementations may include:
 
 A Scheduler should consume a normalized execution description rather than an `ExperimentSpec` directly.
 
+For synchronous schedulers, a scheduler observation may include the captured
+`CommandResult` that produced it. This is optional at the portable boundary:
+the local scheduler uses it to return stdout, stderr, timestamps, and exit
+status, while remote schedulers may instead expose log paths and accounting
+metadata.
+
 ---
 
 ### 11.3 Stager
@@ -1695,6 +1701,35 @@ Artifacts
 ```
 
 Local execution must not be implemented as an unrelated special-case CLI path.
+
+The M1 local execution implementation consists of a shell-free
+`LocalTransport` and a synchronous, one-Task `LocalScheduler`. The transport
+overlays the command's explicit environment on the inherited process
+environment, applies its working directory, captures stdout/stderr as UTF-8
+text, and returns non-zero exits as normal `CommandResult` values. Process-start
+failures remain distinct adapter errors. The local scheduler assigns an opaque
+native reference, executes through `Transport`, retains the terminal
+observation, and maps exit zero to `SUCCEEDED` and all other exits to `FAILED`.
+It provides no asynchronous cancellation or local resource enforcement in M1.
+
+`OrchestrationService` implements the first common vertical slice for exactly
+one planned Task. It rejects a plan that does not reproduce from the recorded
+experiment, config, target, and seed; creates the `RunRecord` before capability
+checks; stages the immutable snapshot; constructs the container command; and
+submits it through `Scheduler`. The staged source and input directories are
+bound read-only at `/workspace/source` and `/workspace/input`; output and
+runtime directories are bound read-write at `/workspace/output` and
+`/workspace/runtime`. Relative experiment working directories are rooted below
+the container source directory.
+
+After reconciliation, stdout and stderr are written as separate Task artifacts
+and the terminal state, native state, timestamps, scheduler reference, and exit
+code are persisted. Requested outputs are fetched even after a non-zero task
+exit. The versioned `RunRecord.artifacts` collection is the M1 artifact
+manifest. Computation and retrieval state are updated independently, so a
+retrieval failure after successful execution leaves computation `SUCCEEDED`.
+The M1.4 service does not add lifecycle CLI commands, asynchronous local runs,
+Git provenance, or a no-container execution path.
 
 ---
 
