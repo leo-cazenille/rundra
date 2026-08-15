@@ -26,6 +26,7 @@ from rundra.ports import (
     CapabilityCheck,
     CommandResult,
     Scheduler,
+    SchedulerArrayRequest,
     SchedulerGroup,
     SchedulerReference,
     SchedulerUnit,
@@ -476,7 +477,7 @@ def test_slurm_scheduler_persists_manifest_and_submits_bounded_array() -> None:
     request = _array_request(count=3, max_array_size=3)
     transport.results.append(_command_result(Command(("unused",)), 0, "123;alpha\n"))
 
-    submission = scheduler.submit_array(request)
+    submission = scheduler.submit_bounded_array(request)
 
     assert submission.reference == SchedulerReference("123")
     assert submission.task_native_ids == {
@@ -502,7 +503,7 @@ def test_slurm_array_submission_requires_durable_log_paths() -> None:
     transport = ScriptedTransport(deque([]))
 
     with pytest.raises(SlurmSubmissionError, match="configured log directory"):
-        SlurmScheduler(transport).submit_array(_array_request(count=2))
+        SlurmScheduler(transport).submit_bounded_array(_array_request(count=2))
 
     assert transport.run_calls == []
 
@@ -525,7 +526,32 @@ def test_slurm_array_submission_normalizes_remote_failures(
     )
 
     with pytest.raises(SlurmSubmissionError, match=message):
-        scheduler.submit_array(_array_request(count=2))
+        scheduler.submit_bounded_array(_array_request(count=2))
+
+
+def test_slurm_scheduler_discovers_bound_for_portable_array_request() -> None:
+    transport = ScriptedTransport(deque([]))
+    scheduler = SlurmScheduler(
+        transport, log_directory=PurePosixPath("/remote/run/logs")
+    )
+    bounded = _array_request(count=2)
+    portable = SchedulerArrayRequest(
+        bounded.group, bounded.mapping, bounded.manifest_path
+    )
+    transport.results.extend(
+        (
+            _command_result(Command(("unused",)), 0, "MaxArraySize = 1001\n"),
+            _command_result(Command(("unused",)), 0, "456\n"),
+        )
+    )
+
+    submission = scheduler.submit_array(portable)
+
+    assert submission.reference == SchedulerReference("456")
+    assert submission.task_native_ids == {
+        TaskId.from_ordinal(0): "456_0",
+        TaskId.from_ordinal(1): "456_1",
+    }
 
 
 def test_render_sbatch_script_translates_portable_and_allowed_native_resources() -> (

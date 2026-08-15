@@ -8,6 +8,7 @@ from pathlib import PurePath
 from types import MappingProxyType
 from typing import Protocol, runtime_checkable
 
+from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import (
     Artifact,
     Command,
@@ -121,6 +122,43 @@ class SchedulerGroup:
         if len({unit.task_id for unit in units}) != len(units):
             raise ValueError("SchedulerGroup Task IDs must be unique")
         object.__setattr__(self, "units", units)
+
+
+@dataclass(frozen=True, slots=True)
+class SchedulerArrayRequest:
+    """Backend-neutral request to submit an explicitly mapped Task array."""
+
+    group: SchedulerGroup
+    mapping: tuple[ArrayTaskMapping, ...]
+    manifest_path: PurePath
+
+    def __post_init__(self) -> None:
+        if type(self.group) is not SchedulerGroup:
+            raise TypeError("SchedulerArrayRequest group must be a SchedulerGroup")
+        if len(self.group.units) < 2:
+            raise ValueError("SchedulerArrayRequest requires at least two Tasks")
+        if not isinstance(self.mapping, Sequence) or isinstance(
+            self.mapping, (str, bytes)
+        ):
+            raise TypeError("SchedulerArrayRequest mapping must be a sequence")
+        mapping = tuple(self.mapping)
+        if any(type(item) is not ArrayTaskMapping for item in mapping):
+            raise TypeError(
+                "SchedulerArrayRequest mapping must contain ArrayTaskMappings"
+            )
+        if tuple(item.task_id for item in mapping) != tuple(
+            unit.task_id for unit in self.group.units
+        ):
+            raise ValueError(
+                "SchedulerArrayRequest mapping must match SchedulerGroup order"
+            )
+        if not isinstance(self.manifest_path, PurePath):
+            raise TypeError("SchedulerArrayRequest manifest_path must be a path")
+        if not self.manifest_path.is_absolute() or "\x00" in str(self.manifest_path):
+            raise ValueError(
+                "SchedulerArrayRequest manifest_path must be absolute and safe"
+            )
+        object.__setattr__(self, "mapping", mapping)
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,6 +305,7 @@ class StageRequest:
     config: ConfigSnapshot
     target: Target
     source_root: PurePath
+    task_ids: tuple[TaskId, ...] = ()
 
     def __post_init__(self) -> None:
         if type(self.run_id) is not RunId:
@@ -279,6 +318,16 @@ class StageRequest:
             raise TypeError("StageRequest target must be a Target")
         if not isinstance(self.source_root, PurePath):
             raise TypeError("StageRequest source_root must be a PurePath")
+        if not isinstance(self.task_ids, Sequence) or isinstance(
+            self.task_ids, (str, bytes)
+        ):
+            raise TypeError("StageRequest task_ids must be a sequence")
+        task_ids = tuple(self.task_ids)
+        if any(type(task_id) is not TaskId for task_id in task_ids):
+            raise TypeError("StageRequest task_ids must contain only TaskIds")
+        if len(set(task_ids)) != len(task_ids):
+            raise ValueError("StageRequest task_ids must be unique")
+        object.__setattr__(self, "task_ids", task_ids)
 
 
 @dataclass(frozen=True, slots=True)
@@ -453,6 +502,11 @@ class Scheduler(Protocol):
     def cancel(
         self, references: tuple[SchedulerReference, ...]
     ) -> tuple[SchedulerObservation, ...]: ...
+
+
+@runtime_checkable
+class ArrayScheduler(Protocol):
+    def submit_array(self, request: SchedulerArrayRequest) -> SchedulerSubmission: ...
 
 
 @runtime_checkable

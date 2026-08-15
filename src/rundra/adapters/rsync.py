@@ -110,7 +110,11 @@ class RsyncStager:
         host = _target_host(request.target.transport.options)
         if self._host is not None and self._host != host:
             raise RsyncStagerError("Configured rsync host does not match target host")
-        workspace = self._allocator.create(request.run_id, request.target.workspace)
+        workspace = self._allocator.create(
+            request.run_id,
+            request.target.workspace,
+            task_ids=request.task_ids,
+        )
 
         source_argv: list[str] = [
             self._executable,

@@ -222,6 +222,9 @@ class LocalStager:
             )
             for directory in (inputs, runtime, outputs, logs, metadata):
                 directory.mkdir()
+            for task_id in request.task_ids:
+                for directory in (runtime / str(task_id), outputs / str(task_id)):
+                    directory.mkdir()
             config_content = request.config.content.encode("utf-8")
             with config.open("wb") as stream:
                 stream.write(config_content)

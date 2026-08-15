@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import PurePath, PurePosixPath
 
-from rundra.domain.models import Command, RunId
+from rundra.domain.models import Command, RunId, TaskId
 from rundra.ports import CommandResult, StagedWorkspace, Transport
 
 
@@ -22,10 +22,22 @@ class RemoteWorkspaceAllocator:
             raise TypeError("RemoteWorkspaceAllocator requires a Transport")
         self._transport = transport
 
-    def create(self, run_id: RunId, workspace_root: PurePath) -> StagedWorkspace:
+    def create(
+        self,
+        run_id: RunId,
+        workspace_root: PurePath,
+        *,
+        task_ids: tuple[TaskId, ...] = (),
+    ) -> StagedWorkspace:
         """Create one new remote workspace without uploading any content."""
         if type(run_id) is not RunId:
             raise TypeError("Remote workspace run_id must be a RunId")
+        if not isinstance(task_ids, tuple) or any(
+            type(task_id) is not TaskId for task_id in task_ids
+        ):
+            raise TypeError("Remote workspace task_ids must be a tuple of TaskIds")
+        if len(set(task_ids)) != len(task_ids):
+            raise ValueError("Remote workspace task_ids must be unique")
         root = _safe_remote_root(workspace_root)
         runs = root / "runs"
         run_root = runs / str(run_id)
@@ -67,6 +79,24 @@ class RemoteWorkspaceAllocator:
             ),
             operation="create remote Run directories",
         )
+        if task_ids:
+            self._checked_run(
+                Command(
+                    (
+                        "mkdir",
+                        "--",
+                        *(
+                            str(path)
+                            for task_id in task_ids
+                            for path in (
+                                workspace.runtime / str(task_id),
+                                workspace.outputs / str(task_id),
+                            )
+                        ),
+                    )
+                ),
+                operation="create remote Task directories",
+            )
         return workspace
 
     def _checked_run(self, command: Command, *, operation: str) -> None:

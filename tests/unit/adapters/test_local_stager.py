@@ -21,6 +21,7 @@ from rundra.domain.models import (
     ResourceRequest,
     RunId,
     Target,
+    TaskId,
 )
 from rundra.ports import FetchRequest, Stager, StageRequest
 
@@ -119,6 +120,22 @@ def test_local_stage_copies_isolates_excludes_and_seals_inputs(tmp_path: Path) -
         ArtifactKind.SOURCE_SNAPSHOT,
         ArtifactKind.EFFECTIVE_CONFIG,
     ]
+
+
+def test_local_stage_creates_isolated_task_mutation_directories(
+    tmp_path: Path,
+) -> None:
+    source = _make_source(tmp_path)
+    request = replace(
+        _request(source, tmp_path / "workspace"),
+        task_ids=(TaskId.from_ordinal(0), TaskId.from_ordinal(1)),
+    )
+
+    workspace = LocalStager().stage(request)
+
+    for task_id in request.task_ids:
+        assert (workspace.runtime / str(task_id)).is_dir()
+        assert (workspace.outputs / str(task_id)).is_dir()
     assert workspace.artifacts[1].size_bytes == len(request.config.content.encode())
 
     (source / "main.py").write_text("print('edited')\n", encoding="utf-8")

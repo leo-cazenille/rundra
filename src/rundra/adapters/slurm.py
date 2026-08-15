@@ -13,6 +13,7 @@ from rundra.domain.models import Command, NativeValue, ResourceRequest
 from rundra.domain.states import ExecutionState
 from rundra.ports import (
     CommandResult,
+    SchedulerArrayRequest,
     SchedulerGroup,
     SchedulerObservation,
     SchedulerReference,
@@ -226,10 +227,28 @@ class SlurmScheduler:
         reference = SchedulerReference(job_id)
         return SchedulerSubmission(reference, {group.units[0].task_id: job_id})
 
-    def submit_array(self, request: SlurmArrayRequest) -> SchedulerSubmission:
+    def submit_array(self, request: SchedulerArrayRequest) -> SchedulerSubmission:
+        """Discover the controller bound and submit a portable mapped array."""
+        if type(request) is not SchedulerArrayRequest:
+            raise TypeError(
+                "SlurmScheduler.submit_array requires a SchedulerArrayRequest"
+            )
+        bounded = SlurmArrayRequest(
+            request.group,
+            request.mapping,
+            request.manifest_path,
+            self.array_limit(),
+        )
+        return self.submit_bounded_array(bounded)
+
+    def submit_bounded_array(
+        self, request: SlurmArrayRequest
+    ) -> SchedulerSubmission:
         """Persist one immutable manifest and submit its bounded Slurm array."""
         if type(request) is not SlurmArrayRequest:
-            raise TypeError("SlurmScheduler.submit_array requires a SlurmArrayRequest")
+            raise TypeError(
+                "SlurmScheduler.submit_bounded_array requires a SlurmArrayRequest"
+            )
         if self._log_directory is None:
             raise SlurmSubmissionError(
                 "Slurm array submission requires a configured log directory"
