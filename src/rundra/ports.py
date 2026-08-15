@@ -310,6 +310,51 @@ class StagedWorkspace:
                 raise TypeError(f"StagedWorkspace {name} must be a PurePath")
         object.__setattr__(self, "artifacts", _freeze_artifacts(self.artifacts))
 
+    def for_task(self, task_id: TaskId) -> TaskWorkspace:
+        """Derive isolated mutable paths for one logical Task."""
+        if type(task_id) is not TaskId:
+            raise TypeError("StagedWorkspace task_id must be a TaskId")
+        name = str(task_id)
+        return TaskWorkspace(
+            task_id=task_id,
+            source=self.source,
+            config=self.config,
+            runtime=self.runtime / name,
+            outputs=self.outputs / name,
+            stdout=self.logs / f"{name}.stdout",
+            stderr=self.logs / f"{name}.stderr",
+            metadata=self.metadata / name,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TaskWorkspace:
+    """Shared immutable inputs and isolated mutable paths for one Task."""
+
+    task_id: TaskId
+    source: PurePath
+    config: PurePath
+    runtime: PurePath
+    outputs: PurePath
+    stdout: PurePath
+    stderr: PurePath
+    metadata: PurePath
+
+    def __post_init__(self) -> None:
+        if type(self.task_id) is not TaskId:
+            raise TypeError("TaskWorkspace task_id must be a TaskId")
+        for name in (
+            "source",
+            "config",
+            "runtime",
+            "outputs",
+            "stdout",
+            "stderr",
+            "metadata",
+        ):
+            if not isinstance(getattr(self, name), PurePath):
+                raise TypeError(f"TaskWorkspace {name} must be a PurePath")
+
 
 @dataclass(frozen=True, slots=True)
 class FetchRequest:

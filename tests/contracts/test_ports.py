@@ -277,3 +277,45 @@ def test_fake_stager_and_recording_runtime_are_structural_ports() -> None:
     assert stager.fetch(fetch_request) == fetch_result
     assert stager.stage_calls == [stage_request, stage_request]
     assert stager.fetch_calls == [fetch_request]
+
+
+def test_staged_workspace_derives_stable_isolated_task_locations() -> None:
+    from rundra.domain.models import TaskId
+
+    workspace = StagedWorkspace(
+        root=PurePosixPath("/work/runs/run_0123456789abcdef0123456789abcdef"),
+        source=PurePosixPath("/work/runs/run_0123456789abcdef0123456789abcdef/source"),
+        inputs=PurePosixPath("/work/runs/run_0123456789abcdef0123456789abcdef/input"),
+        config=PurePosixPath(
+            "/work/runs/run_0123456789abcdef0123456789abcdef/input/config.yaml"
+        ),
+        runtime=PurePosixPath(
+            "/work/runs/run_0123456789abcdef0123456789abcdef/runtime"
+        ),
+        outputs=PurePosixPath("/work/runs/run_0123456789abcdef0123456789abcdef/output"),
+        logs=PurePosixPath("/work/runs/run_0123456789abcdef0123456789abcdef/logs"),
+        metadata=PurePosixPath(
+            "/work/runs/run_0123456789abcdef0123456789abcdef/metadata"
+        ),
+    )
+
+    first = workspace.for_task(TaskId.from_ordinal(0))
+    second = workspace.for_task(TaskId.from_ordinal(1))
+
+    assert first.source == second.source == workspace.source
+    assert first.config == second.config == workspace.config
+    assert first.runtime == workspace.runtime / "task_000000"
+    assert second.runtime == workspace.runtime / "task_000001"
+    assert first.outputs == workspace.outputs / "task_000000"
+    assert second.outputs == workspace.outputs / "task_000001"
+    assert first.stdout == workspace.logs / "task_000000.stdout"
+    assert first.stderr == workspace.logs / "task_000000.stderr"
+    assert first.metadata == workspace.metadata / "task_000000"
+    assert first != second
+
+
+def test_staged_workspace_rejects_non_task_identity_for_task_locations() -> None:
+    workspace = StagedWorkspace(*(PurePosixPath(f"root/{name}") for name in range(8)))
+
+    with pytest.raises(TypeError, match="task_id"):
+        workspace.for_task("task_000000")
