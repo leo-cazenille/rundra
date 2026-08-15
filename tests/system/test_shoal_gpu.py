@@ -12,7 +12,7 @@ import yaml
 from rundra.adapters import RemoteApptainerRuntime, RsyncStager, SSHTransport
 from rundra.cli.operations import plan_operation
 from rundra.config.experiments import load_experiment
-from rundra.domain.models import ArtifactKind, RunId, Target
+from rundra.domain.models import ArtifactKind, Command, RunId, Target
 from rundra.domain.states import ExecutionState, RetrievalState
 from rundra.orchestration.preflight import PreflightStatus, RemotePreflight
 from rundra.persistence import JsonRunStore
@@ -155,9 +155,25 @@ def test_shoal_gpu_run_verifies_scheduler_allocation_and_container_view(
     assert record.allocated_nodes
     assert record.native_state == "COMPLETED"
 
+    host = shoal_target.transport.options.get("host")
+    assert type(host) is str
+    allocation = SSHTransport(host).run(
+        Command(("scontrol", "show", "job", "-o", record.scheduler_job_ids[0]))
+    )
+    assert allocation.exit_code == 0
+    allocated_tres = next(
+        (
+            field.removeprefix("AllocTRES=")
+            for field in allocation.stdout.split()
+            if field.startswith("AllocTRES=")
+        ),
+        "",
+    )
+    assert "gres/gpu=1" in allocated_tres
+
     evidence = (destination / "output/results/evidence.txt").read_text(encoding="utf-8")
     assert "seed=23\n" in evidence
-    assert "cuda_visible_devices=\n" not in evidence
+    assert "cuda_visible_devices=" in evidence
     assert evidence.endswith("config:\nlabel: shoal-gpu\n")
     gpu_view = (destination / "output/results/nvidia-smi.txt").read_text(
         encoding="utf-8"

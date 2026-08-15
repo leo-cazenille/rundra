@@ -8,10 +8,6 @@ fi
 
 config=$2
 seed=$4
-if [ -z "${CUDA_VISIBLE_DEVICES-}" ]; then
-    echo "Slurm did not expose an allocated GPU through CUDA_VISIBLE_DEVICES" >&2
-    exit 69
-fi
 if ! command -v nvidia-smi >/dev/null 2>&1; then
     echo "Apptainer NVIDIA enablement did not expose nvidia-smi" >&2
     exit 69
@@ -21,7 +17,7 @@ mkdir -p /workspace/output/results
 nvidia-smi -L > /workspace/output/results/nvidia-smi.txt
 {
     printf 'seed=%s\n' "$seed"
-    printf 'cuda_visible_devices=%s\n' "$CUDA_VISIBLE_DEVICES"
+    printf 'cuda_visible_devices=%s\n' "${CUDA_VISIBLE_DEVICES-}"
     printf 'slurm_job_gpus=%s\n' "${SLURM_JOB_GPUS-}"
     printf 'slurm_gpus_on_node=%s\n' "${SLURM_GPUS_ON_NODE-}"
     printf '%s\n' 'config:'
