@@ -26,7 +26,6 @@ default_profile: local
 profiles:
   local:
     config: config.yaml
-    seed: 17
     target: local
     source_root: .
     destination: retrieved
@@ -75,10 +74,16 @@ defaults:
         assert result.returncode == 0, result.stderr or result.stdout
         document = json.loads(result.stdout)
         assert document["run"]["state"] == "SUCCEEDED"
+        seed = document["run"]["seed"]
+        assert type(seed) is int and 0 <= seed < 2**63
         assert (project / "retrieved/results/result.json").is_file()
+        result_document = json.loads(
+            (project / "retrieved/results/result.json").read_text(encoding="utf-8")
+        )
+        assert result_document["seed"] == seed
         stored = JsonRunStore(records).list()
         assert len(stored) == 1
-        assert stored[0].run.tasks[0].seed == 17
+        assert stored[0].run.tasks[0].seed == seed
     finally:
         for run_root in (workspace / "runs").glob("run_*"):
             _restore_writes(run_root / "source")

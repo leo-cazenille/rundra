@@ -52,7 +52,9 @@ def build_parser() -> argparse.ArgumentParser:
     _add_json_option(targets)
 
     run = subparsers.add_parser("run", help="execute one Task synchronously")
-    _add_execution_arguments(run, allow_many=False, required=False)
+    _add_execution_arguments(
+        run, allow_many=False, required=False, allow_random_seed=True
+    )
     run.add_argument("--source-root", type=Path)
     run.add_argument("--destination", type=Path)
     run.add_argument("--project-file", type=Path)
@@ -63,7 +65,9 @@ def build_parser() -> argparse.ArgumentParser:
     submit = subparsers.add_parser(
         "submit", help="report asynchronous submission capability"
     )
-    _add_execution_arguments(submit, allow_many=True, required=True)
+    _add_execution_arguments(
+        submit, allow_many=True, required=True, allow_random_seed=False
+    )
     _add_json_option(submit)
 
     status = subparsers.add_parser("status", help="show persisted Run status")
@@ -119,6 +123,7 @@ def _add_execution_arguments(
     *,
     allow_many: bool,
     required: bool,
+    allow_random_seed: bool,
 ) -> None:
     parser.add_argument("experiment", type=Path)
     parser.add_argument("--config", required=required, type=Path)
@@ -126,6 +131,12 @@ def _add_execution_arguments(
     seed_group.add_argument("--seed", type=int)
     if allow_many:
         seed_group.add_argument("--seeds")
+    if allow_random_seed:
+        seed_group.add_argument(
+            "--random-seed",
+            action="store_true",
+            help="generate a new seed even when defaults specify one",
+        )
     parser.add_argument("--target", required=required)
     parser.add_argument(
         "--targets-file",
@@ -167,6 +178,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             data_dir=arguments.data_dir,
             project_file=arguments.project_file,
             profile=arguments.profile,
+            random_seed=arguments.random_seed,
         )
         if not resolved.ok:
             result = resolved

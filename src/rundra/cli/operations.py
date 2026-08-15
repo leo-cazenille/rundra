@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+import secrets
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from importlib.metadata import version
 from pathlib import Path, PurePath
@@ -70,6 +71,12 @@ class RunValue:
     @property
     def exit_code(self) -> int:
         return 0 if self.record.run.state is ExecutionState.SUCCEEDED else 2
+
+    @property
+    def seed(self) -> int:
+        if len(self.record.run.tasks) != 1:
+            raise ValueError("RunValue requires exactly one Task")
+        return self.record.run.tasks[0].seed
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,8 +219,12 @@ def resolve_run_inputs_operation(
     project_file: Path | None = None,
     profile: str | None = None,
     user_config_source: Path | None = None,
+    random_seed: bool = False,
+    seed_factory: Callable[[], int] | None = None,
 ) -> OperationResult[ResolvedRunInputs]:
     """Resolve synchronous run inputs without planning or executing work."""
+    if type(random_seed) is not bool:
+        raise TypeError("random_seed must be a boolean")
     try:
         cli_values = LaunchValues(
             config=config,
@@ -228,14 +239,13 @@ def resolve_run_inputs_operation(
             getattr(cli_values, field) is not None
             for field in (
                 "config",
-                "seed",
                 "target",
                 "source_root",
                 "destination",
                 "targets_file",
                 "data_dir",
             )
-        )
+        ) and (cli_values.seed is not None or random_seed)
         use_defaults = (
             not fully_explicit or project_file is not None or profile is not None
         )
@@ -262,10 +272,15 @@ def resolve_run_inputs_operation(
         return OperationResult.failure("run", _config_error(error))
     except LaunchResolutionError as error:
         return OperationResult.failure("run", OperationError(error.code, error.message))
+    if seed is not None and random_seed:
+        return OperationResult.failure(
+            "run",
+            OperationError(
+                "SEED_CONFLICT", "--seed and --random-seed are mutually exclusive"
+            ),
+        )
     missing = tuple(
-        name
-        for name in ("config", "seed", "target")
-        if getattr(resolved.values, name) is None
+        name for name in ("config", "target") if getattr(resolved.values, name) is None
     )
     if missing:
         return OperationResult.failure(
@@ -277,6 +292,27 @@ def resolve_run_inputs_operation(
             ),
         )
     values = resolved.values
+    if values.seed is None or random_seed:
+        generator = seed_factory or (lambda: secrets.randbits(63))
+        generated_seed = generator()
+        if (
+            type(generated_seed) is not int
+            or generated_seed < 0
+            or generated_seed >= 2**63
+        ):
+            return OperationResult.failure(
+                "run",
+                OperationError(
+                    "SEED_GENERATION_FAILED",
+                    "Seed generator did not return a non-negative 63-bit integer",
+                ),
+            )
+        values = replace(values, seed=generated_seed)
+        resolved = ResolvedLaunch(
+            values,
+            {**resolved.sources, "seed": "generated"},
+            resolved.profile,
+        )
     assert values.config is not None
     assert values.seed is not None
     assert values.target is not None

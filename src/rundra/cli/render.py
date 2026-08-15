@@ -119,6 +119,7 @@ def render_human(result: OperationResult[Any]) -> str:
     if isinstance(value, RunValue):
         return (
             f"Run: {value.run_id}\n"
+            f"Seed: {value.seed}\n"
             f"State: {value.record.run.state.value}\n"
             f"Retrieval: {value.record.run.retrieval_state.value}\n"
             f"Target: {value.record.run.target.name}"
@@ -233,6 +234,7 @@ def _run_value_document(value: RunValue) -> dict[str, Any]:
         "run_id": str(record.run.id),
         "experiment": record.run.experiment_name,
         "target": record.run.target.name,
+        "seed": value.seed,
         "state": record.run.state.value,
         "retrieval_state": record.run.retrieval_state.value,
         "tasks": len(record.run.tasks),

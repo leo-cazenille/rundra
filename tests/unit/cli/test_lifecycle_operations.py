@@ -266,7 +266,7 @@ def test_run_input_resolution_reports_all_unresolved_required_values(
 
     assert result.error is not None
     assert result.error.code == "LAUNCH_VALUE_REQUIRED"
-    assert result.error.details == {"fields": ("config", "seed", "target")}
+    assert result.error.details == {"fields": ("config", "target")}
 
 
 def test_fully_explicit_run_inputs_do_not_depend_on_optional_defaults(
@@ -289,3 +289,71 @@ def test_fully_explicit_run_inputs_do_not_depend_on_optional_defaults(
 
     assert result.ok and result.value is not None
     assert set(result.value.resolution.sources.values()) == {"cli"}
+
+
+def test_omitted_run_seed_is_generated_exactly_once_after_required_resolution(
+    tmp_path: Path,
+) -> None:
+    calls = 0
+
+    def generate() -> int:
+        nonlocal calls
+        calls += 1
+        return 123456789
+
+    result = resolve_run_inputs_operation(
+        tmp_path / "experiment.yaml",
+        config=tmp_path / "config.yaml",
+        target="local",
+        targets_file=tmp_path / "targets.yaml",
+        source_root=tmp_path,
+        destination=tmp_path / "results",
+        data_dir=tmp_path / "records",
+        user_config_source=tmp_path / "absent.yaml",
+        seed_factory=generate,
+    )
+
+    assert result.ok and result.value is not None
+    assert result.value.seed == 123456789
+    assert result.value.resolution.sources["seed"] == "generated"
+    assert calls == 1
+
+
+def test_random_seed_override_replaces_a_configured_fixed_seed(tmp_path: Path) -> None:
+    project = tmp_path / "rundra.yaml"
+    project.write_text(
+        "version: 1\ndefaults: {config: config.yaml, target: local, seed: 17}\n",
+        encoding="utf-8",
+    )
+
+    result = resolve_run_inputs_operation(
+        tmp_path / "experiment.yaml",
+        project_file=project,
+        random_seed=True,
+        seed_factory=lambda: 29,
+        user_config_source=tmp_path / "absent.yaml",
+    )
+
+    assert result.ok and result.value is not None
+    assert result.value.seed == 29
+    assert result.value.resolution.sources["seed"] == "generated"
+
+
+def test_seed_generation_rejects_conflicts_and_invalid_provider_values(
+    tmp_path: Path,
+) -> None:
+    common = {
+        "experiment_source": tmp_path / "experiment.yaml",
+        "config": tmp_path / "config.yaml",
+        "target": "local",
+        "user_config_source": tmp_path / "absent.yaml",
+    }
+
+    conflict = resolve_run_inputs_operation(
+        **common, seed=1, random_seed=True, seed_factory=lambda: 2
+    )
+    invalid = resolve_run_inputs_operation(**common, seed_factory=lambda: 2**63)
+
+    assert conflict.error is not None and conflict.error.code == "SEED_CONFLICT"
+    assert invalid.error is not None
+    assert invalid.error.code == "SEED_GENERATION_FAILED"

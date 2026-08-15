@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import subprocess
 
+import pytest
+
 from rundra.cli.main import build_parser
 
 
@@ -30,3 +32,9 @@ def test_run_parser_accepts_launch_resolution_without_repeated_arguments() -> No
     assert arguments.source_root is None
     assert arguments.destination is None
     assert arguments.data_dir is None
+    assert arguments.random_seed is False
+
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(
+            ["run", "experiment.yaml", "--seed", "1", "--random-seed"]
+        )
