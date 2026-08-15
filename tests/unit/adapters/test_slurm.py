@@ -248,7 +248,9 @@ def test_slurm_scheduler_submits_generated_script_with_parsable_output() -> None
 def test_slurm_submission_creates_and_uses_configured_log_directory() -> None:
     transport = ScriptedTransport(deque([]))
     scheduler = SlurmScheduler(
-        transport, log_directory=PurePosixPath("/remote/work/.scheduler-logs")
+        transport,
+        timezone=UTC,
+        log_directory=PurePosixPath("/remote/work/.scheduler-logs"),
     )
     transport.results.append(_command_result(Command(("unused",)), 0, "12345\n"))
 
@@ -308,7 +310,9 @@ def test_slurm_query_combines_queue_and_accounting_in_request_order() -> None:
     second = SchedulerReference("456")
     transport = ScriptedTransport(deque([]))
     scheduler = SlurmScheduler(
-        transport, log_directory=PurePosixPath("/remote/work/.scheduler-logs")
+        transport,
+        timezone=UTC,
+        log_directory=PurePosixPath("/remote/work/.scheduler-logs"),
     )
     squeue_command = Command(
         (
@@ -328,7 +332,7 @@ def test_slurm_query_combines_queue_and_accounting_in_request_order() -> None:
             "--jobs",
             "456",
             "--format",
-            "JobIDRaw,State,ExitCode,Start,End,NodeList",
+            "JobIDRaw,State%32,ExitCode,Start,End,NodeList",
         )
     )
     transport.results.extend(
@@ -358,6 +362,7 @@ def test_slurm_query_combines_queue_and_accounting_in_request_order() -> None:
     assert observations[0].metadata == {
         "source": "squeue",
         "allocated_nodes": "node[01-02]",
+        "native_start": "2026-08-15T10:01:02",
         "stdout_path": "/remote/work/.scheduler-logs/123.stdout",
         "stderr_path": "/remote/work/.scheduler-logs/123.stderr",
     }
@@ -366,6 +371,26 @@ def test_slurm_query_combines_queue_and_accounting_in_request_order() -> None:
     assert observations[1].exit_code == 137
     assert observations[1].finished_at == datetime(2026, 8, 15, 9, 1, tzinfo=UTC)
     assert transport.run_calls == [squeue_command, sacct_command]
+
+
+def test_naive_slurm_timestamps_are_not_fabricated_without_site_timezone() -> None:
+    reference = SchedulerReference("123")
+    transport = ScriptedTransport(
+        deque(
+            [
+                _command_result(
+                    Command(("unused",)),
+                    0,
+                    "123|RUNNING|2026-08-15T10:01:02|node01\n",
+                )
+            ]
+        )
+    )
+
+    observation = SlurmScheduler(transport).query((reference,))[0]
+
+    assert observation.started_at is None
+    assert observation.metadata["native_start"] == "2026-08-15T10:01:02"
 
 
 def test_slurm_query_marks_accounting_lag_explicitly() -> None:

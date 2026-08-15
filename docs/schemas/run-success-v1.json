@@ -63,6 +63,7 @@
     "scheduler_job_ids": [
       "local-0123456789abcdef0123456789abcdef"
     ],
+    "scheduler": "local",
     "state": "SUCCEEDED",
     "target": "local",
     "task_exit_codes": {

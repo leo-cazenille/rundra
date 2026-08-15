@@ -7,7 +7,12 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
-from rundra.cli.operations import LogsValue, logs_operation
+from rundra.cli.operations import (
+    CancelValue,
+    LogsValue,
+    cancel_operation,
+    logs_operation,
+)
 from rundra.domain.models import (
     BackendConfig,
     Command,
@@ -268,3 +273,18 @@ def test_logs_use_normalized_artifacts_without_exposing_slurm_filenames(
     ]
     persisted = store.load(_RUN_ID)
     assert persisted.scheduler_metadata["source"] == "sacct"
+
+
+def test_cancel_operation_reconciles_by_run_id(tmp_path: Path) -> None:
+    store = JsonRunStore(tmp_path / "records")
+    store.create(_record())
+    scheduler = SequenceScheduler(
+        deque([]),
+        deque([_observation(ExecutionState.CANCELLED, "CANCELLED")]),
+    )
+
+    result = cancel_operation(str(_RUN_ID), store, scheduler=scheduler)
+
+    assert result.ok and isinstance(result.value, CancelValue)
+    assert result.value.status.state is ExecutionState.CANCELLED
+    assert store.load(_RUN_ID).run.state is ExecutionState.CANCELLED

@@ -16,11 +16,15 @@ The M1.4 example represents a completed local Run and demonstrates its artifact
 manifest, scheduler reference, timestamps, Task exit code, and independent
 successful retrieval state. It also demonstrates the optional M1.6 Git commit,
 branch, dirty flag, and bounded dirty patch fields.
+M3 adds immutable scalar `scheduler_metadata`, including available accounting
+source, allocated-node, accounting-delay, and normalized log-path values.
 
 M1.5 adds checked success envelopes for synchronous `run`, `status`, `list`,
 `logs`, and `fetch`. The `inspect` contract embeds `run-record-v1.json` unchanged
-under the standard envelope's `record` field. `submit` uses the common error
-envelope with code `ASYNC_UNAVAILABLE` until asynchronous semantics exist.
+under the standard envelope's `record` field. M3 adds checked successful
+`submit` and `cancel` envelopes; status/list include the separately preserved
+native state and scheduler job IDs. Local asynchronous submission still uses
+the common `ASYNC_UNAVAILABLE` error.
 
 M1E adds a sibling `launch` object to checked `plan` and `run` success
 envelopes. It contains the selected profile, every launch value consumed by the

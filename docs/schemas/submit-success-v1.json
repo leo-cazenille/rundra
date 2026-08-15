@@ -1,0 +1,33 @@
+{
+  "format_version": 1,
+  "ok": true,
+  "operation": "submit",
+  "run": {
+    "artifacts": [
+      {
+        "kind": "source_snapshot",
+        "path": "/workspaces/runs/run_0123456789abcdef0123456789abcdef/source",
+        "size_bytes": null,
+        "task_id": null
+      },
+      {
+        "kind": "effective_config",
+        "path": "/workspaces/runs/run_0123456789abcdef0123456789abcdef/input/config.yaml",
+        "size_bytes": 24,
+        "task_id": null
+      }
+    ],
+    "experiment": "minimal",
+    "retrieval_state": "NOT_REQUESTED",
+    "run_id": "run_0123456789abcdef0123456789abcdef",
+    "scheduler": "slurm",
+    "scheduler_job_ids": [
+      "18372"
+    ],
+    "seed": 17,
+    "state": "SUBMITTED",
+    "target": "shoal",
+    "task_exit_codes": {},
+    "tasks": 1
+  }
+}

@@ -5,8 +5,12 @@
   "runs": [
     {
       "experiment": "minimal",
+      "native_state": "EXITED",
       "retrieval_state": "SUCCEEDED",
       "run_id": "run_0123456789abcdef0123456789abcdef",
+      "scheduler_job_ids": [
+        "local-0123456789abcdef0123456789abcdef"
+      ],
       "state": "SUCCEEDED",
       "target": "local",
       "tasks": {

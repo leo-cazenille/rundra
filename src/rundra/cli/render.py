@@ -281,6 +281,7 @@ def _run_value_document(value: RunValue) -> dict[str, Any]:
                 record.task_exit_codes.items(), key=lambda item: item[0].value
             )
         },
+        "scheduler": record.run.target.scheduler.kind,
         "artifacts": [_artifact_document(item) for item in record.artifacts],
     }
 
@@ -292,6 +293,8 @@ def _status_document(value: StatusValue) -> dict[str, Any]:
         "target": value.target,
         "state": value.state.value,
         "retrieval_state": value.retrieval_state.value,
+        "native_state": value.native_state,
+        "scheduler_job_ids": list(value.scheduler_job_ids),
         "tasks": {
             "total": sum(value.task_counts.values()),
             **{

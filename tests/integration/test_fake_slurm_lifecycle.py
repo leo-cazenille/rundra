@@ -1,0 +1,235 @@
+from __future__ import annotations
+
+from collections import deque
+from datetime import UTC, datetime
+from pathlib import Path, PurePosixPath
+
+import pytest
+
+from rundra.adapters import SlurmScheduler
+from rundra.domain.models import (
+    BackendConfig,
+    Command,
+    ConfigSnapshot,
+    ContainerSpec,
+    ExperimentSpec,
+    ResourceRequest,
+    RunId,
+    Target,
+)
+from rundra.domain.states import ExecutionState, RetrievalState
+from rundra.orchestration.planner import create_plan
+from rundra.orchestration.service import (
+    OrchestrationError,
+    OrchestrationService,
+    RunExecutionRequest,
+    SchedulerLifecycleService,
+)
+from rundra.persistence import JsonRunStore
+from rundra.ports import (
+    CapabilityCheck,
+    CommandResult,
+    ContainerRequest,
+    FetchRequest,
+    FetchResult,
+    StagedWorkspace,
+    StageRequest,
+)
+
+_RUN_ID = RunId("run_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+_NOW = datetime(2026, 8, 15, 10, tzinfo=UTC)
+
+
+class ScriptedTransport:
+    def __init__(self, outcomes: deque[tuple[int, str, str] | Exception]) -> None:
+        self.outcomes = outcomes
+        self.commands: list[Command] = []
+
+    def check(self) -> CapabilityCheck:
+        return CapabilityCheck("fake-ssh")
+
+    def run(self, command: Command) -> CommandResult:
+        self.commands.append(command)
+        outcome = self.outcomes.popleft()
+        if isinstance(outcome, Exception):
+            raise outcome
+        exit_code, stdout, stderr = outcome
+        return CommandResult(command, exit_code, stdout, stderr, _NOW, _NOW)
+
+
+class FakeRemoteStager:
+    def __init__(self) -> None:
+        root = PurePosixPath(f"/remote/runs/{_RUN_ID}")
+        self.workspace = StagedWorkspace(
+            root,
+            root / "source",
+            root / "input",
+            root / "input/config.yaml",
+            root / "runtime",
+            root / "output",
+            root / "logs",
+            root / "metadata",
+        )
+
+    def stage(self, request: StageRequest) -> StagedWorkspace:
+        return self.workspace
+
+    def fetch(self, request: FetchRequest) -> FetchResult:
+        return FetchResult(())
+
+
+class FakeRuntime:
+    def check(self) -> CapabilityCheck:
+        return CapabilityCheck("fake-apptainer")
+
+    def build_command(self, request: ContainerRequest) -> Command:
+        return Command(("apptainer", "exec", "/images/test.sif", "program"))
+
+
+def _request(tmp_path: Path) -> RunExecutionRequest:
+    resources = ResourceRequest(cpus_per_task=2)
+    experiment = ExperimentSpec(
+        1,
+        "fake-slurm",
+        Command(("program", "--config", "{config}", "--seed", "{seed}")),
+        resources,
+        container=ContainerSpec(PurePosixPath("/images/test.sif")),
+    )
+    target = Target(
+        "cluster",
+        BackendConfig("ssh", {"host": "cluster"}),
+        BackendConfig("slurm"),
+        BackendConfig("rsync"),
+        BackendConfig("apptainer"),
+        PurePosixPath("/remote"),
+    )
+    config = ConfigSnapshot(PurePosixPath("config.yaml"), "value: 1\n")
+    return RunExecutionRequest(
+        create_plan(experiment, config, target, seeds=(17,)),
+        experiment,
+        tmp_path,
+        tmp_path / "retrieved",
+    )
+
+
+def _service(
+    tmp_path: Path, outcomes: deque[tuple[int, str, str] | Exception]
+) -> tuple[OrchestrationService, ScriptedTransport, JsonRunStore]:
+    transport = ScriptedTransport(outcomes)
+    store = JsonRunStore(tmp_path / "records")
+    scheduler = SlurmScheduler(
+        transport,
+        timezone=UTC,
+        log_directory=PurePosixPath("/remote/.scheduler-logs"),
+    )
+    service = OrchestrationService(
+        store=store,
+        stager=FakeRemoteStager(),
+        runtime=FakeRuntime(),
+        scheduler=scheduler,
+        transport=transport,
+        run_id_factory=lambda: _RUN_ID,
+        clock=lambda: _NOW,
+        framework_version="0.1.0.dev0",
+    )
+    return service, transport, store
+
+
+def _terminal_rows(state: str, exit_code: int) -> tuple[tuple[int, str, str], ...]:
+    accounting = (
+        f"42|{state}|{exit_code}:0|2026-08-15T10:00:00|2026-08-15T10:00:00|node01|\n"
+    )
+    return ((0, "", ""), (0, accounting, ""))
+
+
+@pytest.mark.parametrize(
+    ("native_state", "exit_code", "expected"),
+    [
+        ("COMPLETED", 0, ExecutionState.SUCCEEDED),
+        ("OUT_OF_MEMORY", 137, ExecutionState.FAILED),
+    ],
+)
+def test_scripted_slurm_run_reconciles_terminal_success_and_failure(
+    tmp_path: Path,
+    native_state: str,
+    exit_code: int,
+    expected: ExecutionState,
+) -> None:
+    outcomes = deque(
+        [
+            (0, "42\n", ""),
+            *_terminal_rows(native_state, exit_code),
+            *_terminal_rows(native_state, exit_code),
+        ]
+    )
+    service, transport, store = _service(tmp_path, outcomes)
+
+    result = service.execute_one(_request(tmp_path))
+
+    assert result.record.run.state is expected
+    assert result.record.native_state == native_state
+    assert result.record.task_exit_codes == {result.record.run.tasks[0].id: exit_code}
+    assert result.record.run.retrieval_state is RetrievalState.SUCCEEDED
+    assert store.load(_RUN_ID) == result.record
+    assert transport.commands[0].argv[0:2] == ("/bin/sh", "-c")
+
+
+def test_scripted_submission_failure_is_durable_and_actionable(tmp_path: Path) -> None:
+    service, _, store = _service(tmp_path, deque([(1, "", "invalid account or qos")]))
+
+    with pytest.raises(OrchestrationError) as caught:
+        service.submit_one(_request(tmp_path))
+
+    assert caught.value.code == "SCHEDULER_SUBMISSION_FAILED"
+    record = store.load(_RUN_ID)
+    assert record.run.state is ExecutionState.FAILED
+    assert record.native_state == "SCHEDULER_SUBMISSION_FAILED"
+
+
+def test_accounting_disappearance_times_out_without_failing_the_run(
+    tmp_path: Path,
+) -> None:
+    service, _, store = _service(tmp_path, deque([(0, "42\n", "")]))
+    submitted = service.submit_one(_request(tmp_path)).record
+    continuation_transport = ScriptedTransport(deque([(0, "", ""), (0, "", "")]))
+    continuation = SchedulerLifecycleService(
+        store=JsonRunStore(tmp_path / "records"),
+        scheduler=SlurmScheduler(continuation_transport),
+        monotonic_clock=lambda: 0.0,
+        sleeper=lambda delay: None,
+    )
+
+    with pytest.raises(OrchestrationError) as caught:
+        continuation.wait(store.load(submitted.run.id), timeout=0)
+
+    assert caught.value.code == "SCHEDULER_TIMEOUT"
+    record = store.load(_RUN_ID)
+    assert record.run.state is ExecutionState.UNKNOWN
+    assert record.native_state == "ACCOUNTING_PENDING"
+    assert record.scheduler_job_ids == ("42",)
+
+
+def test_new_client_can_cancel_from_only_the_persisted_record(tmp_path: Path) -> None:
+    service, _, store = _service(tmp_path, deque([(0, "42\n", "")]))
+    service.submit_one(_request(tmp_path))
+    cancel_transport = ScriptedTransport(
+        deque(
+            [
+                (0, "", ""),
+                (0, "", ""),
+                *_terminal_rows("CANCELLED", 0)[1:],
+            ]
+        )
+    )
+    reloaded_store = JsonRunStore(tmp_path / "records")
+    continuation = SchedulerLifecycleService(
+        store=reloaded_store,
+        scheduler=SlurmScheduler(cancel_transport),
+        clock=lambda: _NOW,
+    )
+
+    cancelled = continuation.cancel(reloaded_store.load(_RUN_ID))
+
+    assert cancelled.run.state is ExecutionState.CANCELLED
+    assert cancelled.native_state == "CANCELLED"
+    assert cancel_transport.commands[0] == Command(("scancel", "--", "42"))

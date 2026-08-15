@@ -11,7 +11,8 @@ The project, GitHub repository, Python package, and PyPI distribution are named
 
 ## Development status
 
-M1, M1E, and M2 are complete; M3 scheduler work is in progress. Rundra has
+M1, M1E, M2, and M3 are complete; real-cluster M4 validation has not started.
+Rundra has
 portable domain and configuration models,
 deterministic planning, isolated local staging, durable versioned Run records,
 shell-free local execution, Apptainer command construction, Git provenance,
@@ -19,16 +20,17 @@ artifact retrieval, and common human/JSON lifecycle interfaces. The checked
 minimal experiment runs through the same planner, ports, orchestration service,
 and persistence path intended for later remote execution.
 
-M3.1 defines the backend-neutral scheduler boundary: nonempty groups contain
-minimal per-Task command/resource units, submissions retain an explicit mapping
-from logical Task IDs to opaque native IDs, and observations preserve portable
-and native states plus optional accounting data. Slurm command generation and
-submission begin in M3.2 and are not implemented yet.
+M3 adds deterministic inspectable sbatch scripts, parsable submission, durable
+job references, `squeue`/`sacct` reconciliation, synchronous waiting,
+asynchronous `submit`, cancellation, and normalized remote logs. Portable
+resource fields and a narrow `resources.native.slurm` allowlist are translated
+without allowing native options to override framework-managed directives.
+Normal tests use scripted transports and do not invoke an installed Slurm.
 
 M2.1 adds a typed OpenSSH transport adapter that honors normal user SSH
 configuration, agent authentication, jump-host configuration, and host-key
-verification. Remote staging and CLI execution are not yet implemented, so an
-SSH target is not yet runnable through `rundr run`.
+verification. SSH/Slurm/rsync/Apptainer targets are now wired through `run` and
+`submit`; actual site behavior remains unclaimed until the opt-in M4 checks.
 
 M2.2 centralizes the unavoidable remote-shell serialization boundary. Literal
 arguments, environment values, and working directories are POSIX-shell quoted;
@@ -38,8 +40,7 @@ M2.3–M2.6 add validated isolated remote workspace allocation and rsync upload
 of live working trees plus exact effective configuration. Successfully uploaded
 source/input snapshots are sealed read-only. Independent idempotent rsync
 retrieval collects output, logs, and metadata while keeping transfer state
-separate from computation state. Remote lifecycle CLI execution is still
-pending on the Slurm milestone.
+separate from computation state.
 
 The default integration suite validates this remote transport/staging path with
 executable SSH and rsync shims. It requires neither a network connection nor an
@@ -49,10 +50,11 @@ M1E adds strict project launch profiles, optional user defaults, deterministic
 resolution precedence, concise `run`/`plan` commands, and generated seeds that
 are displayed and durably recorded before execution.
 
-Local execution is synchronous. `submit` reports `ASYNC_UNAVAILABLE` until a
-durable asynchronous backend exists. An explicit `native` runtime supports only
-an all-local target and an experiment without a container request; experiments
-that declare a container image require the `apptainer` runtime.
+Local execution is synchronous and local `submit` remains unavailable. Slurm
+targets support durable asynchronous `submit`, new-process `status`/`logs`, and
+idempotent `cancel`. An explicit `native` runtime supports only an all-local
+target and an experiment without a container request; remote experiments use
+the `apptainer` runtime.
 
 Implementation progress is tracked in
 [`.agent/plans/v0.1.md`](.agent/plans/v0.1.md).

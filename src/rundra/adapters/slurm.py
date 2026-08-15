@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta, tzinfo
+from datetime import datetime, timedelta, tzinfo
 from pathlib import PurePath
 
 from rundra.adapters._remote_shell import serialize_remote_command
@@ -66,7 +66,7 @@ class SlurmScheduler:
         squeue: str = "squeue",
         sacct: str = "sacct",
         scancel: str = "scancel",
-        timezone: tzinfo = UTC,
+        timezone: tzinfo | None = None,
         log_directory: PurePath | None = None,
     ) -> None:
         if not isinstance(transport, Transport):
@@ -85,8 +85,8 @@ class SlurmScheduler:
                 raise ValueError(
                     f"SlurmScheduler {name} executable must be nonblank and safe"
                 )
-        if not isinstance(timezone, tzinfo):
-            raise TypeError("SlurmScheduler timezone must be a tzinfo")
+        if timezone is not None and not isinstance(timezone, tzinfo):
+            raise TypeError("SlurmScheduler timezone must be a tzinfo or None")
         if log_directory is not None:
             if not isinstance(log_directory, PurePath):
                 raise TypeError("SlurmScheduler log_directory must be a path or None")
@@ -177,7 +177,7 @@ class SlurmScheduler:
                         "--jobs",
                         ",".join(reference.native_id for reference in missing),
                         "--format",
-                        "JobIDRaw,State,ExitCode,Start,End,NodeList",
+                        "JobIDRaw,State%32,ExitCode,Start,End,NodeList",
                     )
                 ),
                 source="sacct",
@@ -389,7 +389,7 @@ def _references(
 def _parse_squeue(
     output: str,
     requested: tuple[SchedulerReference, ...],
-    timezone: tzinfo,
+    timezone: tzinfo | None,
 ) -> dict[SchedulerReference, SchedulerObservation]:
     expected = {reference.native_id: reference for reference in requested}
     observations: dict[SchedulerReference, SchedulerObservation] = {}
@@ -407,6 +407,8 @@ def _parse_squeue(
             raise SlurmQueryError(f"squeue returned duplicate job {job_id}")
         state = _portable_state(native_state, None)
         metadata: dict[str, NativeValue] = {"source": "squeue"}
+        if raw_start not in {"", "N/A", "Unknown", "None"}:
+            metadata["native_start"] = raw_start
         if nodes not in {"", "(null)", "N/A"}:
             metadata["allocated_nodes"] = nodes
         observations[reference] = SchedulerObservation(
@@ -426,7 +428,7 @@ def _parse_squeue(
 def _parse_sacct(
     output: str,
     requested: tuple[SchedulerReference, ...],
-    timezone: tzinfo,
+    timezone: tzinfo | None,
 ) -> dict[SchedulerReference, SchedulerObservation]:
     expected = {reference.native_id: reference for reference in requested}
     observations: dict[SchedulerReference, SchedulerObservation] = {}
@@ -452,6 +454,10 @@ def _parse_sacct(
             ExecutionState.CANCELLED,
         }
         metadata: dict[str, NativeValue] = {"source": "sacct"}
+        if raw_start not in {"", "N/A", "Unknown", "None"}:
+            metadata["native_start"] = raw_start
+        if raw_end not in {"", "N/A", "Unknown", "None"}:
+            metadata["native_end"] = raw_end
         if nodes not in {"", "(null)", "Unknown"}:
             metadata["allocated_nodes"] = nodes
         observations[reference] = SchedulerObservation(
@@ -506,11 +512,13 @@ def _parse_exit_code(value: str) -> int | None:
     return int(match.group(1))
 
 
-def _parse_timestamp(value: str, timezone: tzinfo) -> datetime | None:
+def _parse_timestamp(value: str, timezone: tzinfo | None) -> datetime | None:
     if value in {"", "N/A", "Unknown", "None"}:
         return None
     try:
         parsed = datetime.fromisoformat(value)
     except ValueError as error:
         raise SlurmQueryError("Slurm returned an invalid timestamp") from error
-    return parsed.replace(tzinfo=timezone) if parsed.tzinfo is None else parsed
+    if parsed.tzinfo is not None:
+        return parsed
+    return None if timezone is None else parsed.replace(tzinfo=timezone)

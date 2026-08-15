@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import secrets
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from importlib.metadata import version
 from pathlib import Path, PurePath
@@ -110,11 +110,25 @@ class StatusValue:
     state: ExecutionState
     retrieval_state: RetrievalState
     task_counts: Mapping[str, int]
+    native_state: str | None = None
+    scheduler_job_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(
             self, "task_counts", MappingProxyType(dict(self.task_counts))
         )
+        if self.native_state is not None and (
+            type(self.native_state) is not str or not self.native_state.strip()
+        ):
+            raise ValueError("StatusValue native_state must be nonblank or None")
+        if not isinstance(self.scheduler_job_ids, Sequence) or isinstance(
+            self.scheduler_job_ids, (str, bytes)
+        ):
+            raise TypeError("StatusValue scheduler_job_ids must be a sequence")
+        scheduler_job_ids = tuple(self.scheduler_job_ids)
+        if any(type(value) is not str or not value for value in scheduler_job_ids):
+            raise ValueError("StatusValue scheduler_job_ids must be nonempty strings")
+        object.__setattr__(self, "scheduler_job_ids", scheduler_job_ids)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1016,6 +1030,8 @@ def _status_value(record: RunRecord) -> StatusValue:
         state=record.run.state,
         retrieval_state=record.run.retrieval_state,
         task_counts=counts,
+        native_state=record.native_state,
+        scheduler_job_ids=record.scheduler_job_ids,
     )
 
 

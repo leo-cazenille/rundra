@@ -820,6 +820,16 @@ the local scheduler uses it to return stdout, stderr, timestamps, and exit
 status, while remote schedulers may instead expose log paths and accounting
 metadata.
 
+The M3 Slurm adapter renders a deterministic single-Task sbatch script before
+submission. Portable node/task/CPU/GPU/memory/walltime requests own their
+directives; only `account`, `constraint`, `partition`, `qos`, and boolean
+`exclusive` are accepted from `resources.native.slurm`. Output/error directives
+and other framework-owned fields cannot be overridden. `sbatch --parsable`,
+delimiter-stable `squeue`, and parsable `sacct` output are interpreted only in
+the adapter. A job absent from both queue and accounting is reported as
+portable `UNKNOWN` with explicit accounting-pending metadata rather than being
+assumed complete or failed.
+
 ---
 
 ### 11.3 Stager
@@ -1498,14 +1508,16 @@ task failure returns a Run document with state `FAILED` and process exit code
 2; operation/configuration/infrastructure failures return exit code 1; other
 successful operations return 0.
 
-`status`, `list`, and `inspect` load strict persisted RunRecords rather than
-querying native tools. `logs` resolves framework-managed stdout/stderr artifacts
-by stable Task ID. Local `fetch` reconstructs the per-Run workspace from its
-target and Run ID, is idempotent, and updates the artifact manifest; refetching
-an already successful retrieval keeps its successful state. Asynchronous
-`submit` is present only as the structured `ASYNC_UNAVAILABLE` capability error
-in M1.5. `cancel` remains unavailable because there is no active asynchronous
-local process to cancel.
+`list` and `inspect` load strict persisted RunRecords. `status` additionally
+refreshes active Slurm Runs through the scheduler adapter. `logs` resolves
+framework-managed stdout/stderr artifacts by stable Task ID and reads remote
+Slurm logs through the configured transport. Local `fetch` reconstructs the
+per-Run workspace from its target and Run ID, is idempotent, and updates the
+artifact manifest; refetching an already successful retrieval keeps its
+successful state. Asynchronous
+`submit` and idempotent `cancel` are available for SSH/Slurm/rsync/Apptainer
+targets; local `submit` remains the structured `ASYNC_UNAVAILABLE` capability
+error because no detached local process owner exists.
 
 Synchronous `run` wires the Git provenance provider into the same orchestration
 service. `inspect` exposes the persisted optional fields through the existing
@@ -2000,6 +2012,19 @@ srun
 The rest of the application should not depend directly on their textual output formats.
 
 Parsing belongs inside the Slurm adapter.
+
+The M3 implementation supports the one-Task reference path. It stores the
+native job reference before the first query, polls without a daemon, leaves an
+active Run nonterminal when the client wait times out, and permits a later
+client process to continue by Run ID. Active state comes from `squeue`; missing
+jobs fall back to `sacct`, including native state, exit code, timestamps, and
+allocated nodes. Slurm stdout/stderr use adapter-owned job-ID paths under the
+target workspace and are exposed as portable Task artifacts. Slurm arrays and
+multi-seed grouping remain the M5 deliverable.
+
+Native timestamp text is retained in scheduler metadata. A timestamp without a
+UTC offset is promoted to a portable timezone-aware value only when the
+adapter has an explicit site timezone; Rundra does not silently assume UTC.
 
 ---
 

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path, PurePosixPath
 
 import pytest
 
 from rundra.cli.operations import (
+    CancelValue,
     FetchValue,
     InspectValue,
     LaunchResolutionValue,
@@ -16,6 +18,7 @@ from rundra.cli.operations import (
 )
 from rundra.cli.render import result_document
 from rundra.domain.models import ArtifactKind
+from rundra.domain.states import ExecutionState, RetrievalState
 from rundra.persistence import record_from_dict
 from rundra.results import OperationResult
 
@@ -31,6 +34,8 @@ _STATUS = StatusValue(
     state=_RECORD.run.state,
     retrieval_state=_RECORD.run.retrieval_state,
     task_counts={"SUCCEEDED": 1},
+    native_state=_RECORD.native_state,
+    scheduler_job_ids=_RECORD.scheduler_job_ids,
 )
 _LOGS = LogsValue(
     run_id=_RECORD.run.id,
@@ -70,6 +75,40 @@ _RUN_LAUNCH = LaunchResolutionValue(
         "data_dir": "cli",
     },
 )
+_SUBMITTED_RUN = replace(
+    _RECORD.run,
+    target=replace(
+        _RECORD.run.target,
+        name="shoal",
+        scheduler=replace(_RECORD.run.target.scheduler, kind="slurm"),
+    ),
+    state=ExecutionState.SUBMITTED,
+    retrieval_state=RetrievalState.NOT_REQUESTED,
+    tasks=tuple(
+        replace(task, state=ExecutionState.SUBMITTED) for task in _RECORD.run.tasks
+    ),
+)
+_SUBMITTED_RECORD = replace(
+    _RECORD,
+    run=_SUBMITTED_RUN,
+    scheduler_job_ids=("18372",),
+    started_at=None,
+    completed_at=None,
+    native_state=None,
+    scheduler_metadata={},
+    task_exit_codes={},
+    artifacts=_RECORD.artifacts[:2],
+)
+_CANCELLED_STATUS = StatusValue(
+    run_id=_RECORD.run.id,
+    experiment="minimal",
+    target="shoal",
+    state=ExecutionState.CANCELLED,
+    retrieval_state=RetrievalState.NOT_REQUESTED,
+    task_counts={"CANCELLED": 1},
+    native_state="CANCELLED",
+    scheduler_job_ids=("18372",),
+)
 
 
 @pytest.mark.parametrize(
@@ -78,6 +117,10 @@ _RUN_LAUNCH = LaunchResolutionValue(
         (
             OperationResult.success("run", RunValue(_RECORD, _RUN_LAUNCH)),
             "run-success-v1.json",
+        ),
+        (
+            OperationResult.success("submit", RunValue(_SUBMITTED_RECORD)),
+            "submit-success-v1.json",
         ),
         (OperationResult.success("status", _STATUS), "status-success-v1.json"),
         (
@@ -96,6 +139,10 @@ _RUN_LAUNCH = LaunchResolutionValue(
                 ),
             ),
             "fetch-success-v1.json",
+        ),
+        (
+            OperationResult.success("cancel", CancelValue(_CANCELLED_STATUS)),
+            "cancel-success-v1.json",
         ),
     ],
 )

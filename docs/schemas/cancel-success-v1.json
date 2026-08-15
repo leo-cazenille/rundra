@@ -1,0 +1,20 @@
+{
+  "cancel": {
+    "experiment": "minimal",
+    "native_state": "CANCELLED",
+    "retrieval_state": "NOT_REQUESTED",
+    "run_id": "run_0123456789abcdef0123456789abcdef",
+    "scheduler_job_ids": [
+      "18372"
+    ],
+    "state": "CANCELLED",
+    "target": "shoal",
+    "tasks": {
+      "cancelled": 1,
+      "total": 1
+    }
+  },
+  "format_version": 1,
+  "ok": true,
+  "operation": "cancel"
+}
