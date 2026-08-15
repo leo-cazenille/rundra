@@ -4,7 +4,7 @@ import subprocess
 
 import pytest
 
-from rundra.cli.main import build_parser
+from rundra.cli.main import CLIUsageError, build_parser
 
 
 def test_console_entry_point_displays_help() -> None:
@@ -43,7 +43,7 @@ def test_run_parser_accepts_launch_resolution_without_repeated_arguments() -> No
     assert arguments.data_dir is None
     assert arguments.random_seed is False
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(CLIUsageError):
         build_parser().parse_args(
             ["run", "experiment.yaml", "--seed", "1", "--random-seed"]
         )
@@ -58,7 +58,7 @@ def test_plan_parser_accepts_defaults_and_mutually_exclusive_seed_forms() -> Non
     assert arguments.random_seed is False
     assert arguments.target is None
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(CLIUsageError):
         build_parser().parse_args(
             ["plan", "experiment.yaml", "--seeds", "0:2", "--random-seed"]
         )

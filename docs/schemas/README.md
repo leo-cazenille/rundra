@@ -6,6 +6,10 @@ an operation name, and an `ok` flag. Successful documents contain an
 operation-specific value; failures contain a structured `error` with `code`,
 `message`, and `details`.
 
+`cli-usage-error-v1.json` checks the same envelope for an argument-validation
+failure before operation execution begins. Machine-readable usage failures use
+exit 1 and never require parsing argparse prose.
+
 [`run-record-v1.json`](run-record-v1.json) defines a complete checked example of
 the persisted RunRecord format introduced in M1.1. Unlike CLI envelopes, it is
 a durable state document rather than an operation result. Optional unavailable

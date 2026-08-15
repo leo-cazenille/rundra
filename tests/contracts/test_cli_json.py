@@ -161,3 +161,42 @@ def test_human_commands_use_the_same_operations_and_separate_errors() -> None:
     assert "local: local / local" in targets.stdout
     assert invalid.returncode == 1 and invalid.stdout == ""
     assert "CONFIG_NOT_FOUND" in invalid.stderr
+
+
+def test_json_is_a_common_option_before_or_after_the_command() -> None:
+    before = _run("--json", "validate", "examples/minimal/experiment.yaml")
+    after = _run("validate", "examples/minimal/experiment.yaml", "--json")
+
+    assert before.returncode == after.returncode == 0
+    assert before.stderr == after.stderr == ""
+    assert before.stdout == after.stdout
+
+
+def test_json_usage_failure_uses_the_common_error_envelope_and_exit_one() -> None:
+    result = _run("--json", "status")
+    expected = json.loads(
+        (_ROOT / "docs/schemas/cli-usage-error-v1.json").read_text(encoding="utf-8")
+    )
+
+    assert result.returncode == 1
+    assert result.stderr == ""
+    assert json.loads(result.stdout) == expected
+
+
+def test_human_usage_failure_uses_the_same_error_code() -> None:
+    result = _run("status")
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "CLI_USAGE_ERROR" in result.stderr
+    assert "run_id" in result.stderr
+
+
+def test_unknown_command_is_a_structured_cli_operation_error() -> None:
+    result = _run("--json", "unknown")
+    document = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert result.stderr == ""
+    assert document["operation"] == "cli"
+    assert document["error"]["code"] == "CLI_USAGE_ERROR"

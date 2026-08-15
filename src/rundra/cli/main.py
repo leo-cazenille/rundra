@@ -4,7 +4,7 @@ import argparse
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Never
 
 from rundra.cli.operations import (
     RunValue,
@@ -24,14 +24,44 @@ from rundra.cli.operations import (
 )
 from rundra.cli.render import render_human, render_json
 from rundra.persistence import JsonRunStore
-from rundra.results import OperationResult
+from rundra.results import OperationError, OperationResult
+
+_COMMANDS = (
+    "validate",
+    "plan",
+    "targets",
+    "run",
+    "submit",
+    "status",
+    "list",
+    "logs",
+    "fetch",
+    "inspect",
+    "cancel",
+)
+
+
+class CLIUsageError(ValueError):
+    """An argparse failure that must pass through Rundra's result boundary."""
+
+
+class RundraArgumentParser(argparse.ArgumentParser):
+    """Raise usage failures so JSON callers receive a structured result."""
+
+    def error(self, message: str) -> Never:
+        raise CLIUsageError(message)
 
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the top-level command-line parser."""
-    parser = argparse.ArgumentParser(
+    parser = RundraArgumentParser(
         prog="rundr",
         description="Portable experiment execution for scientific computing.",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit JSON output (may also follow the command)",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -122,7 +152,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _add_json_option(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--json", action="store_true", help="emit JSON output")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="emit JSON output",
+    )
 
 
 def _default_targets_file() -> Path:
@@ -170,8 +205,26 @@ def _add_execution_arguments(
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the rundr command-line interface."""
+    raw_arguments = tuple(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
-    arguments = parser.parse_args(argv)
+    try:
+        arguments = parser.parse_args(raw_arguments)
+    except CLIUsageError as error:
+        operation = _requested_operation(raw_arguments)
+        usage_result: OperationResult[Any] = OperationResult.failure(
+            operation,
+            OperationError(
+                "CLI_USAGE_ERROR",
+                str(error),
+                {"command": operation},
+            ),
+        )
+        json_requested = "--json" in raw_arguments
+        output = (
+            render_json(usage_result) if json_requested else render_human(usage_result)
+        )
+        print(output, file=sys.stdout if json_requested else sys.stderr)
+        return 1
     if arguments.command is None:
         parser.print_help()
         return 0
@@ -290,8 +343,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     elif arguments.command == "inspect":
         result = inspect_operation(arguments.run_id, JsonRunStore(arguments.data_dir))
-    else:
+    elif arguments.command == "cancel":
         result = cancel_operation(arguments.run_id, JsonRunStore(arguments.data_dir))
+    else:
+        raise AssertionError(f"Unhandled CLI command: {arguments.command}")
     output = render_json(result) if arguments.json else render_human(result)
     stream = sys.stdout if arguments.json or result.ok else sys.stderr
     print(output, file=stream)
@@ -300,3 +355,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if isinstance(result.value, RunValue):
         return result.value.exit_code
     return 0
+
+
+def _requested_operation(arguments: Sequence[str]) -> str:
+    candidate = next((value for value in arguments if value != "--json"), None)
+    return candidate if candidate in _COMMANDS else "cli"

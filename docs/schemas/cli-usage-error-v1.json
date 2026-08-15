@@ -1,0 +1,12 @@
+{
+  "error": {
+    "code": "CLI_USAGE_ERROR",
+    "details": {
+      "command": "status"
+    },
+    "message": "the following arguments are required: run_id"
+  },
+  "format_version": 1,
+  "ok": false,
+  "operation": "status"
+}
