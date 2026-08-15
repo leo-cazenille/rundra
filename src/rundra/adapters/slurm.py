@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, tzinfo
@@ -167,6 +168,11 @@ class SlurmScheduler:
 
     def submit(self, group: SchedulerGroup) -> SchedulerSubmission:
         """Submit one generated script and retain opaque Slurm identity."""
+        if type(group) is SchedulerGroup and len(group.units) != 1:
+            raise SlurmSubmissionError(
+                "M5.3 array submission is not available until per-Task "
+                "reconciliation is implemented"
+            )
         stdout_path, stderr_path = self._log_paths("%j")
         script = render_sbatch_script(
             group, stdout_path=stdout_path, stderr_path=stderr_path
@@ -388,6 +394,36 @@ def render_slurm_array_manifest(request: SlurmArrayRequest) -> str:
     )
 
 
+def render_sbatch_array_script(
+    request: SlurmArrayRequest,
+    *,
+    stdout_path: PurePath,
+    stderr_path: PurePath,
+) -> str:
+    """Render a bounded Slurm array script that dispatches through its manifest."""
+    if type(request) is not SlurmArrayRequest:
+        raise TypeError("render_sbatch_array_script requires a SlurmArrayRequest")
+    stdout = _array_log_path(stdout_path, name="stdout")
+    stderr = _array_log_path(stderr_path, name="stderr")
+    resources = request.group.units[0].resources
+    directives = _sbatch_directives(
+        job_name="rundra-array",
+        resources=resources,
+        stdout_path=stdout,
+        stderr_path=stderr,
+        array_stop=len(request.mapping) - 1,
+    )
+    manifest_path = shlex.quote(str(request.manifest_path))
+    command = (
+        'if [ "${SLURM_ARRAY_TASK_ID+x}" != x ]; then\n'
+        "  printf '%s\\n' 'missing SLURM_ARRAY_TASK_ID' >&2\n"
+        "  exit 64\n"
+        "fi\n"
+        f'exec /bin/sh {manifest_path} "$SLURM_ARRAY_TASK_ID"'
+    )
+    return "\n".join(("#!/bin/sh", *directives, "", "set -eu", command, ""))
+
+
 def render_sbatch_script(
     group: SchedulerGroup,
     *,
@@ -401,16 +437,38 @@ def render_sbatch_script(
         raise SlurmScriptError("M3 Slurm submission requires exactly one Task")
     unit = group.units[0]
     resources = unit.resources
-    directives = [
-        f"#SBATCH --job-name=rundra-{unit.task_id}",
-        f"#SBATCH --nodes={resources.nodes}",
-        f"#SBATCH --ntasks={resources.tasks}",
-        f"#SBATCH --cpus-per-task={resources.cpus_per_task}",
-    ]
     if (stdout_path is None) != (stderr_path is None):
         raise SlurmScriptError(
             "Slurm stdout and stderr paths must be provided together"
         )
+    directives = _sbatch_directives(
+        job_name=f"rundra-{unit.task_id}",
+        resources=resources,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+    )
+    command = serialize_remote_command(unit.command)
+    return "\n".join(("#!/bin/sh", *directives, "", "set -eu", command, ""))
+
+
+def _sbatch_directives(
+    *,
+    job_name: str,
+    resources: ResourceRequest,
+    stdout_path: PurePath | None,
+    stderr_path: PurePath | None,
+    array_stop: int | None = None,
+) -> tuple[str, ...]:
+    directives = [f"#SBATCH --job-name={job_name}"]
+    if array_stop is not None:
+        directives.append(f"#SBATCH --array=0-{array_stop}")
+    directives.extend(
+        (
+            f"#SBATCH --nodes={resources.nodes}",
+            f"#SBATCH --ntasks={resources.tasks}",
+            f"#SBATCH --cpus-per-task={resources.cpus_per_task}",
+        )
+    )
     if stdout_path is not None and stderr_path is not None:
         directives.extend(
             (
@@ -426,8 +484,16 @@ def render_sbatch_script(
     if resources.walltime is not None:
         directives.append(f"#SBATCH --time={_slurm_duration(resources.walltime)}")
     directives.extend(_native_directives(resources))
-    command = serialize_remote_command(unit.command)
-    return "\n".join(("#!/bin/sh", *directives, "", "set -eu", command, ""))
+    return tuple(directives)
+
+
+def _array_log_path(value: PurePath, *, name: str) -> PurePath:
+    rendered = _directive_path(value, name=name)
+    if "%A" not in rendered or "%a" not in rendered:
+        raise SlurmScriptError(
+            f"Slurm array {name} path must contain %A and %a placeholders"
+        )
+    return value
 
 
 def _native_directives(resources: ResourceRequest) -> tuple[str, ...]:

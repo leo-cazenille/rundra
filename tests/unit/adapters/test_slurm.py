@@ -14,6 +14,7 @@ from rundra.adapters import (
     SlurmScheduler,
     SlurmScriptError,
     SlurmSubmissionError,
+    render_sbatch_array_script,
     render_sbatch_script,
     render_slurm_array_manifest,
 )
@@ -315,6 +316,154 @@ def test_array_manifest_rejects_missing_or_unknown_indices(
 def test_array_manifest_rejects_non_array_requests() -> None:
     with pytest.raises(TypeError, match="SlurmArrayRequest"):
         render_slurm_array_manifest(object())  # type: ignore[arg-type]
+
+
+def test_array_script_renders_bounded_resources_logs_and_manifest_dispatch() -> None:
+    resources = ResourceRequest(
+        nodes=2,
+        tasks=4,
+        cpus_per_task=8,
+        gpus_per_task=1,
+        memory_bytes=16 * 1024**3,
+        walltime=timedelta(minutes=5),
+        native={"slurm": {"partition": "gpu", "exclusive": True}},
+    )
+    request = _array_request(count=3, resources=resources, max_array_size=3)
+
+    script = render_sbatch_array_script(
+        request,
+        stdout_path=PurePosixPath("/remote/logs/%A_%a.stdout"),
+        stderr_path=PurePosixPath("/remote/logs/%A_%a.stderr"),
+    )
+
+    assert (
+        script
+        == """\
+#!/bin/sh
+#SBATCH --job-name=rundra-array
+#SBATCH --array=0-2
+#SBATCH --nodes=2
+#SBATCH --ntasks=4
+#SBATCH --cpus-per-task=8
+#SBATCH --output=/remote/logs/%A_%a.stdout
+#SBATCH --error=/remote/logs/%A_%a.stderr
+#SBATCH --gpus-per-task=1
+#SBATCH --mem=16384M
+#SBATCH --time=00:05:00
+#SBATCH --partition=gpu
+#SBATCH --exclusive
+
+set -eu
+if [ "${SLURM_ARRAY_TASK_ID+x}" != x ]; then
+  printf '%s\\n' 'missing SLURM_ARRAY_TASK_ID' >&2
+  exit 64
+fi
+exec /bin/sh /remote/run/metadata/tasks.sh "$SLURM_ARRAY_TASK_ID"
+"""
+    )
+    assert "experiment.py" not in script
+    assert "--seed" not in script
+
+
+def test_array_script_executes_selected_manifest_task_with_quoted_path(
+    tmp_path: PurePosixPath,
+) -> None:
+    request = _array_request(
+        count=2,
+        manifest_path=tmp_path / "manifest with spaces.sh",
+        max_array_size=2,
+    )
+    request.manifest_path.write_text(
+        render_slurm_array_manifest(request),
+        encoding="utf-8",
+    )
+    script = render_sbatch_array_script(
+        request,
+        stdout_path=PurePosixPath("/remote/logs/%A_%a.stdout"),
+        stderr_path=PurePosixPath("/remote/logs/%A_%a.stderr"),
+    )
+
+    completed = subprocess.run(
+        ("/bin/sh", "-c", script),
+        env={"SLURM_ARRAY_TASK_ID": "1"},
+        capture_output=True,
+        check=False,
+        encoding="utf-8",
+        shell=False,
+    )
+
+    assert completed.returncode == 2
+    assert "experiment.py" in completed.stderr
+    assert "manifest with spaces.sh" in script
+    assert "'/tmp/" in script
+
+
+def test_array_script_rejects_missing_index_at_runtime() -> None:
+    script = render_sbatch_array_script(
+        _array_request(count=2),
+        stdout_path=PurePosixPath("/remote/logs/%A_%a.stdout"),
+        stderr_path=PurePosixPath("/remote/logs/%A_%a.stderr"),
+    )
+
+    completed = subprocess.run(
+        ("/bin/sh", "-c", script),
+        env={},
+        capture_output=True,
+        check=False,
+        encoding="utf-8",
+        shell=False,
+    )
+
+    assert completed.returncode == 64
+    assert completed.stderr == "missing SLURM_ARRAY_TASK_ID\n"
+
+
+@pytest.mark.parametrize(
+    ("stdout_path", "stderr_path"),
+    [
+        (
+            PurePosixPath("/remote/logs/%A.stdout"),
+            PurePosixPath("/remote/logs/%A_%a.stderr"),
+        ),
+        (
+            PurePosixPath("/remote/logs/%A_%a.stdout"),
+            PurePosixPath("/remote/logs/%a.stderr"),
+        ),
+        (
+            PurePosixPath("relative/%A_%a.stdout"),
+            PurePosixPath("/remote/logs/%A_%a.stderr"),
+        ),
+    ],
+)
+def test_array_script_requires_safe_per_element_log_paths(
+    stdout_path: PurePosixPath,
+    stderr_path: PurePosixPath,
+) -> None:
+    with pytest.raises(SlurmScriptError, match="path|%A and %a"):
+        render_sbatch_array_script(
+            _array_request(count=2),
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+        )
+
+
+def test_array_script_rejects_non_array_requests() -> None:
+    with pytest.raises(TypeError, match="SlurmArrayRequest"):
+        render_sbatch_array_script(
+            object(),  # type: ignore[arg-type]
+            stdout_path=PurePosixPath("/remote/logs/%A_%a.stdout"),
+            stderr_path=PurePosixPath("/remote/logs/%A_%a.stderr"),
+        )
+
+
+def test_scheduler_does_not_submit_multi_task_array_during_m53() -> None:
+    transport = ScriptedTransport(deque([]))
+    scheduler = SlurmScheduler(transport)
+
+    with pytest.raises(SlurmSubmissionError, match="array submission is not available"):
+        scheduler.submit(_array_request(count=2).group)
+
+    assert transport.run_calls == []
 
 
 def test_render_sbatch_script_translates_portable_and_allowed_native_resources() -> (

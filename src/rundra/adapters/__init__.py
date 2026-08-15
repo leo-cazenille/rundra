@@ -36,6 +36,7 @@ from rundra.adapters.slurm import (
     SlurmScheduler,
     SlurmScriptError,
     SlurmSubmissionError,
+    render_sbatch_array_script,
     render_sbatch_script,
     render_slurm_array_manifest,
 )
@@ -81,6 +82,7 @@ __all__ = [
     "SlurmScriptError",
     "SlurmSubmissionError",
     "WorkspaceCollisionError",
+    "render_sbatch_array_script",
     "render_sbatch_script",
     "render_slurm_array_manifest",
 ]
