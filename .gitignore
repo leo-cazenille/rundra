@@ -209,6 +209,9 @@ tempCodeRunnerFile.py
 # PyPI configuration file
 .pypirc
 
+# Editor swap files
+*.swp
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
