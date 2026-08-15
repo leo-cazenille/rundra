@@ -56,9 +56,9 @@ def build_parser() -> argparse.ArgumentParser:
     targets.add_argument("--targets-file", type=Path, default=_default_targets_file())
     _add_json_option(targets)
 
-    run = subparsers.add_parser("run", help="execute one Task synchronously")
+    run = subparsers.add_parser("run", help="execute one Run synchronously")
     _add_execution_arguments(
-        run, allow_many=False, required=False, allow_random_seed=True
+        run, allow_many=True, required=False, allow_random_seed=True
     )
     run.add_argument("--source-root", type=Path)
     run.add_argument("--destination", type=Path)
@@ -67,9 +67,9 @@ def build_parser() -> argparse.ArgumentParser:
     _add_store_option(run, use_default=False)
     _add_json_option(run)
 
-    submit = subparsers.add_parser("submit", help="submit one Task asynchronously")
+    submit = subparsers.add_parser("submit", help="submit one Run asynchronously")
     _add_execution_arguments(
-        submit, allow_many=False, required=False, allow_random_seed=True
+        submit, allow_many=True, required=False, allow_random_seed=True
     )
     submit.add_argument("--source-root", type=Path)
     submit.add_argument("--destination", type=Path)
@@ -211,6 +211,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             arguments.experiment,
             config=arguments.config,
             seed=arguments.seed,
+            seeds=arguments.seeds,
             target=arguments.target,
             targets_file=arguments.targets_file,
             source_root=arguments.source_root,
@@ -234,6 +235,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 run_inputs.destination,
                 JsonRunStore(run_inputs.data_dir),
                 seed=run_inputs.seed,
+                seeds=run_inputs.seeds if len(run_inputs.seeds) > 1 else None,
                 launch=run_inputs.launch,
             )
     elif arguments.command == "submit":
@@ -241,6 +243,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             arguments.experiment,
             config=arguments.config,
             seed=arguments.seed,
+            seeds=arguments.seeds,
             target=arguments.target,
             targets_file=arguments.targets_file,
             source_root=arguments.source_root,
@@ -265,6 +268,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 submit_inputs.destination,
                 JsonRunStore(submit_inputs.data_dir),
                 seed=submit_inputs.seed,
+                seeds=submit_inputs.seeds if len(submit_inputs.seeds) > 1 else None,
                 launch=submit_inputs.launch,
             )
     elif arguments.command == "status":

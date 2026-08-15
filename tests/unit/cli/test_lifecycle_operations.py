@@ -446,6 +446,38 @@ defaults:
     assert result.value.data_dir == (tmp_path / "records").resolve()
 
 
+def test_run_input_resolution_accepts_explicit_inclusive_seed_range(
+    tmp_path: Path,
+) -> None:
+    result = resolve_run_inputs_operation(
+        tmp_path / "experiment.yaml",
+        config=tmp_path / "config.yaml",
+        seeds="7:9",
+        target="cluster",
+        targets_file=tmp_path / "targets.yaml",
+        source_root=tmp_path,
+        destination=tmp_path / "retrieved",
+        data_dir=tmp_path / "records",
+    )
+
+    assert result.ok and result.value is not None
+    assert result.value.seeds == (7, 8, 9)
+    assert result.value.seed is None
+    assert result.value.launch.values["seeds"] == "7:9"
+    assert result.value.launch.sources["seeds"] == "cli"
+
+
+def test_run_input_resolution_rejects_seed_range_conflicts(tmp_path: Path) -> None:
+    result = resolve_run_inputs_operation(
+        tmp_path / "experiment.yaml",
+        seed=7,
+        seeds="7:9",
+    )
+
+    assert result.error is not None
+    assert result.error.code == "SEED_CONFLICT"
+
+
 def test_run_input_resolution_reports_all_unresolved_required_values(
     tmp_path: Path,
 ) -> None:

@@ -222,7 +222,7 @@ class PlanValue:
 @dataclass(frozen=True, slots=True)
 class ResolvedRunInputs:
     config: Path
-    seed: int
+    seeds: tuple[int, ...]
     target: str
     targets_file: Path
     source_root: Path
@@ -240,8 +240,13 @@ class ResolvedRunInputs:
         ):
             if not isinstance(getattr(self, name), Path):
                 raise TypeError(f"ResolvedRunInputs {name} must be a Path")
-        if type(self.seed) is not int:
-            raise TypeError("ResolvedRunInputs seed must be an integer")
+        if (
+            not isinstance(self.seeds, tuple)
+            or not self.seeds
+            or any(type(seed) is not int for seed in self.seeds)
+            or len(set(self.seeds)) != len(self.seeds)
+        ):
+            raise TypeError("ResolvedRunInputs seeds must be unique integers")
         if type(self.target) is not str or not self.target:
             raise ValueError("ResolvedRunInputs target must be nonblank")
         if type(self.resolution) is not ResolvedLaunch:
@@ -250,11 +255,10 @@ class ResolvedRunInputs:
     @property
     def launch(self) -> LaunchResolutionValue:
         """Return public metadata for values consumed by synchronous run."""
-        return _launch_resolution_value(
+        base = _launch_resolution_value(
             self.resolution,
             (
                 "config",
-                "seed",
                 "target",
                 "targets_file",
                 "source_root",
@@ -262,6 +266,25 @@ class ResolvedRunInputs:
                 "data_dir",
             ),
         )
+        if len(self.seeds) == 1:
+            return LaunchResolutionValue(
+                base.profile,
+                {**base.values, "seed": self.seeds[0]},
+                {
+                    **base.sources,
+                    "seed": self.resolution.sources.get("seed", "generated"),
+                },
+            )
+        return LaunchResolutionValue(
+            base.profile,
+            {**base.values, "seeds": f"{self.seeds[0]}:{self.seeds[-1]}"},
+            {**base.sources, "seeds": "cli"},
+        )
+
+    @property
+    def seed(self) -> int | None:
+        """Return the single seed when this is not a replicated launch."""
+        return self.seeds[0] if len(self.seeds) == 1 else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -489,6 +512,7 @@ def resolve_run_inputs_operation(
     *,
     config: Path | None = None,
     seed: int | None = None,
+    seeds: str | None = None,
     target: str | None = None,
     targets_file: Path | None = None,
     source_root: Path | None = None,
@@ -505,6 +529,7 @@ def resolve_run_inputs_operation(
     if type(random_seed) is not bool:
         raise TypeError("random_seed must be a boolean")
     try:
+        explicit_seeds = expand_seeds(seeds=seeds) if seeds is not None else None
         cli_values = LaunchValues(
             config=config,
             seed=seed,
@@ -524,7 +549,7 @@ def resolve_run_inputs_operation(
                 "targets_file",
                 "data_dir",
             )
-        ) and (cli_values.seed is not None or random_seed)
+        ) and (cli_values.seed is not None or explicit_seeds is not None or random_seed)
         use_defaults = (
             not fully_explicit or project_file is not None or profile is not None
         )
@@ -549,15 +574,20 @@ def resolve_run_inputs_operation(
         )
     except ConfigError as error:
         return OperationResult.failure(operation, _config_error(error))
+    except PlanningError as error:
+        return OperationResult.failure(
+            operation, OperationError(error.code, error.message, error.details)
+        )
     except LaunchResolutionError as error:
         return OperationResult.failure(
             operation, OperationError(error.code, error.message)
         )
-    if seed is not None and random_seed:
+    if sum((seed is not None, seeds is not None, random_seed)) > 1:
         return OperationResult.failure(
             operation,
             OperationError(
-                "SEED_CONFLICT", "--seed and --random-seed are mutually exclusive"
+                "SEED_CONFLICT",
+                "--seed, --seeds, and --random-seed are mutually exclusive",
             ),
         )
     missing = tuple(
@@ -573,7 +603,7 @@ def resolve_run_inputs_operation(
             ),
         )
     values = resolved.values
-    if values.seed is None or random_seed:
+    if explicit_seeds is None and (values.seed is None or random_seed):
         generator = seed_factory or (lambda: secrets.randbits(63))
         generated_seed = generator()
         if (
@@ -595,17 +625,21 @@ def resolve_run_inputs_operation(
             resolved.profile,
         )
     assert values.config is not None
-    assert values.seed is not None
+    assert values.seed is not None or explicit_seeds is not None
     assert values.target is not None
     assert values.targets_file is not None
     assert values.source_root is not None
     assert values.destination is not None
     assert values.data_dir is not None
+    resolved_seeds = explicit_seeds
+    if resolved_seeds is None:
+        assert values.seed is not None
+        resolved_seeds = (values.seed,)
     return OperationResult.success(
         operation,
         ResolvedRunInputs(
             config=values.config,
-            seed=values.seed,
+            seeds=resolved_seeds,
             target=values.target,
             targets_file=values.targets_file,
             source_root=values.source_root,
@@ -625,7 +659,8 @@ def run_operation(
     destination: Path,
     store: RunStore,
     *,
-    seed: object,
+    seed: object = None,
+    seeds: object = None,
     launch: LaunchResolutionValue | None = None,
 ) -> OperationResult[RunValue]:
     try:
@@ -649,7 +684,7 @@ def run_operation(
             experiment,
             config,
             target,
-            seeds=expand_seeds(seed=seed),
+            seeds=_execution_seed_values(seed=seed, seeds=seeds),
         )
         transport, stager, runtime, scheduler = _execution_adapters(target)
         service = OrchestrationService(
@@ -697,7 +732,8 @@ def submit_operation(
     destination: Path,
     store: RunStore,
     *,
-    seed: object,
+    seed: object = None,
+    seeds: object = None,
     launch: LaunchResolutionValue | None = None,
 ) -> OperationResult[RunValue]:
     try:
@@ -723,7 +759,7 @@ def submit_operation(
             experiment,
             config,
             target,
-            seeds=expand_seeds(seed=seed),
+            seeds=_execution_seed_values(seed=seed, seeds=seeds),
         )
         transport, stager, runtime, scheduler = _execution_adapters(target)
         service = OrchestrationService(
@@ -1284,6 +1320,22 @@ def _launch_resolution_value(
         values[field] = str(value) if isinstance(value, Path) else value
         sources[field] = resolved.sources[field]
     return LaunchResolutionValue(resolved.profile, values, sources)
+
+
+def _execution_seed_values(*, seed: object, seeds: object) -> tuple[int, ...]:
+    if isinstance(seeds, tuple):
+        if seed is not None:
+            raise PlanningError(
+                code="SEED_CONFLICT",
+                message="seed and seeds are mutually exclusive",
+            )
+        if not seeds or any(type(value) is not int for value in seeds):
+            raise PlanningError(
+                code="INVALID_SEED_RANGE",
+                message="resolved seeds must be a nonempty integer tuple",
+            )
+        return seeds
+    return expand_seeds(seed=seed, seeds=seeds)
 
 
 def _unsupported_execution_target(
