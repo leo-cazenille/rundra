@@ -23,11 +23,11 @@ from rundra.domain.states import ExecutionState, aggregate_execution_state
         ),
         (
             (ExecutionState.SUCCEEDED, ExecutionState.QUEUED),
-            ExecutionState.QUEUED,
+            ExecutionState.RUNNING,
         ),
         (
             (ExecutionState.SUCCEEDED, ExecutionState.SUBMITTED),
-            ExecutionState.SUBMITTED,
+            ExecutionState.RUNNING,
         ),
         (
             (ExecutionState.SUCCEEDED, ExecutionState.UNKNOWN),

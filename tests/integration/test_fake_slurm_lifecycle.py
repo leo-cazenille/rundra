@@ -86,7 +86,7 @@ class FakeRuntime:
         return Command(("apptainer", "exec", "/images/test.sif", "program"))
 
 
-def _request(tmp_path: Path) -> RunExecutionRequest:
+def _request(tmp_path: Path, *, seeds: tuple[int, ...] = (17,)) -> RunExecutionRequest:
     resources = ResourceRequest(cpus_per_task=2)
     experiment = ExperimentSpec(
         1,
@@ -105,7 +105,7 @@ def _request(tmp_path: Path) -> RunExecutionRequest:
     )
     config = ConfigSnapshot(PurePosixPath("config.yaml"), "value: 1\n")
     return RunExecutionRequest(
-        create_plan(experiment, config, target, seeds=(17,)),
+        create_plan(experiment, config, target, seeds=seeds),
         experiment,
         tmp_path,
         tmp_path / "retrieved",
@@ -184,6 +184,61 @@ def test_scripted_submission_failure_is_durable_and_actionable(tmp_path: Path) -
     record = store.load(_RUN_ID)
     assert record.run.state is ExecutionState.FAILED
     assert record.native_state == "SCHEDULER_SUBMISSION_FAILED"
+
+
+def test_scripted_slurm_array_reconciles_every_task_and_mixed_outcome(
+    tmp_path: Path,
+) -> None:
+    accounting = (
+        "42_0|COMPLETED|0:0|2026-08-15T10:00:00|"
+        "2026-08-15T10:01:00|node01|\n"
+        "42_1|FAILED|9:0|2026-08-15T10:00:00|"
+        "2026-08-15T10:02:00|node02|\n"
+    )
+    service, transport, store = _service(
+        tmp_path,
+        deque(
+            [
+                (0, "MaxArraySize = 1001\n", ""),
+                (0, "42\n", ""),
+                (0, "", ""),
+                (0, accounting, ""),
+            ]
+        ),
+    )
+
+    result = service.execute_one(_request(tmp_path, seeds=(17, 23)))
+
+    first, second = result.record.run.tasks
+    assert [task.state for task in result.record.run.tasks] == [
+        ExecutionState.SUCCEEDED,
+        ExecutionState.FAILED,
+    ]
+    assert result.record.run.state is ExecutionState.FAILED
+    assert result.record.native_state == "MIXED"
+    assert result.record.scheduler_job_ids == ("42",)
+    assert result.record.task_scheduler_ids == {first.id: "42_0", second.id: "42_1"}
+    assert result.record.task_native_states == {
+        first.id: "COMPLETED",
+        second.id: "FAILED",
+    }
+    assert result.record.task_exit_codes == {first.id: 0, second.id: 9}
+    assert result.record.allocated_nodes == ("node01", "node02")
+    assert {
+        (artifact.kind.value, artifact.task_id, str(artifact.path))
+        for artifact in result.record.artifacts
+    } >= {
+        ("stdout", first.id, "/remote/.scheduler-logs/42_0.stdout"),
+        ("stderr", first.id, "/remote/.scheduler-logs/42_0.stderr"),
+        ("stdout", second.id, "/remote/.scheduler-logs/42_1.stdout"),
+        ("stderr", second.id, "/remote/.scheduler-logs/42_1.stderr"),
+    }
+    assert result.record.run.retrieval_state is RetrievalState.SUCCEEDED
+    assert store.load(_RUN_ID) == result.record
+    submission_command = transport.commands[1]
+    assert "#SBATCH --array=0-1" in submission_command.argv[6]
+    assert "task_id=task_000000 seed=17" in submission_command.argv[5]
+    assert "task_id=task_000001 seed=23" in submission_command.argv[5]
 
 
 def test_accounting_disappearance_times_out_without_failing_the_run(

@@ -135,6 +135,12 @@
   "started_at": "2026-08-15T08:01:00+00:00",
   "submitted_at": "2026-08-15T08:01:00+00:00",
   "task_array_mapping": [],
+  "task_native_states": {
+    "task_000000": "EXITED"
+  },
+  "task_scheduler_ids": {
+    "task_000000": "local-0123456789abcdef0123456789abcdef"
+  },
   "task_exit_codes": {
     "task_000000": 0
   }

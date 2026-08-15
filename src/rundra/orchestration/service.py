@@ -15,18 +15,25 @@ from rundra.domain.models import (
     Run,
     RunId,
     Task,
+    TaskId,
 )
 from rundra.domain.records import RunRecord
-from rundra.domain.states import ExecutionState, RetrievalState
-from rundra.orchestration.models import ExecutionPlan, ExecutionUnit
+from rundra.domain.states import (
+    ExecutionState,
+    RetrievalState,
+    aggregate_execution_state,
+)
+from rundra.orchestration.models import SLURM_ARRAY, ExecutionPlan, ExecutionUnit
 from rundra.orchestration.planner import create_plan
 from rundra.persistence.base import RunStore
 from rundra.ports import (
+    ArrayScheduler,
     BindMount,
     ContainerRequest,
     ContainerRuntime,
     FetchRequest,
     Scheduler,
+    SchedulerArrayRequest,
     SchedulerGroup,
     SchedulerObservation,
     SchedulerReference,
@@ -103,13 +110,22 @@ class SchedulerLifecycleService:
         self._monotonic = monotonic_clock
 
     def refresh(self, record: RunRecord) -> RunRecord:
-        """Query and durably apply one scheduler observation when active."""
+        """Query and durably apply every Task scheduler observation."""
         _require_record(record)
-        reference = _record_reference(record)
-        observation = _single_observation(
-            self._scheduler.query((reference,)), reference
+        task_references = _record_task_references(record)
+        references = tuple(reference for _, reference in task_references)
+        observations = self._scheduler.query(references)
+        _validate_observations(observations, references)
+        updated = _observed_records(
+            record,
+            tuple(
+                (task_id, observation)
+                for (task_id, _), observation in zip(
+                    task_references, observations, strict=True
+                )
+            ),
+            self._clock(),
         )
-        updated = _observed_record(record, observation, self._clock())
         self._store.update(updated)
         return updated
 
@@ -163,6 +179,12 @@ class SchedulerLifecycleService:
         _require_record(record)
         if record.run.state in _TERMINAL_STATES:
             return record
+        if len(record.run.tasks) != 1:
+            raise OrchestrationError(
+                code="ARRAY_CANCELLATION_UNAVAILABLE",
+                message=(f"Run {record.run.id} array cancellation is deferred to M5.5"),
+                run_id=record.run.id,
+            )
         reference = _record_reference(record)
         try:
             observation = _single_observation(
@@ -181,7 +203,7 @@ class SchedulerLifecycleService:
 
 @dataclass(frozen=True, slots=True)
 class RunExecutionRequest:
-    """Inputs for one local or remote single-Task execution lifecycle."""
+    """Inputs for one local or remote planned-Task execution lifecycle."""
 
     plan: ExecutionPlan
     experiment: ExperimentSpec
@@ -227,7 +249,7 @@ class RunExecutionResult:
 
 
 class OrchestrationService:
-    """Coordinate one synchronous or asynchronous Task through portable ports."""
+    """Coordinate one synchronous or asynchronous Run through portable ports."""
 
     def __init__(
         self,
@@ -285,7 +307,7 @@ class OrchestrationService:
         self, request: RunExecutionRequest, *, wait: bool
     ) -> RunExecutionResult:
         self._validate_request(request)
-        unit = request.plan.units[0]
+        units = request.plan.units
         run_id = self._run_id_factory()
         if type(run_id) is not RunId:
             raise TypeError("Run ID factory must return a RunId")
@@ -297,7 +319,7 @@ class OrchestrationService:
                     provenance = captured
             except Exception:
                 provenance = GitProvenance()
-        record = self._created_record(request, unit, run_id, provenance)
+        record = self._created_record(request, run_id, provenance)
         self.store.create(record)
 
         try:
@@ -318,9 +340,10 @@ class OrchestrationService:
                 StageRequest(
                     run_id=run_id,
                     experiment=request.experiment,
-                    config=unit.config,
+                    config=units[0].config,
                     target=request.plan.target,
                     source_root=request.source_root,
+                    task_ids=tuple(unit.task_id for unit in units),
                 )
             )
         except Exception as error:
@@ -334,11 +357,19 @@ class OrchestrationService:
         self.store.update(record)
 
         try:
-            scheduled_unit = replace(
-                unit,
-                command=self._runtime.build_command(
-                    _container_request(request.experiment, unit, workspace)
-                ),
+            scheduled_units = tuple(
+                replace(
+                    unit,
+                    command=self._runtime.build_command(
+                        _container_request(
+                            request.experiment,
+                            unit,
+                            workspace,
+                            isolate_task=len(units) > 1,
+                        )
+                    ),
+                )
+                for unit in units
             )
         except Exception as error:
             self._fail_before_completion(record, "CONTAINER_COMMAND_FAILED")
@@ -350,22 +381,29 @@ class OrchestrationService:
 
         submission_started_at = self._clock()
         try:
-            submission = self._scheduler.submit(
-                SchedulerGroup(
-                    (
-                        SchedulerUnit(
-                            scheduled_unit.task_id,
-                            scheduled_unit.command,
-                            scheduled_unit.resources,
-                        ),
-                    )
+            scheduler_group = SchedulerGroup(
+                tuple(
+                    SchedulerUnit(unit.task_id, unit.command, unit.resources)
+                    for unit in scheduled_units
                 )
             )
-            if submission.task_native_ids != {
-                unit.task_id: submission.reference.native_id
-            }:
+            if request.plan.strategy == SLURM_ARRAY:
+                if not isinstance(self._scheduler, ArrayScheduler):
+                    raise TypeError(
+                        "Configured scheduler does not support mapped arrays"
+                    )
+                submission = self._scheduler.submit_array(
+                    SchedulerArrayRequest(
+                        scheduler_group,
+                        request.plan.array_mapping,
+                        workspace.metadata / "slurm-array-tasks.sh",
+                    )
+                )
+            else:
+                submission = self._scheduler.submit(scheduler_group)
+            if set(submission.task_native_ids) != {unit.task_id for unit in units}:
                 raise ValueError(
-                    "Scheduler submission did not map the planned Task exactly"
+                    "Scheduler submission did not map every planned Task exactly"
                 )
         except Exception as error:
             self._fail_before_completion(record, "SCHEDULER_SUBMISSION_FAILED")
@@ -378,6 +416,7 @@ class OrchestrationService:
         record = replace(
             _with_execution_state(record, ExecutionState.SUBMITTED),
             scheduler_job_ids=(submission.reference.native_id,),
+            task_scheduler_ids=submission.task_native_ids,
             submitted_at=submission_started_at,
         )
         self.store.update(record)
@@ -392,20 +431,24 @@ class OrchestrationService:
                 clock=self._clock,
             )
             record = lifecycle.wait(record)
-            observation = _single_observation(
-                self._scheduler.query((submission.reference,)),
-                submission.reference,
-            )
-            command_result = observation.result
-            if observation.state not in _TERMINAL_STATES:
-                raise ValueError("Scheduler wait returned a nonterminal state")
-            if (
-                command_result is not None
-                and command_result.command != scheduled_unit.command
-            ):
-                raise ValueError(
-                    "Synchronous local scheduler result describes another command"
+            command_result = None
+            if len(units) == 1:
+                task_reference = SchedulerReference(
+                    submission.task_native_ids[units[0].task_id]
                 )
+                observation = _single_observation(
+                    self._scheduler.query((task_reference,)), task_reference
+                )
+                command_result = observation.result
+                if observation.state not in _TERMINAL_STATES:
+                    raise ValueError("Scheduler wait returned a nonterminal state")
+                if (
+                    command_result is not None
+                    and command_result.command != scheduled_units[0].command
+                ):
+                    raise ValueError(
+                        "Synchronous local scheduler result describes another command"
+                    )
         except OrchestrationError:
             raise
         except Exception as error:
@@ -419,7 +462,7 @@ class OrchestrationService:
             try:
                 log_artifacts = _write_task_logs(
                     workspace,
-                    unit,
+                    units[0],
                     stdout=command_result.stdout,
                     stderr=command_result.stderr,
                 )
@@ -443,11 +486,11 @@ class OrchestrationService:
             fetched = self._stager.fetch(
                 FetchRequest(
                     workspace=workspace,
-                    patterns=request.experiment.outputs,
+                    patterns=_fetch_patterns(request.experiment.outputs, units),
                     destination=request.fetch_destination,
                 )
             )
-            fetched_artifacts = _fetched_task_artifacts(fetched.artifacts, unit)
+            fetched_artifacts = _fetched_task_artifacts(fetched.artifacts, units)
         except Exception as error:
             failed = replace(
                 record,
@@ -474,27 +517,27 @@ class OrchestrationService:
             raise TypeError(
                 "OrchestrationService.execute_one requires a RunExecutionRequest"
             )
-        if len(request.plan.units) != 1:
+        units = request.plan.units
+        if len(units) > 1 and request.plan.strategy != SLURM_ARRAY:
             raise OrchestrationError(
                 code="UNSUPPORTED_TASK_COUNT",
-                message="M3 execution requires exactly one Task",
+                message="Multi-Task execution currently requires a Slurm array plan",
             )
-        unit = request.plan.units[0]
         if request.plan.experiment_name != request.experiment.name:
             raise OrchestrationError(
                 code="PLAN_MISMATCH",
                 message="Execution plan and experiment names do not match",
             )
-        if unit.resources != request.experiment.resources:
+        if any(unit.resources != request.experiment.resources for unit in units):
             raise OrchestrationError(
                 code="PLAN_MISMATCH",
                 message="Execution plan resources do not match the experiment",
             )
         expected_plan = create_plan(
             request.experiment,
-            unit.config,
+            units[0].config,
             request.plan.target,
-            seeds=(unit.seed,),
+            seeds=tuple(unit.seed for unit in units),
         )
         if request.plan != expected_plan:
             raise OrchestrationError(
@@ -505,23 +548,25 @@ class OrchestrationService:
     def _created_record(
         self,
         request: RunExecutionRequest,
-        unit: ExecutionUnit,
         run_id: RunId,
         provenance: GitProvenance,
     ) -> RunRecord:
-        task = Task(
-            id=unit.task_id,
-            run_id=run_id,
-            experiment_name=request.experiment.name,
-            config=unit.config,
-            seed=unit.seed,
-            resources=unit.resources,
+        tasks = tuple(
+            Task(
+                id=unit.task_id,
+                run_id=run_id,
+                experiment_name=request.experiment.name,
+                config=unit.config,
+                seed=unit.seed,
+                resources=unit.resources,
+            )
+            for unit in request.plan.units
         )
         run = Run(
             id=run_id,
             experiment_name=request.experiment.name,
             target=request.plan.target,
-            tasks=(task,),
+            tasks=tasks,
             created_at=self._clock(),
         )
         return RunRecord(
@@ -536,6 +581,7 @@ class OrchestrationService:
             git_branch=provenance.branch,
             git_dirty=provenance.dirty,
             git_diff=provenance.diff,
+            task_array_mapping=request.plan.array_mapping,
         )
 
     def _fail_before_completion(self, record: RunRecord, native_state: str) -> None:
@@ -582,45 +628,125 @@ def _record_reference(record: RunRecord) -> SchedulerReference:
     return SchedulerReference(record.scheduler_job_ids[0])
 
 
+def _record_task_references(
+    record: RunRecord,
+) -> tuple[tuple[TaskId, SchedulerReference], ...]:
+    if record.task_scheduler_ids:
+        return tuple(
+            (task.id, SchedulerReference(record.task_scheduler_ids[task.id]))
+            for task in record.run.tasks
+        )
+    if len(record.run.tasks) == 1:
+        return ((record.run.tasks[0].id, _record_reference(record)),)
+    raise OrchestrationError(
+        code="SCHEDULER_REFERENCE_UNAVAILABLE",
+        message=f"Run {record.run.id} has no durable per-Task scheduler identities",
+        run_id=record.run.id,
+    )
+
+
+def _validate_observations(
+    observations: tuple[SchedulerObservation, ...],
+    references: tuple[SchedulerReference, ...],
+) -> None:
+    if not isinstance(observations, tuple) or len(observations) != len(references):
+        raise ValueError("Scheduler must return one observation per Task reference")
+    if tuple(observation.reference for observation in observations) != references:
+        raise ValueError("Scheduler observations must preserve Task reference order")
+
+
 def _observed_record(
     record: RunRecord,
     observation: SchedulerObservation,
     observed_at: datetime,
 ) -> RunRecord:
-    state = observation.state
-    updated = _with_execution_state(record, state)
-    task_id = record.run.tasks[0].id
+    return _observed_records(
+        record, ((record.run.tasks[0].id, observation),), observed_at
+    )
+
+
+def _observed_records(
+    record: RunRecord,
+    task_observations: tuple[tuple[TaskId, SchedulerObservation], ...],
+    observed_at: datetime,
+) -> RunRecord:
+    observations = dict(task_observations)
+    expected_task_ids = {task.id for task in record.run.tasks}
+    if set(observations) != expected_task_ids:
+        raise ValueError("Scheduler observations must map every Run Task exactly")
+    tasks = tuple(
+        replace(task, state=observations[task.id].state) for task in record.run.tasks
+    )
+    state = aggregate_execution_state(tuple(task.state for task in tasks))
+    updated = replace(record, run=replace(record.run, tasks=tasks, state=state))
     exit_codes = dict(record.task_exit_codes)
-    if observation.exit_code is not None:
-        exit_codes[task_id] = observation.exit_code
+    native_states = dict(record.task_native_states)
+    for task_id, observation in task_observations:
+        if observation.exit_code is not None:
+            exit_codes[task_id] = observation.exit_code
+        native_states[task_id] = observation.native_state
     terminal = state in _TERMINAL_STATES
-    nodes = observation.metadata.get("allocated_nodes")
+    nodes = tuple(
+        str(node)
+        for _, observation in task_observations
+        if (node := observation.metadata.get("allocated_nodes")) is not None
+    )
     scheduler_metadata = dict(record.scheduler_metadata)
-    if observation.native_state != "ACCOUNTING_PENDING":
-        scheduler_metadata.pop("accounting_pending", None)
-    scheduler_metadata.update(observation.metadata)
+    if len(task_observations) == 1:
+        observation = task_observations[0][1]
+        if observation.native_state != "ACCOUNTING_PENDING":
+            scheduler_metadata.pop("accounting_pending", None)
+        scheduler_metadata.update(observation.metadata)
+    else:
+        pending_count = sum(
+            observation.native_state == "ACCOUNTING_PENDING"
+            for _, observation in task_observations
+        )
+        scheduler_metadata["task_observation_count"] = len(task_observations)
+        if pending_count:
+            scheduler_metadata["accounting_pending_tasks"] = pending_count
+        else:
+            scheduler_metadata.pop("accounting_pending_tasks", None)
     artifacts = list(record.artifacts)
-    for metadata_name, kind in (
-        ("stdout_path", ArtifactKind.STDOUT),
-        ("stderr_path", ArtifactKind.STDERR),
-    ):
-        path = observation.metadata.get(metadata_name)
-        if type(path) is str and not any(
-            artifact.kind is kind and artifact.task_id == task_id
-            for artifact in artifacts
+    for task_id, observation in task_observations:
+        for metadata_name, kind in (
+            ("stdout_path", ArtifactKind.STDOUT),
+            ("stderr_path", ArtifactKind.STDERR),
         ):
-            artifacts.append(Artifact(kind, PurePosixPath(path), task_id=task_id))
+            path = observation.metadata.get(metadata_name)
+            if type(path) is str and not any(
+                artifact.kind is kind and artifact.task_id == task_id
+                for artifact in artifacts
+            ):
+                artifacts.append(Artifact(kind, PurePosixPath(path), task_id=task_id))
+    started_values = tuple(
+        observation.started_at
+        for _, observation in task_observations
+        if observation.started_at is not None
+    )
+    finished_values = tuple(
+        observation.finished_at
+        for _, observation in task_observations
+        if observation.finished_at is not None
+    )
+    distinct_native_states = tuple(dict.fromkeys(native_states.values()))
     return replace(
         updated,
-        allocated_nodes=(str(nodes),) if nodes is not None else record.allocated_nodes,
-        started_at=record.started_at or observation.started_at,
+        allocated_nodes=tuple(dict.fromkeys((*record.allocated_nodes, *nodes))),
+        started_at=record.started_at
+        or (min(started_values) if started_values else None),
         completed_at=(
-            record.completed_at or observation.finished_at or observed_at
+            record.completed_at
+            or (max(finished_values) if finished_values else None)
+            or observed_at
             if terminal
             else record.completed_at
         ),
-        native_state=observation.native_state,
+        native_state=(
+            distinct_native_states[0] if len(distinct_native_states) == 1 else "MIXED"
+        ),
         scheduler_metadata=scheduler_metadata,
+        task_native_states=native_states,
         task_exit_codes=exit_codes,
         artifacts=tuple(artifacts),
     )
@@ -630,8 +756,13 @@ def _container_request(
     experiment: ExperimentSpec,
     unit: ExecutionUnit,
     workspace: StagedWorkspace,
+    *,
+    isolate_task: bool = False,
 ) -> ContainerRequest:
     container = experiment.container
+    task_workspace = workspace.for_task(unit.task_id)
+    outputs = task_workspace.outputs if isolate_task else workspace.outputs
+    runtime = task_workspace.runtime if isolate_task else workspace.runtime
     command = Command(
         tuple(
             argument.replace("{config}", str(_CONTAINER_CONFIG)).replace(
@@ -658,8 +789,8 @@ def _container_request(
         binds=(
             BindMount(workspace.source, _CONTAINER_SOURCE, read_only=True),
             BindMount(workspace.inputs, _CONTAINER_INPUTS, read_only=True),
-            BindMount(workspace.outputs, _CONTAINER_OUTPUTS, read_only=False),
-            BindMount(workspace.runtime, _CONTAINER_RUNTIME, read_only=False),
+            BindMount(outputs, _CONTAINER_OUTPUTS, read_only=False),
+            BindMount(runtime, _CONTAINER_RUNTIME, read_only=False),
         ),
     )
 
@@ -721,9 +852,17 @@ def _write_new_file(path: Path, content: str) -> int:
     return len(encoded)
 
 
+def _fetch_patterns(
+    patterns: tuple[str, ...], units: tuple[ExecutionUnit, ...]
+) -> tuple[str, ...]:
+    if len(units) == 1:
+        return patterns
+    return tuple(f"{unit.task_id}/{pattern}" for unit in units for pattern in patterns)
+
+
 def _fetched_task_artifacts(
     artifacts: tuple[Artifact, ...],
-    unit: ExecutionUnit,
+    units: tuple[ExecutionUnit, ...],
 ) -> tuple[Artifact, ...]:
     allowed = {
         ArtifactKind.RAW_RESULT,
@@ -733,14 +872,32 @@ def _fetched_task_artifacts(
     }
     if any(artifact.kind not in allowed for artifact in artifacts):
         raise ValueError("Stager fetch returned an unsupported artifact")
+    task_ids = {unit.task_id for unit in units}
     if any(
-        artifact.task_id is not None and artifact.task_id != unit.task_id
+        artifact.task_id is not None and artifact.task_id not in task_ids
         for artifact in artifacts
     ):
         raise ValueError("Stager fetch returned an artifact for another Task")
-    return tuple(
-        replace(artifact, task_id=unit.task_id)
-        if artifact.kind is ArtifactKind.RAW_RESULT and artifact.task_id is None
-        else artifact
-        for artifact in artifacts
-    )
+    result: list[Artifact] = []
+    for artifact in artifacts:
+        if artifact.kind is not ArtifactKind.RAW_RESULT or artifact.task_id is not None:
+            result.append(artifact)
+            continue
+        task_id: TaskId | None
+        if len(units) == 1:
+            task_id = units[0].task_id
+        else:
+            task_id = next(
+                (
+                    candidate
+                    for candidate in task_ids
+                    if str(candidate) in artifact.path.parts
+                ),
+                None,
+            )
+            if task_id is None:
+                raise ValueError(
+                    "Multi-Task raw artifact path does not identify its Task"
+                )
+        result.append(replace(artifact, task_id=task_id))
+    return tuple(result)

@@ -30,8 +30,10 @@ def aggregate_execution_state(states: Sequence[ExecutionState]) -> ExecutionStat
 
     A Run becomes terminal only after every Task is terminal. Mixed terminal
     outcomes then use FAILED > CANCELLED > SUCCEEDED precedence. While work is
-    active, RUNNING > QUEUED > SUBMITTED > STAGING > CREATED; UNKNOWN is used
-    when no active state can describe the incomplete Task set.
+    active, RUNNING takes precedence; a completed or failed sibling also keeps
+    the aggregate RUNNING while queued/submitted work remains. Otherwise
+    QUEUED > SUBMITTED > STAGING > CREATED; UNKNOWN is used when no active
+    state can describe the incomplete Task set.
     """
     if not isinstance(states, Sequence) or isinstance(states, (str, bytes)):
         raise TypeError("Aggregate execution states must be a sequence")
@@ -53,8 +55,24 @@ def aggregate_execution_state(states: Sequence[ExecutionState]) -> ExecutionStat
         if ExecutionState.CANCELLED in normalized:
             return ExecutionState.CANCELLED
         return ExecutionState.SUCCEEDED
+    if ExecutionState.RUNNING in normalized or (
+        any(
+            state in {ExecutionState.SUCCEEDED, ExecutionState.FAILED}
+            for state in normalized
+        )
+        and any(
+            state
+            in {
+                ExecutionState.QUEUED,
+                ExecutionState.SUBMITTED,
+                ExecutionState.STAGING,
+                ExecutionState.CREATED,
+            }
+            for state in normalized
+        )
+    ):
+        return ExecutionState.RUNNING
     for state in (
-        ExecutionState.RUNNING,
         ExecutionState.QUEUED,
         ExecutionState.SUBMITTED,
         ExecutionState.STAGING,

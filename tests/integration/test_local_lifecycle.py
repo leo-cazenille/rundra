@@ -355,7 +355,7 @@ def test_service_rejects_multi_task_plans_before_creating_a_record(
     )
     service = _service(tmp_path, runtime)
 
-    with pytest.raises(OrchestrationError, match="exactly one Task") as exc:
+    with pytest.raises(OrchestrationError, match="requires a Slurm array") as exc:
         service.execute_one(
             RunExecutionRequest(
                 plan,
