@@ -8,6 +8,7 @@ from pathlib import PurePosixPath
 import pytest
 
 from rundra.adapters import (
+    SlurmArrayRequest,
     SlurmCancellationError,
     SlurmQueryError,
     SlurmScheduler,
@@ -16,6 +17,7 @@ from rundra.adapters import (
     render_sbatch_script,
 )
 from rundra.adapters.slurm import _portable_state
+from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import Command, ResourceRequest, TaskId
 from rundra.domain.states import ExecutionState
 from rundra.ports import (
@@ -26,6 +28,8 @@ from rundra.ports import (
     SchedulerReference,
     SchedulerUnit,
 )
+
+_MANIFEST_PATH = PurePosixPath("/remote/run/metadata/tasks.sh")
 
 
 class ScriptedTransport:
@@ -59,6 +63,125 @@ def _group(
             ),
         )
     )
+
+
+def _array_request(
+    *,
+    count: int = 3,
+    resources: ResourceRequest | None = None,
+    manifest_path: PurePosixPath = _MANIFEST_PATH,
+    max_array_size: int = 1001,
+) -> SlurmArrayRequest:
+    units = tuple(
+        SchedulerUnit(
+            TaskId.from_ordinal(index),
+            Command(("python3", "experiment.py", "--seed", str(index + 7))),
+            resources or ResourceRequest(),
+        )
+        for index in range(count)
+    )
+    return SlurmArrayRequest(
+        SchedulerGroup(units),
+        tuple(
+            ArrayTaskMapping(unit.task_id, index + 7, index)
+            for index, unit in enumerate(units)
+        ),
+        manifest_path,
+        max_array_size,
+    )
+
+
+def test_slurm_array_request_preserves_explicit_bounded_mapping() -> None:
+    request = _array_request(count=3, max_array_size=3)
+
+    assert [unit.task_id for unit in request.group.units] == [
+        item.task_id for item in request.mapping
+    ]
+    assert [item.seed for item in request.mapping] == [7, 8, 9]
+    assert [item.array_index for item in request.mapping] == [0, 1, 2]
+    assert request.manifest_path == PurePosixPath("/remote/run/metadata/tasks.sh")
+    assert request.max_array_size == 3
+
+
+def test_slurm_array_request_rejects_invalid_task_and_index_mappings() -> None:
+    request = _array_request()
+    first, second, third = request.mapping
+
+    with pytest.raises(SlurmScriptError, match="Task order"):
+        SlurmArrayRequest(
+            request.group,
+            (second, first, third),
+            request.manifest_path,
+            request.max_array_size,
+        )
+    with pytest.raises(SlurmScriptError, match="contiguous and zero-based"):
+        SlurmArrayRequest(
+            request.group,
+            (first, second, ArrayTaskMapping(third.task_id, third.seed, 7)),
+            request.manifest_path,
+            request.max_array_size,
+        )
+    with pytest.raises(SlurmScriptError, match="seeds must be unique"):
+        SlurmArrayRequest(
+            request.group,
+            (first, ArrayTaskMapping(second.task_id, first.seed, 1), third),
+            request.manifest_path,
+            request.max_array_size,
+        )
+
+
+def test_slurm_array_request_rejects_heterogeneous_resources() -> None:
+    request = _array_request(count=2)
+    first, second = request.group.units
+    heterogeneous = SchedulerGroup(
+        (
+            first,
+            SchedulerUnit(
+                second.task_id,
+                second.command,
+                ResourceRequest(cpus_per_task=8),
+            ),
+        )
+    )
+
+    with pytest.raises(SlurmScriptError, match="uniform resources"):
+        SlurmArrayRequest(
+            heterogeneous,
+            request.mapping,
+            request.manifest_path,
+            request.max_array_size,
+        )
+
+
+@pytest.mark.parametrize("max_array_size", [0, -1, True, 1.5])
+def test_slurm_array_request_rejects_invalid_array_bounds(
+    max_array_size: object,
+) -> None:
+    if type(max_array_size) is int and max_array_size <= 0:
+        expected = ValueError
+    else:
+        expected = TypeError
+    with pytest.raises(expected, match="max_array_size"):
+        _array_request(max_array_size=max_array_size)  # type: ignore[arg-type]
+
+    with pytest.raises(SlurmScriptError, match="exceeds.*MaxArraySize"):
+        _array_request(count=4, max_array_size=3)
+
+
+@pytest.mark.parametrize(
+    "manifest_path",
+    [PurePosixPath("relative/tasks.sh"), PurePosixPath("/remote/bad\x00path")],
+)
+def test_slurm_array_request_rejects_unsafe_manifest_paths(
+    manifest_path: PurePosixPath,
+) -> None:
+    with pytest.raises(SlurmScriptError, match="absolute and safe"):
+        _array_request(manifest_path=manifest_path)
+
+
+def test_slurm_array_request_requires_multiple_tasks() -> None:
+    with pytest.raises(SlurmScriptError, match="at least two Tasks"):
+        _array_request(count=1)
 
 
 def test_render_sbatch_script_translates_portable_and_allowed_native_resources() -> (

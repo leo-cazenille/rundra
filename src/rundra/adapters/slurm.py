@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import re
-from dataclasses import replace
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, tzinfo
 from pathlib import PurePath
 
 from rundra.adapters._remote_shell import serialize_remote_command
+from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import Command, NativeValue, ResourceRequest
 from rundra.domain.states import ExecutionState
 from rundra.ports import (
@@ -53,6 +55,59 @@ class SlurmQueryError(RuntimeError):
 
 class SlurmCancellationError(RuntimeError):
     """Raised when scancel fails and the job remains nonterminal."""
+
+
+@dataclass(frozen=True, slots=True)
+class SlurmArrayRequest:
+    """Validated pure inputs for rendering one bounded Slurm array."""
+
+    group: SchedulerGroup
+    mapping: tuple[ArrayTaskMapping, ...]
+    manifest_path: PurePath
+    max_array_size: int
+
+    def __post_init__(self) -> None:
+        if type(self.group) is not SchedulerGroup:
+            raise TypeError("SlurmArrayRequest group must be a SchedulerGroup")
+        if len(self.group.units) < 2:
+            raise SlurmScriptError("Slurm arrays require at least two Tasks")
+        if not isinstance(self.mapping, Sequence) or isinstance(
+            self.mapping, (str, bytes)
+        ):
+            raise TypeError("SlurmArrayRequest mapping must be a sequence")
+        mapping = tuple(self.mapping)
+        if any(type(item) is not ArrayTaskMapping for item in mapping):
+            raise TypeError("SlurmArrayRequest mapping must contain ArrayTaskMappings")
+        expected_task_ids = tuple(unit.task_id for unit in self.group.units)
+        if tuple(item.task_id for item in mapping) != expected_task_ids:
+            raise SlurmScriptError(
+                "Slurm array mapping must match SchedulerGroup Task order"
+            )
+        if tuple(item.array_index for item in mapping) != tuple(range(len(mapping))):
+            raise SlurmScriptError(
+                "Slurm array indices must be contiguous and zero-based"
+            )
+        if len({item.seed for item in mapping}) != len(mapping):
+            raise SlurmScriptError("Slurm array mapping seeds must be unique")
+        resources = self.group.units[0].resources
+        if any(unit.resources != resources for unit in self.group.units[1:]):
+            raise SlurmScriptError("Slurm array Tasks must use uniform resources")
+        if not isinstance(self.manifest_path, PurePath):
+            raise TypeError("SlurmArrayRequest manifest_path must be a path")
+        rendered_path = str(self.manifest_path)
+        if not self.manifest_path.is_absolute() or "\x00" in rendered_path:
+            raise SlurmScriptError(
+                "Slurm array manifest path must be absolute and safe"
+            )
+        if type(self.max_array_size) is not int:
+            raise TypeError("SlurmArrayRequest max_array_size must be an integer")
+        if self.max_array_size <= 0:
+            raise ValueError("SlurmArrayRequest max_array_size must be positive")
+        if len(mapping) > self.max_array_size:
+            raise SlurmScriptError(
+                "Slurm array Task count exceeds configured MaxArraySize"
+            )
+        object.__setattr__(self, "mapping", mapping)
 
 
 class SlurmScheduler:

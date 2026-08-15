@@ -30,6 +30,7 @@ from rundra.adapters.rsync import (
     RsyncUploadError,
 )
 from rundra.adapters.slurm import (
+    SlurmArrayRequest,
     SlurmCancellationError,
     SlurmQueryError,
     SlurmScheduler,
@@ -72,10 +73,11 @@ __all__ = [
     "SSHTransport",
     "SSHTransportError",
     "SSHUnavailableError",
-    "SlurmScriptError",
+    "SlurmArrayRequest",
     "SlurmCancellationError",
     "SlurmQueryError",
     "SlurmScheduler",
+    "SlurmScriptError",
     "SlurmSubmissionError",
     "WorkspaceCollisionError",
     "render_sbatch_script",
