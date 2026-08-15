@@ -826,7 +826,7 @@ def test_slurm_query_combines_queue_and_accounting_in_request_order() -> None:
             "--jobs",
             "456",
             "--format",
-            "JobIDRaw,State%32,ExitCode,Start,End,NodeList",
+            "JobID,State%32,ExitCode,Start,End,NodeList",
         )
     )
     transport.results.extend(

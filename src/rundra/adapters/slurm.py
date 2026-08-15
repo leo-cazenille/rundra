@@ -332,7 +332,9 @@ class SlurmScheduler:
                             "--jobs",
                             ",".join(reference.native_id for reference in missing),
                             "--format",
-                            "JobIDRaw,State%32,ExitCode,Start,End,NodeList",
+                            # JobID preserves the root_index array alias. JobIDRaw
+                            # may be an unrelated allocation ID on older Slurm.
+                            "JobID,State%32,ExitCode,Start,End,NodeList",
                         )
                     ),
                     source="sacct",
