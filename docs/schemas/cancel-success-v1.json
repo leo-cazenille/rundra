@@ -9,6 +9,17 @@
     ],
     "state": "CANCELLED",
     "target": "shoal",
+    "task_details": [
+      {
+        "exit_code": 0,
+        "native_id": "18372",
+        "native_state": "CANCELLED",
+        "retrieval_state": "NOT_REQUESTED",
+        "seed": 17,
+        "state": "CANCELLED",
+        "task_id": "task_000000"
+      }
+    ],
     "tasks": {
       "cancelled": 1,
       "total": 1

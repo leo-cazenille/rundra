@@ -34,6 +34,7 @@ from rundra.ports import (
     FetchRequest,
     FetchResult,
 )
+from rundra.results import OperationResult
 
 
 class RecordingFetchStager:
@@ -169,6 +170,42 @@ def test_persisted_status_list_and_inspect_share_typed_record_values(
     assert result_document(status)["status"]["run_id"] == run_id
     assert result_document(listed)["runs"][0]["state"] == "SUCCEEDED"
     assert result_document(inspected)["record"]["format_version"] == 1
+
+
+def test_replicated_status_and_run_values_expose_concise_per_task_details(
+    tmp_path: Path,
+) -> None:
+    store, run_id = _stored_array_record(tmp_path)
+    record = store.list()[0]
+
+    status = status_operation(run_id, store)
+    run_document = result_document(OperationResult.success("run", RunValue(record)))[
+        "run"
+    ]
+
+    assert status.ok and isinstance(status.value, StatusValue)
+    assert [detail.task_id for detail in status.value.task_details] == [
+        TaskId.from_ordinal(0),
+        TaskId.from_ordinal(1),
+    ]
+    assert [detail.seed for detail in status.value.task_details] == [17, 23]
+    assert [detail.native_id for detail in status.value.task_details] == [
+        "777_0",
+        "777_1",
+    ]
+    document = result_document(status)["status"]
+    assert document["tasks"] == {"total": 2, "succeeded": 2}
+    assert document["task_details"][1] == {
+        "task_id": "task_000001",
+        "seed": 23,
+        "state": "SUCCEEDED",
+        "retrieval_state": "NOT_REQUESTED",
+        "native_id": "777_1",
+        "native_state": "COMPLETED",
+        "exit_code": 0,
+    }
+    assert run_document["seed"] is None
+    assert run_document["seeds"] == [17, 23]
 
 
 def test_logs_are_selected_by_stable_task_without_native_filename_knowledge(

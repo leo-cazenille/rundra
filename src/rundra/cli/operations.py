@@ -102,8 +102,41 @@ class RunValue:
     @property
     def seed(self) -> int:
         if len(self.record.run.tasks) != 1:
-            raise ValueError("RunValue requires exactly one Task")
-        return self.record.run.tasks[0].seed
+            raise ValueError("RunValue has no singular seed for a replicated Run")
+        return self.seeds[0]
+
+    @property
+    def seeds(self) -> tuple[int, ...]:
+        return tuple(task.seed for task in self.record.run.tasks)
+
+
+@dataclass(frozen=True, slots=True)
+class TaskStatusValue:
+    task_id: TaskId
+    seed: int
+    state: ExecutionState
+    retrieval_state: RetrievalState
+    native_id: str | None = None
+    native_state: str | None = None
+    exit_code: int | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.task_id) is not TaskId:
+            raise TypeError("TaskStatusValue task_id must be a TaskId")
+        if type(self.seed) is not int:
+            raise TypeError("TaskStatusValue seed must be an integer")
+        if type(self.state) is not ExecutionState:
+            raise TypeError("TaskStatusValue state must be an ExecutionState")
+        if type(self.retrieval_state) is not RetrievalState:
+            raise TypeError("TaskStatusValue retrieval_state must be a RetrievalState")
+        for name in ("native_id", "native_state"):
+            value = getattr(self, name)
+            if value is not None and (
+                type(value) is not str or not value.strip() or "\x00" in value
+            ):
+                raise ValueError(f"TaskStatusValue {name} must be safe or None")
+        if self.exit_code is not None and type(self.exit_code) is not int:
+            raise TypeError("TaskStatusValue exit_code must be an integer or None")
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +149,7 @@ class StatusValue:
     task_counts: Mapping[str, int]
     native_state: str | None = None
     scheduler_job_ids: tuple[str, ...] = ()
+    task_details: tuple[TaskStatusValue, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -133,6 +167,18 @@ class StatusValue:
         if any(type(value) is not str or not value for value in scheduler_job_ids):
             raise ValueError("StatusValue scheduler_job_ids must be nonempty strings")
         object.__setattr__(self, "scheduler_job_ids", scheduler_job_ids)
+        if not isinstance(self.task_details, Sequence) or isinstance(
+            self.task_details, (str, bytes)
+        ):
+            raise TypeError("StatusValue task_details must be a sequence")
+        task_details = tuple(self.task_details)
+        if any(type(value) is not TaskStatusValue for value in task_details):
+            raise TypeError("StatusValue task_details must contain TaskStatusValues")
+        if len({value.task_id for value in task_details}) != len(task_details):
+            raise ValueError("StatusValue task_details must contain unique Task IDs")
+        if task_details and sum(self.task_counts.values()) != len(task_details):
+            raise ValueError("StatusValue task counts must match task_details")
+        object.__setattr__(self, "task_details", task_details)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1125,6 +1171,18 @@ def _status_value(record: RunRecord) -> StatusValue:
         task_counts=counts,
         native_state=record.native_state,
         scheduler_job_ids=record.scheduler_job_ids,
+        task_details=tuple(
+            TaskStatusValue(
+                task_id=task.id,
+                seed=task.seed,
+                state=task.state,
+                retrieval_state=_task_retrieval_states(record)[task.id],
+                native_id=record.task_scheduler_ids.get(task.id),
+                native_state=record.task_native_states.get(task.id),
+                exit_code=record.task_exit_codes.get(task.id),
+            )
+            for task in record.run.tasks
+        ),
     )
 
 

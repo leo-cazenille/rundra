@@ -15,6 +15,7 @@ from rundra.cli.operations import (
     LogsValue,
     RunValue,
     StatusValue,
+    TaskStatusValue,
 )
 from rundra.cli.render import result_document
 from rundra.domain.models import ArtifactKind
@@ -36,6 +37,17 @@ _STATUS = StatusValue(
     task_counts={"SUCCEEDED": 1},
     native_state=_RECORD.native_state,
     scheduler_job_ids=_RECORD.scheduler_job_ids,
+    task_details=(
+        TaskStatusValue(
+            _RECORD.run.tasks[0].id,
+            17,
+            ExecutionState.SUCCEEDED,
+            RetrievalState.SUCCEEDED,
+            native_id="local-0123456789abcdef0123456789abcdef",
+            native_state="EXITED",
+            exit_code=0,
+        ),
+    ),
 )
 _LOGS = LogsValue(
     run_id=_RECORD.run.id,
@@ -111,6 +123,17 @@ _CANCELLED_STATUS = StatusValue(
     task_counts={"CANCELLED": 1},
     native_state="CANCELLED",
     scheduler_job_ids=("18372",),
+    task_details=(
+        TaskStatusValue(
+            _RECORD.run.tasks[0].id,
+            17,
+            ExecutionState.CANCELLED,
+            RetrievalState.NOT_REQUESTED,
+            native_id="18372",
+            native_state="CANCELLED",
+            exit_code=0,
+        ),
+    ),
 )
 
 

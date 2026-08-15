@@ -12,6 +12,17 @@
     ],
     "state": "SUCCEEDED",
     "target": "local",
+    "task_details": [
+      {
+        "exit_code": 0,
+        "native_id": "local-0123456789abcdef0123456789abcdef",
+        "native_state": "EXITED",
+        "retrieval_state": "SUCCEEDED",
+        "seed": 17,
+        "state": "SUCCEEDED",
+        "task_id": "task_000000"
+      }
+    ],
     "tasks": {
       "succeeded": 1,
       "total": 1

@@ -135,9 +135,13 @@ def render_human(result: OperationResult[Any]) -> str:
         )
         return "\n".join(lines)
     if isinstance(value, RunValue):
+        seed_line = (
+            f"Seed: {value.seed}"
+            if len(value.seeds) == 1
+            else f"Seeds: {', '.join(str(seed) for seed in value.seeds)}"
+        )
         rendered = (
-            f"Run: {value.run_id}\n"
-            f"Seed: {value.seed}\n"
+            f"Run: {value.run_id}\n{seed_line}\n"
             f"State: {value.record.run.state.value}\n"
             f"Retrieval: {value.record.run.retrieval_state.value}\n"
             f"Target: {value.record.run.target.name}"
@@ -148,10 +152,21 @@ def render_human(result: OperationResult[Any]) -> str:
             f"{state.lower()}={count}"
             for state, count in sorted(value.task_counts.items())
         )
-        return (
+        summary = (
             f"Run: {value.run_id}\nState: {value.state.value}\n"
             f"Retrieval: {value.retrieval_state.value}\nTasks: {counts}"
         )
+        if not value.task_details:
+            return summary
+        details = "\n".join(
+            "  "
+            f"{task.task_id} seed={task.seed} state={task.state.value} "
+            f"retrieval={task.retrieval_state.value} "
+            f"native={task.native_state or '-'} exit="
+            f"{task.exit_code if task.exit_code is not None else '-'}"
+            for task in value.task_details
+        )
+        return f"{summary}\nTask details:\n{details}"
     if isinstance(value, CancelValue):
         status = value.status
         return f"Run: {status.run_id}\nState after cancellation: {status.state.value}"
@@ -169,9 +184,11 @@ def render_human(result: OperationResult[Any]) -> str:
             f"--- stderr ---\n{value.stderr}"
         ).rstrip()
     if isinstance(value, FetchValue):
+        selected = ", ".join(str(task_id) for task_id in value.task_ids) or "all"
         return (
             f"Fetched {len(value.artifacts)} artifact(s) for {value.run_id} "
-            f"to {value.destination}"
+            f"to {value.destination}\nTasks: {selected}\n"
+            f"Retrieval: {value.retrieval_state.value}"
         )
     if isinstance(value, InspectValue):
         record = value.record
@@ -289,7 +306,8 @@ def _run_value_document(value: RunValue) -> dict[str, Any]:
         "run_id": str(record.run.id),
         "experiment": record.run.experiment_name,
         "target": record.run.target.name,
-        "seed": value.seed,
+        "seed": value.seeds[0] if len(value.seeds) == 1 else None,
+        "seeds": list(value.seeds),
         "state": record.run.state.value,
         "retrieval_state": record.run.retrieval_state.value,
         "tasks": len(record.run.tasks),
@@ -314,6 +332,18 @@ def _status_document(value: StatusValue) -> dict[str, Any]:
         "retrieval_state": value.retrieval_state.value,
         "native_state": value.native_state,
         "scheduler_job_ids": list(value.scheduler_job_ids),
+        "task_details": [
+            {
+                "task_id": str(task.task_id),
+                "seed": task.seed,
+                "state": task.state.value,
+                "retrieval_state": task.retrieval_state.value,
+                "native_id": task.native_id,
+                "native_state": task.native_state,
+                "exit_code": task.exit_code,
+            }
+            for task in value.task_details
+        ],
         "tasks": {
             "total": sum(value.task_counts.values()),
             **{

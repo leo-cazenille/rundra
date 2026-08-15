@@ -60,6 +60,9 @@
     "retrieval_state": "SUCCEEDED",
     "run_id": "run_0123456789abcdef0123456789abcdef",
     "seed": 17,
+    "seeds": [
+      17
+    ],
     "scheduler_job_ids": [
       "local-0123456789abcdef0123456789abcdef"
     ],

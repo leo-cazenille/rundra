@@ -25,6 +25,9 @@
       "18372"
     ],
     "seed": 17,
+    "seeds": [
+      17
+    ],
     "state": "SUBMITTED",
     "target": "shoal",
     "task_exit_codes": {},
