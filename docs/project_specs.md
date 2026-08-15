@@ -2408,6 +2408,14 @@ and incompatible versions or unknown fields fail explicitly. The persisted
 format stores portable computation and result-retrieval states independently;
 its checked example is `docs/schemas/run-record-v1.json`.
 
+Every update is a compare-and-swap operation: the caller supplies the complete
+record it observed along with the desired replacement. A standard-library
+advisory lock serializes writers for that Run across processes, and the store
+compares the observed record while holding the lock. A changed record produces
+`RunStoreConflictError` rather than silently losing the newer state. If the
+desired replacement is already present, the update succeeds idempotently.
+Readers remain lock-free and see either complete old or complete new JSON.
+
 ---
 
 ## 39. Concurrency and idempotency
@@ -2423,6 +2431,14 @@ Requirements:
 - repeated `cancel` requests should fail gracefully or be idempotent where practical.
 
 Distributed locking is not a v0.1 requirement unless tests demonstrate a real need.
+
+M6.3 stress tests demonstrated a same-Run lost-update race, so the local store
+uses only a per-Run advisory writer lock; it adds no global lock, daemon,
+database, or distributed coordination. Simultaneous identical status, fetch,
+and cancel operations converge idempotently. Incompatible concurrent lifecycle
+updates preserve the winner and return structured `RUN_STORE_CONFLICT` with an
+explicit retry action. Interrupted writes leave the previous record intact and
+remove temporary files.
 
 ---
 

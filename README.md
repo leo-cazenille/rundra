@@ -18,6 +18,9 @@ common `--json` placement, deterministic output, structured usage errors, and
 process exit semantics. M6.2 statically validates executable target stacks,
 container/GPU/resource compatibility, and scheduler-native options before
 execution, while making `plan` safety and staging behavior explicit.
+M6.3 hardens Run persistence with per-Run writer locking, mandatory optimistic
+updates, retryable conflict reporting, and concurrent status/fetch/cancel stress
+coverage; readers remain lock-free over atomically replaced JSON records.
 
 Rundra has
 portable domain and configuration models,
