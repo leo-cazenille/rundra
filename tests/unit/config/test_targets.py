@@ -185,4 +185,69 @@ targets:
     with pytest.raises(ConfigError) as caught:
         load_targets(remote)
     assert caught.value.code == "INVALID_BACKEND_COMBINATION"
-    assert caught.value.path == ("targets", "bad", "container", "type")
+    assert caught.value.path == ("targets", "bad")
+
+
+@pytest.mark.parametrize(
+    ("transport", "scheduler", "staging", "container"),
+    [
+        ("local", "slurm", "local", "apptainer"),
+        ("ssh", "local", "rsync", "apptainer"),
+        ("ssh", "slurm", "local", "apptainer"),
+        ("local", "local", "rsync", "apptainer"),
+    ],
+)
+def test_target_schema_rejects_unexecutable_backend_mixtures(
+    tmp_path: Path,
+    transport: str,
+    scheduler: str,
+    staging: str,
+    container: str,
+) -> None:
+    from rundra.config.errors import ConfigError
+    from rundra.config.targets import load_targets
+
+    transport_document = (
+        "{type: ssh, host: cluster}" if transport == "ssh" else "{type: local}"
+    )
+    source = tmp_path / "targets.yaml"
+    source.write_text(
+        "version: 1\ntargets:\n  bad:\n"
+        f"    transport: {transport_document}\n"
+        f"    scheduler: {{type: {scheduler}}}\n"
+        f"    staging: {{type: {staging}}}\n"
+        f"    container: {{type: {container}}}\n"
+        "    workspace: /tmp/rundra\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        load_targets(source)
+
+    assert caught.value.code == "INVALID_BACKEND_COMBINATION"
+    assert caught.value.path == ("targets", "bad")
+
+
+@pytest.mark.parametrize("workspace", ["relative/workspace", "/"])
+def test_ssh_target_requires_an_absolute_non_root_workspace(
+    tmp_path: Path, workspace: str
+) -> None:
+    from rundra.config.errors import ConfigError
+    from rundra.config.targets import load_targets
+
+    source = tmp_path / "targets.yaml"
+    source.write_text(
+        "version: 1\ntargets:\n  bad:\n"
+        "    transport: {type: ssh, host: cluster}\n"
+        "    scheduler: {type: slurm}\n"
+        "    staging: {type: rsync}\n"
+        "    container: {type: apptainer}\n"
+        f"    workspace: {workspace}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        load_targets(source)
+
+    assert caught.value.code == "INVALID_REMOTE_WORKSPACE"
+    assert caught.value.path == ("targets", "bad", "workspace")

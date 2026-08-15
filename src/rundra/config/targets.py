@@ -24,6 +24,13 @@ _BACKENDS_BY_ROLE = {
     "staging": frozenset({"local", "rsync"}),
     "container": frozenset({"apptainer", "native"}),
 }
+_SUPPORTED_BACKEND_STACKS = frozenset(
+    {
+        ("local", "local", "local", "apptainer"),
+        ("local", "local", "local", "native"),
+        ("ssh", "slurm", "rsync", "apptainer"),
+    }
+)
 
 
 def load_targets(source: Path) -> Mapping[str, Target]:
@@ -66,16 +73,30 @@ def load_targets(source: Path) -> Mapping[str, Target]:
             container=_backend_config(section["container"], "container", source, path),
             workspace=workspace,
         )
-        if target.container.kind == "native" and (
+        backend_stack = (
             target.transport.kind,
             target.scheduler.kind,
             target.staging.kind,
-        ) != ("local", "local", "local"):
+            target.container.kind,
+        )
+        if backend_stack not in _SUPPORTED_BACKEND_STACKS:
             fail(
                 source=source,
-                path=(*path, "container", "type"),
+                path=path,
                 code="INVALID_BACKEND_COMBINATION",
-                message="Native runtime is supported only for an all-local target",
+                message=(
+                    "Target backends must use an all-local stack or the supported "
+                    "SSH/Slurm/rsync/Apptainer stack"
+                ),
+            )
+        if target.transport.kind == "ssh" and (
+            not target.workspace.is_absolute() or target.workspace == PurePath("/")
+        ):
+            fail(
+                source=source,
+                path=(*path, "workspace"),
+                code="INVALID_REMOTE_WORKSPACE",
+                message="SSH target workspace must be an absolute non-root path",
             )
         targets[name] = target
     return MappingProxyType(targets)
