@@ -1848,6 +1848,21 @@ Apptainer invocation must be generated independently from Slurm submission.
 
 The architecture must remain compatible with sites still exposing the `singularity` command where practical, but implementing a separate Singularity backend is not a v0.1 requirement.
 
+The M1 command-construction contract is deliberately pure: it validates the
+request and returns an argument array without starting the runtime. Commands
+use `exec`, `--cleanenv`, and `--no-eval`; add `--nv` only for requested GPU
+access; encode every bind independently with an explicit `ro` or `rw` mode;
+and use `--cwd` for an absolute container working directory. Experiment
+environment values are passed through the runtime's inherited
+`APPTAINERENV_` variables (or `SINGULARITYENV_` when the configured executable
+is `singularity`) so values do not need to be encoded into a comma-delimited
+argument. Bind paths that cannot be represented unambiguously are rejected.
+
+The initial capability check establishes only that the configured executable
+is discoverable; it does not execute a version probe. Container execution and
+runtime-version provenance are introduced only when the orchestration path
+actually runs commands.
+
 ---
 
 ## 36. SSH transport

@@ -16,9 +16,11 @@ version-1 YAML loaders, pure deterministic planning, narrow backend contracts,
 and fake-driven contract tests. M1.1 adds strict versioned RunRecord
 serialization and atomic, collision-safe local JSON persistence. M1.2 adds
 isolated local source/config staging, sealed input snapshots, explicit mutable
-runtime locations, and idempotent output retrieval. The CLI can validate
+runtime locations, and idempotent output retrieval. M1.3 adds pure, shell-free
+Apptainer/Singularity-compatible command construction with explicit bind,
+environment, working-directory, and GPU handling. The CLI can validate
 configuration, inspect a non-submitting plan, and list configured targets.
-Container invocation and experiment execution are not implemented yet.
+Container execution and experiment execution are not implemented yet.
 
 Implementation progress is tracked in
 [`.agent/plans/v0.1.md`](.agent/plans/v0.1.md).

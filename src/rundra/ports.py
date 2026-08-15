@@ -227,13 +227,30 @@ class FetchResult:
 
 
 @dataclass(frozen=True, slots=True)
+class BindMount:
+    """Portable host-to-container path mapping with explicit access mode."""
+
+    source: PurePath
+    destination: PurePath
+    read_only: bool = True
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.source, PurePath):
+            raise TypeError("BindMount source must be a PurePath")
+        if not isinstance(self.destination, PurePath):
+            raise TypeError("BindMount destination must be a PurePath")
+        if type(self.read_only) is not bool:
+            raise TypeError("BindMount read_only must be a boolean")
+
+
+@dataclass(frozen=True, slots=True)
 class ContainerRequest:
     """Normalized input for pure container argv construction."""
 
     command: Command
     image: PurePath
     gpu: bool
-    binds: tuple[tuple[PurePath, PurePath], ...] = ()
+    binds: tuple[BindMount, ...] = ()
 
     def __post_init__(self) -> None:
         if type(self.command) is not Command:
@@ -245,14 +262,13 @@ class ContainerRequest:
         if not isinstance(self.binds, Sequence) or isinstance(self.binds, (str, bytes)):
             raise TypeError("ContainerRequest binds must be a sequence")
         binds = tuple(self.binds)
-        if any(
-            not isinstance(bind, Sequence)
-            or len(bind) != 2
-            or not all(isinstance(path, PurePath) for path in bind)
-            for bind in binds
-        ):
-            raise TypeError("ContainerRequest binds must contain path pairs")
-        object.__setattr__(self, "binds", tuple((bind[0], bind[1]) for bind in binds))
+        if any(type(bind) is not BindMount for bind in binds):
+            raise TypeError("ContainerRequest binds must contain only BindMount values")
+        if len({bind.destination for bind in binds}) != len(binds):
+            raise ValueError(
+                "ContainerRequest binds require unique container destinations"
+            )
+        object.__setattr__(self, "binds", binds)
 
 
 @runtime_checkable

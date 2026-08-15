@@ -11,6 +11,7 @@ from rundra.domain.states import ExecutionState
 from rundra.orchestration.models import ExecutionUnit
 from rundra.orchestration.planner import create_plan
 from rundra.ports import (
+    BindMount,
     CapabilityCheck,
     CommandResult,
     ContainerRequest,
@@ -112,6 +113,12 @@ def test_fake_stager_and_recording_runtime_are_structural_ports() -> None:
         command=Command(("python", "main.py")),
         image=PurePosixPath("image.sif"),
         gpu=False,
+        binds=(
+            BindMount(
+                PurePosixPath("/host/source"),
+                PurePosixPath("/workspace/source"),
+            ),
+        ),
     )
 
     assert isinstance(stager, Stager)
