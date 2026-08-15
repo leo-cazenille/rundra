@@ -2360,10 +2360,21 @@ The system test constructs a pure plan and runs preflight before submission,
 then exercises one synchronous CLI Run from a temporary dirty Git repository.
 It verifies tracked and untracked source execution, exact config/seed, sealed
 remote source, Slurm identity/state/node/timestamps/exit, normalized logs, raw
-result retrieval, artifact manifest, and available Git provenance. Shoal has
-the `sacct` command but disables accounting storage, so Slurm reconciliation
-uses `scontrol show job -o` only when the primary accounting query fails. Native
-timestamp strings are retained without fabricating a site timezone.
+result retrieval, artifact manifest, and available Git provenance. At the time
+of the first CPU run, Shoal exposed the `sacct` command with accounting storage
+disabled, so Slurm reconciliation used `scontrol show job -o` when the primary
+accounting query failed. Native timestamp strings are retained without
+fabricating a site timezone. Accounting was enabled before M4.4; the adapter
+continues to support both configurations.
+
+M4.4 adds an independently gated, bounded one-GPU execution. Its pure plan and
+preflight require one Slurm GPU and Apptainer NVIDIA enablement before
+submission. The live check verifies the scheduler's actual `AllocTRES` through
+`scontrol`, independently executes `nvidia-smi` inside the `apptainer --nv`
+container, and checks exact seed/config propagation, logs, retrieval, terminal
+state, and the durable requested resources. GPU-related environment variables
+inside an Apptainer `--cleanenv` process are diagnostic only and are not treated
+as authoritative allocation evidence.
 
 Shoal system tests should eventually cover:
 

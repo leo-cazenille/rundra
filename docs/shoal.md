@@ -167,3 +167,52 @@ directory. The exact Run and job identifiers remain in the operator's local
 RunRecord rather than this repository. After evidence is no longer needed,
 inspect that record, verify the Run is terminal, and remove only those exact
 per-Run and per-job paths. Do not recursively clean the target workspace root.
+
+## M4.4 bounded GPU vertical slice
+
+GPU execution has its own opt-in and cannot be enabled by either the general
+system-test flag or CPU flag alone. The checked `examples/shoal/gpu` experiment
+requests one node/task/CPU/GPU, 1 GiB, and five minutes. It also sets
+`container.gpu: true`; the Slurm GPU request and Apptainer NVIDIA enablement are
+separate controls. Supply a readable absolute GPU-capable image path:
+
+```bash
+RUNDRA_SHOAL_TARGETS_FILE=/tmp/rundra-shoal-targets.yaml \
+RUNDRA_SHOAL_GPU_IMAGE=/absolute/path/to/gpu-image.sif \
+  uv run pytest tests/system/test_shoal_gpu.py \
+    -m 'shoal_system and shoal_gpu' \
+    --run-shoal-system-tests \
+    --run-shoal-gpu-test \
+    -vv
+```
+
+The exact plan and non-submitting preflight must pass before the Run is
+allocated. After completion, the test uses `scontrol show job -o` to verify
+that Slurm actually allocated `gres/gpu=1`; this check works independently of
+Slurm accounting. It separately requires `nvidia-smi -L` to succeed inside the
+Apptainer NVIDIA-enabled container. It also checks seed/config propagation,
+terminal state and exit status, normalized logs, raw result retrieval, and the
+artifact manifest. `CUDA_VISIBLE_DEVICES`, `SLURM_JOB_GPUS`, and
+`SLURM_GPUS_ON_NODE` are retained as optional diagnostics, not used as proof of
+allocation inside `--cleanenv`.
+
+### Recorded M4.4 observation
+
+On 2026-08-15, the first bounded GPU Run received one GPU on `shoal1`, but the
+test's initial mandatory `CUDA_VISIBLE_DEVICES` assertion caused experiment
+exit 69. Slurm's retained `AllocTRES` nevertheless showed `gres/gpu=1`. The
+test was corrected to keep scheduler-allocation and container-runtime evidence
+independent.
+
+The retry passed in 14.15 seconds. Slurm again recorded one allocated GPU, and
+`nvidia-smi -L` inside the Ubuntu 24.04 Apptainer image reported one NVIDIA GPU.
+The retrieved evidence contained seed 23 and the exact `label: shoal-gpu`
+configuration; normalized stdout/stderr matched the experiment, and the durable
+record reported `COMPLETED`, exit zero, and computation/retrieval states
+`SUCCEEDED`. With accounting enabled for this run, normal reconciliation used
+`sacct`; the previously tested `scontrol` fallback remains available when
+accounting is absent.
+
+As with M4.3, retained evidence is isolated by Run ID. Inspect the terminal
+record before removing only its exact remote Run directory and scheduler log
+paths; never recursively clean the workspace root.
