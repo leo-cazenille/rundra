@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from rundra.cli.operations import PlanValue, plan_operation
+from rundra.cli.render import render_human, result_document
 from rundra.results import OperationResult
 
 
@@ -128,3 +129,8 @@ def test_plan_accepts_allowlisted_slurm_options_without_contacting_the_target(
     assert result.value.plan.units[0].resources.native == {
         "slurm": {"partition": "gpu", "exclusive": True}
     }
+    document = result_document(result)
+    assert document["plan"]["native_options"] == {
+        "slurm": {"partition": "gpu", "exclusive": True}
+    }
+    assert "slurm.exclusive=True, slurm.partition=gpu" in render_human(result)

@@ -120,6 +120,27 @@ targets:
 
     assert completed.returncode == 0
     assert document["plan"]["strategy"] == "slurm_array"
+    assert document["plan"]["resources"]["gpus_per_task"] == 0
+    assert document["plan"]["native_options"] == {}
+    assert document["plan"]["staging"] == {
+        "backend": "rsync",
+        "effective_config": "rsync_upload",
+        "inputs_sealed": True,
+        "results": "rsync_download",
+        "source": "rsync_upload",
+        "workspace_root": "/tmp/rundra-array-plan",
+    }
+    assert document["plan"]["validation"] == {
+        "native_options": "validated",
+        "resources": "validated",
+        "target_capabilities": "validated",
+    }
+    assert document["plan"]["safety"] == {
+        "contacts_target": False,
+        "creates_run": False,
+        "creates_workspace": False,
+        "submits": False,
+    }
     assert document["plan"]["groups"] == [
         {
             "task_ids": [
@@ -158,6 +179,9 @@ def test_human_commands_use_the_same_operations_and_separate_errors() -> None:
     assert valid.returncode == planned.returncode == targets.returncode == 0
     assert "Valid experiment: minimal" in valid.stdout
     assert "1 task(s)" in planned.stdout and "Seeds: 7" in planned.stdout
+    assert "Resources: nodes=1" in planned.stdout
+    assert "Native options: none" in planned.stdout
+    assert "Safety: validated offline" in planned.stdout
     assert "local: local / local" in targets.stdout
     assert invalid.returncode == 1 and invalid.stdout == ""
     assert "CONFIG_NOT_FOUND" in invalid.stderr

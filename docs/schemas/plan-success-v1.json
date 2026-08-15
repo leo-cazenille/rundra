@@ -24,6 +24,30 @@
       {"task_ids": ["task_000000"]},
       {"task_ids": ["task_000001"]}
     ],
+    "native_options": {},
+    "resources": {
+      "cpus_per_task": 1,
+      "gpus_per_task": 0,
+      "memory_bytes": 1073741824,
+      "native": {},
+      "nodes": 1,
+      "tasks": 1,
+      "walltime_seconds": 300
+    },
+    "safety": {
+      "contacts_target": false,
+      "creates_run": false,
+      "creates_workspace": false,
+      "submits": false
+    },
+    "staging": {
+      "backend": "local",
+      "effective_config": "local_copy",
+      "inputs_sealed": true,
+      "results": "local_copy",
+      "source": "local_copy",
+      "workspace_root": ".rundra"
+    },
     "staging_backend": "local",
     "strategy": "one_unit_per_task",
     "target": {
@@ -74,6 +98,11 @@
         "task_id": "task_000001"
       }
     ],
+    "validation": {
+      "native_options": "validated",
+      "resources": "validated",
+      "target_capabilities": "validated"
+    },
     "version": 1
   }
 }

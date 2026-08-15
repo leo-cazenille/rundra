@@ -114,10 +114,16 @@ def render_human(result: OperationResult[Any]) -> str:
     if isinstance(value, PlanValue):
         plan = value.plan
         seeds = ", ".join(str(unit.seed) for unit in plan.units)
+        resources = plan.units[0].resources
         rendered = (
             f"Plan for {plan.experiment_name} on {plan.target.name}: "
             f"{len(plan.units)} task(s)\nSeeds: {seeds}\n"
-            f"Strategy: {plan.strategy}\nStaging: {plan.staging_backend}"
+            f"Strategy: {plan.strategy}\n"
+            f"Resources: {_human_resources(resources)}\n"
+            f"Native options: {_human_native_options(resources)}\n"
+            f"Staging: {_human_staging(plan)}\n"
+            "Safety: validated offline; no target contact, workspace creation, "
+            "Run creation, or submission"
         )
         if plan.array_mapping:
             mapping = ", ".join(
@@ -202,12 +208,30 @@ def render_human(result: OperationResult[Any]) -> str:
 
 
 def _plan_document(plan: ExecutionPlan) -> dict[str, Any]:
+    resources = plan.units[0].resources
     return {
         "version": plan.version,
         "experiment": plan.experiment_name,
         "target": _target_document(plan.target),
         "strategy": plan.strategy,
         "staging_backend": plan.staging_backend,
+        "resources": _resources_document(resources),
+        "native_options": {
+            backend: dict(options)
+            for backend, options in sorted(resources.native.items())
+        },
+        "staging": _staging_document(plan),
+        "validation": {
+            "target_capabilities": "validated",
+            "resources": "validated",
+            "native_options": "validated",
+        },
+        "safety": {
+            "contacts_target": False,
+            "creates_workspace": False,
+            "creates_run": False,
+            "submits": False,
+        },
         "groups": [
             {"task_ids": [str(task_id) for task_id in group.task_ids]}
             for group in plan.groups
@@ -231,6 +255,50 @@ def _plan_document(plan: ExecutionPlan) -> dict[str, Any]:
             for unit in plan.units
         ],
     }
+
+
+def _staging_document(plan: ExecutionPlan) -> dict[str, Any]:
+    local = plan.staging_backend == "local"
+    return {
+        "backend": plan.staging_backend,
+        "workspace_root": str(plan.target.workspace),
+        "source": "local_copy" if local else "rsync_upload",
+        "effective_config": "local_copy" if local else "rsync_upload",
+        "inputs_sealed": True,
+        "results": "local_copy" if local else "rsync_download",
+    }
+
+
+def _human_resources(resources: ResourceRequest) -> str:
+    memory = "unset" if resources.memory_bytes is None else str(resources.memory_bytes)
+    walltime = (
+        "unset"
+        if resources.walltime is None
+        else str(int(resources.walltime.total_seconds()))
+    )
+    return (
+        f"nodes={resources.nodes}, tasks={resources.tasks}, "
+        f"cpus/task={resources.cpus_per_task}, gpus/task={resources.gpus_per_task}, "
+        f"memory_bytes={memory}, walltime_seconds={walltime}"
+    )
+
+
+def _human_native_options(resources: ResourceRequest) -> str:
+    rendered = [
+        f"{backend}.{name}={value}"
+        for backend, options in sorted(resources.native.items())
+        for name, value in sorted(options.items())
+    ]
+    return ", ".join(rendered) if rendered else "none"
+
+
+def _human_staging(plan: ExecutionPlan) -> str:
+    staging = _staging_document(plan)
+    return (
+        f"{staging['backend']} ({staging['source']} source/config; "
+        f"sealed inputs; {staging['results']} results; "
+        f"workspace root {staging['workspace_root']})"
+    )
 
 
 def _launch_document(value: LaunchResolutionValue) -> dict[str, Any]:
