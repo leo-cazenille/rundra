@@ -1463,6 +1463,15 @@ Every important command that returns programmatically useful information must su
 --json
 ```
 
+M6.1 makes `--json` a common option: it may appear immediately after `rundr`
+or anywhere accepted by the selected subcommand. Both forms execute the same
+operation and produce byte-identical deterministic JSON. A machine-readable
+argument failure, unknown command, or missing command uses the standard
+version-1 envelope with error code `CLI_USAGE_ERROR`; a failure tied to a known
+command retains that operation name, while a missing/unknown command uses
+operation `cli`. JSON is written to stdout with an empty stderr. Human failures
+use the same error code/message on stderr.
+
 Human output may evolve more freely.
 
 Documented JSON structures are public interfaces and require greater stability.
@@ -1534,12 +1543,26 @@ Failures must not be communicated only through free-form prose.
 
 CLI process exit codes should also reflect success or failure appropriately.
 
+The audited v0.1 exit-code contract is:
+
+- 0 for a successfully performed operation and ordinary human help;
+- 1 for usage, configuration, capability, persistence, transport, scheduler,
+  staging, retrieval, and other operation failures;
+- 2 only when `run` successfully returns a durable Run result whose aggregate
+  execution state is `FAILED` or `CANCELLED`.
+
+Thus status/list/logs/fetch/inspect/cancel may successfully describe a failed
+or cancelled Run with process exit zero; their own operation succeeded. Help
+remains human-oriented. Plain `rundr` displays help with exit zero, whereas
+`rundr --json` without a command is a structured usage failure with exit one.
+
 The M1.5 local CLI adds synchronous `run` and persisted `status`, `list`,
 `logs`, `fetch`, and `inspect`. Each useful command supports `--json` and both
 renderers consume the same typed result. The default record directory is
 `~/.local/share/rundra/runs`; `--data-dir` selects another store. `run` accepts
-exactly one seed, uses the current directory as its default source root, and
-reports the output destination and stable Run ID. A successfully reconciled
+one seed or an inclusive multi-seed range, uses the current directory as its
+default source root, and reports the output destination and stable Run ID. A
+successfully reconciled
 task failure returns a Run document with state `FAILED` and process exit code
 2; operation/configuration/infrastructure failures return exit code 1; other
 successful operations return 0.

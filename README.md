@@ -11,10 +11,12 @@ The project, GitHub repository, Python package, and PyPI distribution are named
 
 ## Development status
 
-M1, M1E, M2, and M3 are complete. M4.1 provides a checked Shoal target
-template and an opt-in system-test harness. M4.2 validates the non-submitting
-plan and real SSH/rsync/Slurm/Apptainer preflight. M4.3 validates one bounded
-dirty-source CPU Run end to end; GPU execution has not started.
+M0 through M5 are complete; M6 release hardening is in progress. The checked
+Shoal path has passed separately gated CPU, GPU, controlled-failure, and
+three-element Slurm-array system tests. M6.1 audits every public CLI operation,
+common `--json` placement, deterministic output, structured usage errors, and
+process exit semantics.
+
 Rundra has
 portable domain and configuration models,
 deterministic planning, isolated local staging, durable versioned Run records,
@@ -33,7 +35,7 @@ Normal tests use scripted transports and do not invoke an installed Slurm.
 M2.1 adds a typed OpenSSH transport adapter that honors normal user SSH
 configuration, agent authentication, jump-host configuration, and host-key
 verification. SSH/Slurm/rsync/Apptainer targets are now wired through `run` and
-`submit`; actual site behavior remains unclaimed until the opt-in M4 checks.
+`submit`; site behavior is validated only by separately enabled system tests.
 
 M2.2 centralizes the unavoidable remote-shell serialization boundary. Literal
 arguments, environment values, and working directories are POSIX-shell quoted;
@@ -51,7 +53,8 @@ installed scheduler. Real-cluster checks remain explicitly opt-in.
 
 A non-secret Shoal target template and its configuration guidance are in
 [`docs/shoal.md`](docs/shoal.md). The template is setup documentation, not a
-claim that real-cluster validation has passed.
+portable site default; recorded bounded validation evidence is documented
+separately in that guide.
 
 M1E adds strict project launch profiles, optional user defaults, deterministic
 resolution precedence, concise `run`/`plan` commands, and generated seeds that
@@ -136,14 +139,13 @@ Use `--random-seed` to override a fixed seed supplied by a project profile or
 user default. Explicit `--seeds START:STOP` uses an inclusive range in `plan`:
 `0:2` produces Tasks for seeds 0, 1, and 2. Task order follows seed-request
 order, IDs are stable zero-based ordinals, and duplicate seeds are rejected.
-M5.1 fixes these logical semantics; Slurm array grouping and multi-Task
-submission follow in later checkpoints. M5.2 now makes grouping inspectable:
+M5.1 fixes these logical semantics. M5.2 makes grouping inspectable:
 for two or more homogeneous Tasks on a Slurm target, `plan --json` reports
 `strategy: "slurm_array"`, one ordered Task group, and an explicit Task
-ID/seed/zero-based-array-index mapping. It does not submit or generate an array
-script yet. M5.3 now provides the tested construction boundary for bounded
-array scripts and safely quoted per-Task manifests. Multi-Task scheduler
-submission remains disabled until per-Task reconciliation is implemented.
+ID/seed/zero-based-array-index mapping. M5.3–M5.6 add bounded safely quoted
+array manifests, submission, per-Task reconciliation/logs/results/retrieval,
+cancellation, deterministic aggregation, and real-cluster partial-failure
+evidence.
 
 ## Launch configuration
 
@@ -193,11 +195,16 @@ uv run rundr targets --targets-file examples/minimal/targets.yaml
 ```
 
 Lifecycle commands use `~/.local/share/rundra/runs` by default; pass
-`--data-dir` to select another record store. Synchronous `run` executes exactly
-one seed, supplied or generated, while `source_root` and `destination` may come
+`--data-dir` to select another record store. Synchronous `run` executes one
+seed or an inclusive seed range, while `source_root` and `destination` may come
 from the same launch-resolution layers.
 
 Add `--json` to obtain the version-1 machine-readable contracts documented in
 [`docs/schemas/`](docs/schemas/). Authentication comes only from external
 transport mechanisms: credentials must never be placed in experiment files,
 target files, opaque scientific configuration, command arguments, or run data.
+
+`--json` may also precede the command, for example `rundr --json status
+RUN_ID`. Successful operations exit 0. Structured usage/operation failures
+exit 1. Exit 2 is reserved for `run` returning a durable failed or cancelled
+experiment result; querying that Run successfully with `status` still exits 0.
