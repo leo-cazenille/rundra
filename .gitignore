@@ -212,6 +212,10 @@ tempCodeRunnerFile.py
 # Editor swap files
 *.sw?
 
+# Rundra runtime output
+/.rundra/
+/examples/minimal/retrieved/
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
