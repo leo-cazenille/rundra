@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 import pytest
 
 from rundra.adapters.rsync import (
+    RsyncRetrievalError,
     RsyncStager,
     RsyncStagerError,
     RsyncUnavailableError,
@@ -25,7 +26,13 @@ from rundra.domain.models import (
     RunId,
     Target,
 )
-from rundra.ports import CapabilityCheck, CommandResult, StageRequest
+from rundra.ports import (
+    CapabilityCheck,
+    CommandResult,
+    FetchRequest,
+    StagedWorkspace,
+    StageRequest,
+)
 
 
 @dataclass
@@ -281,3 +288,146 @@ def test_rsync_stager_rejects_invalid_targets_exclusions_and_sources(
 def test_rsync_stager_rejects_non_requests(value: object) -> None:
     with pytest.raises(TypeError, match="StageRequest"):
         RsyncStager(RecordingTransport(deque())).stage(value)  # type: ignore[arg-type]
+
+
+def _workspace() -> StagedWorkspace:
+    root = PurePosixPath("/remote/work tree/runs/run_0123456789abcdef0123456789abcdef")
+    return StagedWorkspace(
+        root=root,
+        source=root / "source",
+        inputs=root / "input",
+        config=root / "input/config.yaml",
+        runtime=root / "runtime",
+        outputs=root / "output",
+        logs=root / "logs",
+        metadata=root / "metadata",
+    )
+
+
+def test_rsync_fetch_is_idempotent_and_returns_result_log_metadata_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda executable: "/usr/bin/rsync")
+    calls: list[tuple[str, ...]] = []
+    generation = 0
+
+    def run(
+        argv: tuple[str, ...], **options: object
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal generation
+        calls.append(argv)
+        destination = Path(argv[-1])
+        destination.mkdir(parents=True, exist_ok=True)
+        tree = len(calls) % 3
+        if tree == 1:
+            generation += 1
+            result = destination / "results/result.txt"
+            result.parent.mkdir(parents=True, exist_ok=True)
+            result.write_text(f"generation {generation}\n", encoding="utf-8")
+        elif tree == 2:
+            (destination / "task_000000.stdout").write_text("out\n", encoding="utf-8")
+            (destination / "task_000000.stderr").write_text("err\n", encoding="utf-8")
+        else:
+            (destination / "job.json").write_text("{}\n", encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    destination = tmp_path / "retrieved"
+    request = FetchRequest(_workspace(), ("results/**",), destination)
+    stager = RsyncStager(RecordingTransport(deque()), host="cluster-alias")
+
+    first = stager.fetch(request)
+    second = stager.fetch(request)
+
+    workspace = _workspace()
+    assert calls[:3] == [
+        (
+            "rsync",
+            "--archive",
+            "--no-links",
+            "--protect-args",
+            "--delay-updates",
+            "--prune-empty-dirs",
+            "--include",
+            "*/",
+            "--include",
+            "results/**",
+            "--exclude",
+            "*",
+            "--",
+            f"cluster-alias:{workspace.outputs}/",
+            f"{destination.resolve()}/output/",
+        ),
+        (
+            "rsync",
+            "--archive",
+            "--no-links",
+            "--protect-args",
+            "--delay-updates",
+            "--",
+            f"cluster-alias:{workspace.logs}/",
+            f"{destination.resolve()}/logs/",
+        ),
+        (
+            "rsync",
+            "--archive",
+            "--no-links",
+            "--protect-args",
+            "--delay-updates",
+            "--",
+            f"cluster-alias:{workspace.metadata}/",
+            f"{destination.resolve()}/metadata/",
+        ),
+    ]
+    assert (destination / "output/results/result.txt").read_text(
+        encoding="utf-8"
+    ) == "generation 2\n"
+    assert first.artifacts == second.artifacts
+    assert [artifact.kind for artifact in second.artifacts] == [
+        ArtifactKind.STDERR,
+        ArtifactKind.STDOUT,
+        ArtifactKind.SCHEDULER_METADATA,
+        ArtifactKind.RAW_RESULT,
+    ]
+    assert all(artifact.size_bytes is not None for artifact in second.artifacts)
+    assert not list(destination.rglob("*.tmp"))
+
+
+def test_rsync_fetch_rejects_unsafe_inputs_and_redacts_transfer_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda executable: "/usr/bin/rsync")
+    stager = RsyncStager(RecordingTransport(deque()), host="cluster-alias")
+    with pytest.raises(RsyncRetrievalError, match="filesystem root"):
+        stager.fetch(FetchRequest(_workspace(), ("results/**",), PurePosixPath("/")))
+    with pytest.raises(RsyncRetrievalError, match="NUL"):
+        stager.fetch(
+            FetchRequest(_workspace(), ("results/\x00*",), tmp_path / "retrieved")
+        )
+
+    def fail(
+        argv: tuple[str, ...], **options: object
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 12, "", "SECRET_REMOTE_DATA")
+
+    monkeypatch.setattr(subprocess, "run", fail)
+    with pytest.raises(RsyncRetrievalError, match="exit code 12") as captured:
+        stager.fetch(
+            FetchRequest(_workspace(), ("results/**",), tmp_path / "retrieved")
+        )
+    assert "SECRET_REMOTE_DATA" not in str(captured.value)
+
+
+def test_rsync_fetch_requires_host_and_valid_semantic_workspace(tmp_path: Path) -> None:
+    with pytest.raises(RsyncRetrievalError, match="requires a host"):
+        RsyncStager(RecordingTransport(deque())).fetch(
+            FetchRequest(_workspace(), ("results/**",), tmp_path / "retrieved")
+        )
+    workspace = _workspace()
+    malformed = replace(workspace, outputs=workspace.root.parent / "escaped")
+    with pytest.raises(RsyncRetrievalError, match="workspace"):
+        RsyncStager(RecordingTransport(deque()), host="cluster").fetch(
+            FetchRequest(malformed, ("results/**",), tmp_path / "retrieved")
+        )

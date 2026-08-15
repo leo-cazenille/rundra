@@ -527,14 +527,25 @@ def _fetched_task_artifacts(
     artifacts: tuple[Artifact, ...],
     unit: ExecutionUnit,
 ) -> tuple[Artifact, ...]:
-    if any(artifact.kind is not ArtifactKind.RAW_RESULT for artifact in artifacts):
-        raise ValueError("Stager fetch returned a non-result artifact")
+    allowed = {
+        ArtifactKind.RAW_RESULT,
+        ArtifactKind.STDOUT,
+        ArtifactKind.STDERR,
+        ArtifactKind.SCHEDULER_METADATA,
+    }
+    if any(artifact.kind not in allowed for artifact in artifacts):
+        raise ValueError("Stager fetch returned an unsupported artifact")
     if any(
         artifact.task_id is not None and artifact.task_id != unit.task_id
         for artifact in artifacts
     ):
         raise ValueError("Stager fetch returned an artifact for another Task")
-    return tuple(replace(artifact, task_id=unit.task_id) for artifact in artifacts)
+    return tuple(
+        replace(artifact, task_id=unit.task_id)
+        if artifact.kind is ArtifactKind.RAW_RESULT and artifact.task_id is None
+        else artifact
+        for artifact in artifacts
+    )
 
 
 def _completed_record(

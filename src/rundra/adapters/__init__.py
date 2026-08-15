@@ -22,6 +22,7 @@ from rundra.adapters.remote import (
     RemoteWorkspaceError,
 )
 from rundra.adapters.rsync import (
+    RsyncRetrievalError,
     RsyncStager,
     RsyncStagerError,
     RsyncUnavailableError,
@@ -53,6 +54,7 @@ __all__ = [
     "RemoteWorkspaceError",
     "RsyncStager",
     "RsyncStagerError",
+    "RsyncRetrievalError",
     "RsyncUnavailableError",
     "RsyncUploadError",
     "SSHCommandError",

@@ -28,10 +28,12 @@ M2.2 centralizes the unavoidable remote-shell serialization boundary. Literal
 arguments, environment values, and working directories are POSIX-shell quoted;
 diagnostics expose only structurally redacted command summaries.
 
-M2.3–M2.4 add validated isolated remote workspace allocation and rsync upload
+M2.3–M2.5 add validated isolated remote workspace allocation and rsync upload
 of live working trees plus exact effective configuration. Successfully uploaded
-source/input snapshots are sealed read-only. Remote result retrieval and CLI
-execution are still pending.
+source/input snapshots are sealed read-only. Independent idempotent rsync
+retrieval collects output, logs, and metadata while keeping transfer state
+separate from computation state. Remote lifecycle CLI execution is still
+pending on the Slurm milestone.
 
 M1E adds strict project launch profiles, optional user defaults, deterministic
 resolution precedence, concise `run`/`plan` commands, and generated seeds that

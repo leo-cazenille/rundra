@@ -30,7 +30,7 @@ class RemoteWorkspaceAllocator:
         runs = root / "runs"
         run_root = runs / str(run_id)
         workspace = _workspace(run_root)
-        _validate_derived_paths(root, workspace)
+        validate_remote_workspace(workspace, configured_root=root)
 
         self._checked_run(
             Command(("mkdir", "-p", "--", str(runs))),
@@ -110,7 +110,19 @@ def _workspace(root: PurePosixPath) -> StagedWorkspace:
     )
 
 
-def _validate_derived_paths(root: PurePosixPath, workspace: StagedWorkspace) -> None:
+def validate_remote_workspace(
+    workspace: StagedWorkspace,
+    *,
+    configured_root: PurePath | None = None,
+) -> None:
+    """Reject malformed or escaping semantic remote workspace paths."""
+    if type(workspace) is not StagedWorkspace:
+        raise TypeError("Remote workspace must be a StagedWorkspace")
+    run_root = _safe_remote_root(workspace.root)
+    root = (
+        _safe_remote_root(configured_root) if configured_root is not None else run_root
+    )
+    expected = _workspace(run_root)
     for name in (
         "root",
         "source",
@@ -125,4 +137,8 @@ def _validate_derived_paths(root: PurePosixPath, workspace: StagedWorkspace) -> 
         if not path.is_relative_to(root) or ".." in path.parts:
             raise RemoteWorkspaceError(
                 f"Derived remote workspace path escapes its root: {name}"
+            )
+        if getattr(expected, name) != path:
+            raise RemoteWorkspaceError(
+                f"Remote workspace has an unexpected semantic path: {name}"
             )

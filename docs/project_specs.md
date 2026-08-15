@@ -2101,7 +2101,23 @@ cannot be reused or reported as a completed immutable snapshot. Transfer
 diagnostics contain the Run ID and exit category, not rsync output or source and
 configuration values.
 
-Result retrieval should remain possible separately from submission.
+Result retrieval remains possible separately from submission. A newly
+constructed rsync stager with the target host can validate an existing semantic
+workspace and fetch its `output`, `logs`, and `metadata` trees into distinct
+subdirectories of an explicit local destination. Output include patterns remain
+relative and are passed as separate rsync filter arguments.
+
+Retrieval uses protected arguments, refuses symlinks, and enables rsync delayed
+updates so completed files replace their destinations atomically. Repeating the
+same request safely updates the same paths. Only after all three transfers
+succeed are regular files scanned into raw-result, stdout/stderr, and scheduler
+metadata artifacts with measured sizes. Nonzero or interrupted transfers do not
+return a successful `FetchResult` and their diagnostics omit remote output.
+
+Portable computation and retrieval states remain independent. A transfer
+failure moves retrieval from `PENDING` to `FAILED` without changing a completed
+Run or Task execution state, exit code, or scheduler identity; a later explicit
+fetch may transition `FAILED` back through `PENDING` to `SUCCEEDED`.
 
 ---
 
