@@ -26,6 +26,7 @@ from rundra.domain.states import (
 from rundra.orchestration.models import SLURM_ARRAY, ExecutionPlan, ExecutionUnit
 from rundra.orchestration.planner import create_plan
 from rundra.persistence.base import RunStore
+from rundra.persistence.errors import RunStoreError
 from rundra.ports import (
     ArrayScheduler,
     BindMount,
@@ -126,7 +127,7 @@ class SchedulerLifecycleService:
             ),
             self._clock(),
         )
-        self._store.update(updated)
+        self._store.update(updated, expected=record)
         return updated
 
     def wait(
@@ -147,6 +148,8 @@ class SchedulerLifecycleService:
         while current.run.state not in _TERMINAL_STATES:
             try:
                 current = self.refresh(current)
+            except RunStoreError:
+                raise
             except Exception as error:
                 raise OrchestrationError(
                     code="SCHEDULER_QUERY_FAILED",
@@ -197,13 +200,15 @@ class SchedulerLifecycleService:
             references = tuple(reference for _, reference in active)
             observations = self._scheduler.cancel(references)
             _validate_observations(observations, references)
+        except RunStoreError:
+            raise
         except Exception as error:
             raise OrchestrationError(
                 code="SCHEDULER_CANCEL_FAILED",
                 message=f"Run {record.run.id} cancellation failed: {error}",
                 run_id=record.run.id,
             ) from error
-        current = _observed_records(
+        updated = _observed_records(
             current,
             tuple(
                 (task_id, observation)
@@ -211,8 +216,8 @@ class SchedulerLifecycleService:
             ),
             self._clock(),
         )
-        self._store.update(current)
-        return self.wait(current, timeout=timeout, poll_interval=poll_interval)
+        self._store.update(updated, expected=current)
+        return self.wait(updated, timeout=timeout, poll_interval=poll_interval)
 
     def _cancel_single(
         self,
@@ -233,7 +238,7 @@ class SchedulerLifecycleService:
                 run_id=record.run.id,
             ) from error
         current = _observed_record(record, observation, self._clock())
-        self._store.update(current)
+        self._store.update(current, expected=record)
         return self.wait(current, timeout=timeout, poll_interval=poll_interval)
 
 
@@ -369,8 +374,9 @@ class OrchestrationService:
                 run_id=run_id,
             ) from error
 
-        record = _with_execution_state(record, ExecutionState.STAGING)
-        self.store.update(record)
+        updated = _with_execution_state(record, ExecutionState.STAGING)
+        self.store.update(updated, expected=record)
+        record = updated
         try:
             workspace = self._stager.stage(
                 StageRequest(
@@ -389,8 +395,9 @@ class OrchestrationService:
                 message=f"Run {run_id} staging failed: {error}",
                 run_id=run_id,
             ) from error
-        record = replace(record, artifacts=workspace.artifacts)
-        self.store.update(record)
+        updated = replace(record, artifacts=workspace.artifacts)
+        self.store.update(updated, expected=record)
+        record = updated
 
         try:
             scheduled_units = tuple(
@@ -449,13 +456,14 @@ class OrchestrationService:
                 run_id=run_id,
             ) from error
 
-        record = replace(
+        updated = replace(
             _with_execution_state(record, ExecutionState.SUBMITTED),
             scheduler_job_ids=(submission.reference.native_id,),
             task_scheduler_ids=submission.task_native_ids,
             submitted_at=submission_started_at,
         )
-        self.store.update(record)
+        self.store.update(updated, expected=record)
+        record = updated
 
         if not wait:
             return RunExecutionResult(record, workspace)
@@ -511,16 +519,18 @@ class OrchestrationService:
                     ),
                     run_id=run_id,
                 ) from error
-            record = replace(record, artifacts=(*record.artifacts, *log_artifacts))
-            self.store.update(record)
-        record = replace(
+            updated = replace(record, artifacts=(*record.artifacts, *log_artifacts))
+            self.store.update(updated, expected=record)
+            record = updated
+        updated = replace(
             record,
             run=replace(record.run, retrieval_state=RetrievalState.PENDING),
             task_retrieval_states={
                 task.id: RetrievalState.PENDING for task in record.run.tasks
             },
         )
-        self.store.update(record)
+        self.store.update(updated, expected=record)
+        record = updated
         try:
             fetched = self._stager.fetch(
                 FetchRequest(
@@ -538,14 +548,14 @@ class OrchestrationService:
                     task.id: RetrievalState.FAILED for task in record.run.tasks
                 },
             )
-            self.store.update(failed)
+            self.store.update(failed, expected=record)
             raise OrchestrationError(
                 code="RESULT_RETRIEVAL_FAILED",
                 message=f"Run {run_id} result retrieval failed: {error}",
                 run_id=run_id,
             ) from error
 
-        record = replace(
+        updated = replace(
             record,
             run=replace(record.run, retrieval_state=RetrievalState.SUCCEEDED),
             task_retrieval_states={
@@ -553,8 +563,8 @@ class OrchestrationService:
             },
             artifacts=(*record.artifacts, *fetched_artifacts),
         )
-        self.store.update(record)
-        return RunExecutionResult(record, workspace)
+        self.store.update(updated, expected=record)
+        return RunExecutionResult(updated, workspace)
 
     @staticmethod
     def _validate_request(request: RunExecutionRequest) -> None:
@@ -640,7 +650,8 @@ class OrchestrationService:
                 failed,
                 completed_at=self._clock(),
                 native_state=native_state,
-            )
+            ),
+            expected=record,
         )
 
     def _record_retrieval_failure(self, record: RunRecord) -> None:
@@ -651,7 +662,7 @@ class OrchestrationService:
                 task.id: RetrievalState.PENDING for task in record.run.tasks
             },
         )
-        self.store.update(pending)
+        self.store.update(pending, expected=record)
         self.store.update(
             replace(
                 pending,
@@ -659,7 +670,8 @@ class OrchestrationService:
                 task_retrieval_states={
                     task.id: RetrievalState.FAILED for task in pending.run.tasks
                 },
-            )
+            ),
+            expected=pending,
         )
 
 

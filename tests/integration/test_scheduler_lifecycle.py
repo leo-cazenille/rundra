@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
@@ -12,6 +13,7 @@ from rundra.cli.operations import (
     LogsValue,
     cancel_operation,
     logs_operation,
+    status_operation,
 )
 from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import (
@@ -317,6 +319,84 @@ def test_cancel_reconciles_a_race_and_is_idempotent_after_terminal(tmp_path) -> 
     assert repeated == cancelled
     assert scheduler.cancel_calls == 1
     assert scheduler.query_calls == 1
+
+
+def test_concurrent_status_refreshes_converge_without_record_corruption(
+    tmp_path: Path,
+) -> None:
+    store_path = tmp_path / "records"
+    JsonRunStore(store_path).create(_record())
+
+    class TerminalScheduler:
+        def submit(self, group: SchedulerGroup) -> SchedulerSubmission:
+            raise AssertionError("status must not submit")
+
+        def query(
+            self, references: tuple[SchedulerReference, ...]
+        ) -> tuple[SchedulerObservation, ...]:
+            assert references == (_REFERENCE,)
+            return (
+                _observation(
+                    ExecutionState.SUCCEEDED,
+                    "COMPLETED",
+                    exit_code=0,
+                ),
+            )
+
+        def cancel(
+            self, references: tuple[SchedulerReference, ...]
+        ) -> tuple[SchedulerObservation, ...]:
+            raise AssertionError("status must not cancel")
+
+    scheduler = TerminalScheduler()
+
+    def refresh() -> bool:
+        return status_operation(
+            str(_RUN_ID), JsonRunStore(store_path), scheduler=scheduler
+        ).ok
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        outcomes = tuple(executor.map(lambda _index: refresh(), range(32)))
+
+    assert all(outcomes)
+    completed = JsonRunStore(store_path).load(_RUN_ID)
+    assert completed.run.state is ExecutionState.SUCCEEDED
+    assert completed.task_exit_codes == {_TASK_ID: 0}
+
+
+def test_concurrent_cancel_requests_are_idempotent(tmp_path: Path) -> None:
+    store_path = tmp_path / "records"
+    JsonRunStore(store_path).create(_record())
+
+    class TerminalCancellationScheduler:
+        def submit(self, group: SchedulerGroup) -> SchedulerSubmission:
+            raise AssertionError("cancel must not submit")
+
+        def query(
+            self, references: tuple[SchedulerReference, ...]
+        ) -> tuple[SchedulerObservation, ...]:
+            raise AssertionError("terminal cancellation must not poll")
+
+        def cancel(
+            self, references: tuple[SchedulerReference, ...]
+        ) -> tuple[SchedulerObservation, ...]:
+            assert references == (_REFERENCE,)
+            return (_observation(ExecutionState.CANCELLED, "CANCELLED"),)
+
+    scheduler = TerminalCancellationScheduler()
+
+    def cancel() -> bool:
+        return cancel_operation(
+            str(_RUN_ID), JsonRunStore(store_path), scheduler=scheduler
+        ).ok
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        outcomes = tuple(executor.map(lambda _index: cancel(), range(32)))
+
+    assert all(outcomes)
+    cancelled = JsonRunStore(store_path).load(_RUN_ID)
+    assert cancelled.run.state is ExecutionState.CANCELLED
+    assert cancelled.native_state == "CANCELLED"
 
 
 def test_array_cancel_reconciles_first_and_cancels_only_active_elements(

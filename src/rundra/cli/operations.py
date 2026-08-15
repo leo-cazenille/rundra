@@ -54,7 +54,12 @@ from rundra.orchestration.service import (
     RunExecutionRequest,
     SchedulerLifecycleService,
 )
-from rundra.persistence import RunNotFoundError, RunStore, RunStoreError
+from rundra.persistence import (
+    RunNotFoundError,
+    RunStore,
+    RunStoreConflictError,
+    RunStoreError,
+)
 from rundra.ports import (
     ContainerRuntime,
     FetchRequest,
@@ -870,6 +875,10 @@ def status_operation(
             record = SchedulerLifecycleService(
                 store=store, scheduler=active_scheduler
             ).refresh(record)
+        except RunStoreError as store_error:
+            return OperationResult.failure(
+                "status", _run_store_operation_error(store_error, record.run.id)
+            )
         except (OrchestrationError, RuntimeError, TypeError, ValueError) as error:
             return OperationResult.failure(
                 "status",
@@ -917,7 +926,7 @@ def cancel_operation(
         )
     except RunStoreError as store_error:
         return OperationResult.failure(
-            "cancel", OperationError("RUN_STORE_ERROR", str(store_error))
+            "cancel", _run_store_operation_error(store_error, record.run.id)
         )
     return OperationResult.success("cancel", CancelValue(_status_value(record)))
 
@@ -967,6 +976,10 @@ def logs_operation(
             record = SchedulerLifecycleService(
                 store=store, scheduler=active_scheduler
             ).refresh(record)
+        except RunStoreError as store_error:
+            return OperationResult.failure(
+                "logs", _run_store_operation_error(store_error, record.run.id)
+            )
         except (OrchestrationError, RuntimeError, TypeError, ValueError) as error:
             return OperationResult.failure(
                 "logs",
@@ -1044,7 +1057,7 @@ def fetch_operation(
     if transitioning:
         for task_id in transitioning:
             retrieval_states[task_id] = RetrievalState.PENDING
-        record = replace(
+        pending = replace(
             record,
             run=replace(
                 record.run,
@@ -1055,11 +1068,12 @@ def fetch_operation(
             task_retrieval_states=retrieval_states,
         )
         try:
-            store.update(record)
-        except RunStoreError as error:
+            store.update(pending, expected=record)
+        except RunStoreError as store_error:
             return OperationResult.failure(
-                "fetch", OperationError("RUN_STORE_ERROR", str(error))
+                "fetch", _run_store_operation_error(store_error, record.run.id)
             )
+        record = pending
     workspace = _record_workspace(record)
     try:
         active_stager = stager or _record_stager(record)
@@ -1075,18 +1089,17 @@ def fetch_operation(
             for task_id in transitioning:
                 retrieval_states[task_id] = RetrievalState.FAILED
             try:
-                store.update(
-                    replace(
-                        record,
-                        run=replace(
-                            record.run,
-                            retrieval_state=aggregate_retrieval_state(
-                                tuple(retrieval_states.values())
-                            ),
+                failed = replace(
+                    record,
+                    run=replace(
+                        record.run,
+                        retrieval_state=aggregate_retrieval_state(
+                            tuple(retrieval_states.values())
                         ),
-                        task_retrieval_states=retrieval_states,
-                    )
+                    ),
+                    task_retrieval_states=retrieval_states,
                 )
+                store.update(failed, expected=record)
             except RunStoreError:
                 pass
         return OperationResult.failure(
@@ -1104,18 +1117,17 @@ def fetch_operation(
             for task_id in transitioning:
                 retrieval_states[task_id] = RetrievalState.FAILED
             try:
-                store.update(
-                    replace(
-                        record,
-                        run=replace(
-                            record.run,
-                            retrieval_state=aggregate_retrieval_state(
-                                tuple(retrieval_states.values())
-                            ),
+                failed = replace(
+                    record,
+                    run=replace(
+                        record.run,
+                        retrieval_state=aggregate_retrieval_state(
+                            tuple(retrieval_states.values())
                         ),
-                        task_retrieval_states=retrieval_states,
-                    )
+                    ),
+                    task_retrieval_states=retrieval_states,
                 )
+                store.update(failed, expected=record)
             except RunStoreError:
                 pass
         return OperationResult.failure(
@@ -1137,10 +1149,10 @@ def fetch_operation(
         artifacts=merged,
     )
     try:
-        store.update(succeeded)
+        store.update(succeeded, expected=record)
     except RunStoreError as error:
         return OperationResult.failure(
-            "fetch", OperationError("RUN_STORE_ERROR", str(error))
+            "fetch", _run_store_operation_error(error, record.run.id)
         )
     return OperationResult.success(
         "fetch",
@@ -1162,6 +1174,16 @@ def _load_record(
         return None, OperationError("RUN_NOT_FOUND", str(error), {"run_id": value})
     except RunStoreError as error:
         return None, OperationError("RUN_STORE_ERROR", str(error), {"run_id": value})
+
+
+def _run_store_operation_error(error: RunStoreError, run_id: RunId) -> OperationError:
+    if isinstance(error, RunStoreConflictError):
+        return OperationError(
+            "RUN_STORE_CONFLICT",
+            f"Run {run_id} changed concurrently; retry the operation",
+            {"run_id": str(run_id)},
+        )
+    return OperationError("RUN_STORE_ERROR", str(error), {"run_id": str(run_id)})
 
 
 def _status_value(record: RunRecord) -> StatusValue:

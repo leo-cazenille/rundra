@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
@@ -241,6 +242,37 @@ def test_fetch_is_idempotent_and_preserves_successful_retrieval_state(
         store.load(first.value.run_id).run.retrieval_state is RetrievalState.SUCCEEDED
     )
     assert result_document(second)["fetch"]["artifacts"][0]["kind"] == "raw_result"
+
+
+def test_concurrent_fetches_are_idempotent_and_preserve_one_artifact(
+    tmp_path: Path,
+) -> None:
+    _, run_id = _stored_record(tmp_path)
+    store_path = tmp_path / "records"
+    destination = tmp_path / "retrieved"
+
+    def fetch() -> bool:
+        return fetch_operation(
+            run_id,
+            JsonRunStore(store_path),
+            destination,
+        ).ok
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        outcomes = tuple(executor.map(lambda _index: fetch(), range(32)))
+
+    assert all(outcomes)
+    persisted = JsonRunStore(store_path).list()[0]
+    result_artifacts = tuple(
+        artifact
+        for artifact in persisted.artifacts
+        if artifact.kind is ArtifactKind.RAW_RESULT
+        and artifact.path == destination / "results/result.json"
+    )
+    assert len(result_artifacts) == 1
+    assert (destination / "results/result.json").read_text(encoding="utf-8") == (
+        '{"value": 17}\n'
+    )
 
 
 def test_partial_array_fetch_tracks_tasks_and_becomes_complete_incrementally(
