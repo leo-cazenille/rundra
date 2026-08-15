@@ -53,6 +53,7 @@ _RECORD_FIELDS = frozenset(
         "task_array_mapping",
         "task_scheduler_ids",
         "task_native_states",
+        "task_retrieval_states",
         "task_exit_codes",
         "artifacts",
     }
@@ -93,6 +94,12 @@ def record_to_dict(record: RunRecord) -> JsonObject:
         ],
         "task_scheduler_ids": _task_string_mapping(record.task_scheduler_ids),
         "task_native_states": _task_string_mapping(record.task_native_states),
+        "task_retrieval_states": {
+            str(task_id): state.value
+            for task_id, state in sorted(
+                record.task_retrieval_states.items(), key=lambda item: item[0].value
+            )
+        },
         "task_exit_codes": {
             str(task_id): exit_code
             for task_id, exit_code in sorted(
@@ -114,6 +121,7 @@ def record_from_dict(value: object) -> RunRecord:
     document.setdefault("task_array_mapping", [])
     document.setdefault("task_scheduler_ids", {})
     document.setdefault("task_native_states", {})
+    document.setdefault("task_retrieval_states", {})
     _exact_fields(document, _RECORD_FIELDS, path="record")
     run = _parse_run(document["run"], path="run")
     try:
@@ -163,6 +171,9 @@ def record_from_dict(value: object) -> RunRecord:
             ),
             task_native_states=_parse_task_string_mapping(
                 document["task_native_states"], path="task_native_states"
+            ),
+            task_retrieval_states=_parse_task_retrieval_states(
+                document["task_retrieval_states"]
             ),
             task_exit_codes=_parse_exit_codes(document["task_exit_codes"]),
             artifacts=_parse_artifacts(document["artifacts"]),
@@ -593,6 +604,20 @@ def _parse_task_string_mapping(value: object, *, path: str) -> dict[TaskId, str]
         except (TypeError, ValueError) as error:
             _invalid(f"{path}.{task_id}", error)
         result[parsed_task_id] = _string(native_value, path=f"{path}.{task_id}")
+    return result
+
+
+def _parse_task_retrieval_states(value: object) -> dict[TaskId, RetrievalState]:
+    path = "task_retrieval_states"
+    document = _object(value, path=path)
+    result: dict[TaskId, RetrievalState] = {}
+    for task_id, state in document.items():
+        try:
+            parsed_task_id = TaskId(task_id)
+            parsed_state = RetrievalState(_string(state, path=f"{path}.{task_id}"))
+        except (TypeError, ValueError) as error:
+            _invalid(f"{path}.{task_id}", error)
+        result[parsed_task_id] = parsed_state
     return result
 
 

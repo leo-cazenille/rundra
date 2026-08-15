@@ -161,6 +161,10 @@ def test_run_record_round_trips_ordered_multi_task_identity_and_artifacts() -> N
         run=replace(record.run, tasks=(first, second)),
         task_scheduler_ids={first.id: "123_0", second.id: "123_1"},
         task_native_states={first.id: "COMPLETED", second.id: "FAILED"},
+        task_retrieval_states={
+            first.id: RetrievalState.SUCCEEDED,
+            second.id: RetrievalState.FAILED,
+        },
         task_exit_codes={first.id: 0, second.id: 7},
         artifacts=(
             Artifact(
@@ -201,6 +205,10 @@ def test_run_record_round_trips_ordered_multi_task_identity_and_artifacts() -> N
     }
     assert document["task_native_states"] == {
         "task_000000": "COMPLETED",
+        "task_000001": "FAILED",
+    }
+    assert document["task_retrieval_states"] == {
+        "task_000000": "SUCCEEDED",
         "task_000001": "FAILED",
     }
     assert [artifact["task_id"] for artifact in document["artifacts"]] == [
@@ -259,6 +267,15 @@ def test_run_record_accepts_pre_m54_version_one_document() -> None:
 
     assert loaded.task_scheduler_ids == {}
     assert loaded.task_native_states == {}
+
+
+def test_run_record_accepts_pre_m55_version_one_document() -> None:
+    document = record_to_dict(_record())
+    del document["task_retrieval_states"]
+
+    loaded = record_from_dict(document)
+
+    assert loaded.task_retrieval_states == {}
 
 
 def test_run_record_rejects_array_mapping_identity_mismatches() -> None:

@@ -138,6 +138,9 @@
   "task_native_states": {
     "task_000000": "EXITED"
   },
+  "task_retrieval_states": {
+    "task_000000": "SUCCEEDED"
+  },
   "task_scheduler_ids": {
     "task_000000": "local-0123456789abcdef0123456789abcdef"
   },

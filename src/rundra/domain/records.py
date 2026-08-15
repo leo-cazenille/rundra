@@ -9,6 +9,7 @@ from types import MappingProxyType
 
 from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import Artifact, ExperimentSpec, NativeValue, Run, TaskId
+from rundra.domain.states import RetrievalState
 
 
 def _freeze_strings(value: object, *, field_name: str) -> tuple[str, ...]:
@@ -66,6 +67,7 @@ class RunRecord:
     task_array_mapping: tuple[ArrayTaskMapping, ...] = ()
     task_scheduler_ids: Mapping[TaskId, str] = field(default_factory=dict)
     task_native_states: Mapping[TaskId, str] = field(default_factory=dict)
+    task_retrieval_states: Mapping[TaskId, RetrievalState] = field(default_factory=dict)
     task_exit_codes: Mapping[TaskId, int] = field(default_factory=dict)
     artifacts: tuple[Artifact, ...] = ()
 
@@ -185,6 +187,23 @@ class RunRecord:
                         "RunRecord task_scheduler_ids must contain unique identities"
                     )
             object.__setattr__(self, field_name, MappingProxyType(mapping))
+        if not isinstance(self.task_retrieval_states, Mapping):
+            raise TypeError("RunRecord task_retrieval_states must be a mapping")
+        retrieval_states = dict(self.task_retrieval_states)
+        if any(
+            type(task_id) is not TaskId or type(state) is not RetrievalState
+            for task_id, state in retrieval_states.items()
+        ):
+            raise TypeError(
+                "RunRecord task_retrieval_states must map TaskIds to RetrievalStates"
+            )
+        if retrieval_states and set(retrieval_states) != task_ids:
+            raise ValueError("RunRecord task_retrieval_states must describe every Task")
+        object.__setattr__(
+            self,
+            "task_retrieval_states",
+            MappingProxyType(retrieval_states),
+        )
         if not isinstance(self.task_exit_codes, Mapping):
             raise TypeError("RunRecord task_exit_codes must be a mapping")
         exit_codes = dict(self.task_exit_codes)

@@ -178,6 +178,14 @@ class JsonRunStore:
             previous_tasks = {task.id: task for task in previous.run.tasks}
             for task in current.run.tasks:
                 validate_execution_transition(previous_tasks[task.id].state, task.state)
+            previous_retrieval = previous.task_retrieval_states or {
+                task.id: previous.run.retrieval_state for task in previous.run.tasks
+            }
+            current_retrieval = current.task_retrieval_states or {
+                task.id: current.run.retrieval_state for task in current.run.tasks
+            }
+            for task_id, state in current_retrieval.items():
+                validate_retrieval_transition(previous_retrieval[task_id], state)
         except ValueError as error:
             raise RunStoreError(str(error)) from error
 

@@ -516,6 +516,9 @@ class OrchestrationService:
         record = replace(
             record,
             run=replace(record.run, retrieval_state=RetrievalState.PENDING),
+            task_retrieval_states={
+                task.id: RetrievalState.PENDING for task in record.run.tasks
+            },
         )
         self.store.update(record)
         try:
@@ -531,6 +534,9 @@ class OrchestrationService:
             failed = replace(
                 record,
                 run=replace(record.run, retrieval_state=RetrievalState.FAILED),
+                task_retrieval_states={
+                    task.id: RetrievalState.FAILED for task in record.run.tasks
+                },
             )
             self.store.update(failed)
             raise OrchestrationError(
@@ -542,6 +548,9 @@ class OrchestrationService:
         record = replace(
             record,
             run=replace(record.run, retrieval_state=RetrievalState.SUCCEEDED),
+            task_retrieval_states={
+                task.id: RetrievalState.SUCCEEDED for task in record.run.tasks
+            },
             artifacts=(*record.artifacts, *fetched_artifacts),
         )
         self.store.update(record)
@@ -618,6 +627,10 @@ class OrchestrationService:
             git_dirty=provenance.dirty,
             git_diff=provenance.diff,
             task_array_mapping=request.plan.array_mapping,
+            task_retrieval_states={
+                unit.task_id: RetrievalState.NOT_REQUESTED
+                for unit in request.plan.units
+            },
         )
 
     def _fail_before_completion(self, record: RunRecord, native_state: str) -> None:
@@ -634,12 +647,18 @@ class OrchestrationService:
         pending = replace(
             record,
             run=replace(record.run, retrieval_state=RetrievalState.PENDING),
+            task_retrieval_states={
+                task.id: RetrievalState.PENDING for task in record.run.tasks
+            },
         )
         self.store.update(pending)
         self.store.update(
             replace(
                 pending,
                 run=replace(pending.run, retrieval_state=RetrievalState.FAILED),
+                task_retrieval_states={
+                    task.id: RetrievalState.FAILED for task in pending.run.tasks
+                },
             )
         )
 

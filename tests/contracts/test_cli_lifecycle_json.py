@@ -98,6 +98,7 @@ _SUBMITTED_RECORD = replace(
     scheduler_metadata={},
     task_scheduler_ids={_RECORD.run.tasks[0].id: "18372"},
     task_native_states={},
+    task_retrieval_states={_RECORD.run.tasks[0].id: RetrievalState.NOT_REQUESTED},
     task_exit_codes={},
     artifacts=_RECORD.artifacts[:2],
 )
