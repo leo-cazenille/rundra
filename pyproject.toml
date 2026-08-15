@@ -34,6 +34,7 @@ markers = [
   "shoal_cpu: resource-consuming Shoal tests requiring a separate CPU opt-in",
   "shoal_gpu: resource-consuming Shoal tests requiring a separate GPU opt-in",
   "shoal_failure: bounded Shoal M4.5 tests requiring a separate failure opt-in",
+  "shoal_array: bounded Shoal M5.6 array test requiring a separate array opt-in",
 ]
 
 [tool.ruff]

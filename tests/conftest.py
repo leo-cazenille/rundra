@@ -28,6 +28,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="enable bounded Shoal M4.5 failure scenarios in addition to preflight",
     )
+    parser.addoption(
+        "--run-shoal-array-test",
+        action="store_true",
+        default=False,
+        help="enable the bounded Shoal M5.6 array test in addition to preflight",
+    )
 
 
 def pytest_collection_modifyitems(
@@ -38,6 +44,7 @@ def pytest_collection_modifyitems(
     run_cpu = bool(config.getoption("--run-shoal-cpu-test"))
     run_gpu = bool(config.getoption("--run-shoal-gpu-test"))
     run_failures = bool(config.getoption("--run-shoal-failure-tests"))
+    run_array = bool(config.getoption("--run-shoal-array-test"))
     skip_system = pytest.mark.skip(
         reason="requires the explicit --run-shoal-system-tests opt-in"
     )
@@ -50,8 +57,13 @@ def pytest_collection_modifyitems(
     skip_failures = pytest.mark.skip(
         reason="requires both Shoal system and M4.5 failure-scenario opt-ins"
     )
+    skip_array = pytest.mark.skip(
+        reason="requires both Shoal system and M5.6 array submission opt-ins"
+    )
     for item in items:
-        if "shoal_failure" in item.keywords and not (run_system and run_failures):
+        if "shoal_array" in item.keywords and not (run_system and run_array):
+            item.add_marker(skip_array)
+        elif "shoal_failure" in item.keywords and not (run_system and run_failures):
             item.add_marker(skip_failures)
         elif "shoal_gpu" in item.keywords and not (run_system and run_gpu):
             item.add_marker(skip_gpu)
