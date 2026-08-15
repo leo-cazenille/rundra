@@ -2131,7 +2131,21 @@ retrieval state. Partial success remains globally `PENDING`, any attempted
 failure is `FAILED`, failed Tasks may transition through `PENDING` on retry,
 and only all-Task success is globally `SUCCEEDED`. Public status JSON preserves
 aggregate counts and adds ordered per-Task seed, execution/retrieval, native,
-and exit details. M5.6 remains responsible for opt-in real-cluster proof.
+and exit details.
+
+M5.6 completes the replicated-experiment acceptance gate. Default integration
+coverage repeats the same seed set through the complete fake Slurm lifecycle
+and proves identical Task IDs, configs, explicit mapping, generated dispatch
+manifest, exits, and retrieval outcomes. The separately gated Shoal proof uses
+three bounded CPU Tasks in one array, including one controlled non-zero exit,
+and verifies every Task's mapping, state, exit, logs, raw result, and retrieval.
+
+Slurm accounting is queried with the display `JobID`, not `JobIDRaw`. For array
+elements the former preserves the stable `array-root_index` alias used by
+submission, logs, and Rundra's Task mapping. Some Slurm installations assign a
+different raw allocation ID to each element, so `JobIDRaw` cannot be used as a
+portable array-element correlation key. This remains an adapter detail; core
+Task identity and RunRecord schemas are unchanged.
 
 ---
 

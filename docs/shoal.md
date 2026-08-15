@@ -312,3 +312,48 @@ All seven authorized Shoal checks passed across bounded M4.6 invocations: the
 target/resource harness, pure plan, non-submitting preflight, CPU Run, GPU Run,
 deliberate experiment failure, and safe non-submitting staging failure. Ordinary
 `uv run pytest` continues to skip all seven checks and requires no cluster.
+
+## M5.6 bounded replicated-array proof
+
+The checked `examples/shoal/array` experiment requests one node, Task, and CPU
+per element, no GPU, 1 GiB, and five minutes. Seeds 40 through 42 form one
+three-element Slurm array. Every element writes seed/config evidence; seed 41
+then deliberately exits 23 so one Run contains two successes and one failure.
+The submission has a separate opt-in:
+
+```bash
+RUNDRA_SHOAL_TARGETS_FILE=/tmp/rundra-shoal-targets.yaml \
+RUNDRA_SHOAL_CPU_IMAGE=/absolute/path/to/cpu-image.sif \
+  uv run pytest tests/system/test_shoal_array.py \
+    -m 'shoal_system and shoal_array' \
+    --run-shoal-system-tests \
+    --run-shoal-array-test \
+    -vv
+```
+
+The harness performs a pure plan and complete remote preflight before it
+submits anything. It requires the exact stable mapping `task_000000/40/0`,
+`task_000001/41/1`, and `task_000002/42/2`, one numeric array root, isolated
+results, Task-tagged artifacts, terminal exits `0/23/0`, and per-Task logs. It
+also invokes `status` and `logs` through fresh CLI processes using only the
+durable local record and Run ID. Ordinary tests and the general Shoal opt-in do
+not submit this array.
+
+### Recorded M5.6 observation
+
+On 2026-08-16, the bounded proof passed on `fishvision` in 22.35 seconds as
+array job 54. The durable Run was `FAILED` with native state `MIXED`, while
+retrieval independently succeeded for all three Tasks. Seeds 40 and 42 were
+`COMPLETED` with exit zero; seed 41 was `FAILED` with exit 23. All three exact
+config/seed files and both log streams matched their logical Task IDs.
+
+The first observation exposed a Slurm compatibility issue: this controller's
+`sacct` `JobIDRaw` values were distinct allocation IDs, while its `JobID`
+values retained the submitted `array-root_index` aliases. Rundra now correlates
+on `JobID`; default adapter and lifecycle tests cover that alias form without
+adding a site-specific field to core models.
+
+The system test retains evidence under its exact Run ID. If cleanup is wanted,
+inspect the record first and remove only that Run's configured workspace path
+and its exact array-element scheduler log files; do not recursively clean the
+workspace root.
