@@ -456,7 +456,7 @@ def test_array_script_rejects_non_array_requests() -> None:
         )
 
 
-def test_scheduler_does_not_submit_multi_task_array_during_m53() -> None:
+def test_generic_scheduler_submit_still_rejects_ambiguous_multi_task_groups() -> None:
     transport = ScriptedTransport(deque([]))
     scheduler = SlurmScheduler(transport)
 
@@ -464,6 +464,68 @@ def test_scheduler_does_not_submit_multi_task_array_during_m53() -> None:
         scheduler.submit(_array_request(count=2).group)
 
     assert transport.run_calls == []
+
+
+def test_slurm_scheduler_persists_manifest_and_submits_bounded_array() -> None:
+    transport = ScriptedTransport(deque([]))
+    scheduler = SlurmScheduler(
+        transport,
+        sbatch="/opt/slurm/bin/sbatch",
+        log_directory=PurePosixPath("/remote/run/logs"),
+    )
+    request = _array_request(count=3, max_array_size=3)
+    transport.results.append(_command_result(Command(("unused",)), 0, "123;alpha\n"))
+
+    submission = scheduler.submit_array(request)
+
+    assert submission.reference == SchedulerReference("123")
+    assert submission.task_native_ids == {
+        TaskId.from_ordinal(0): "123_0",
+        TaskId.from_ordinal(1): "123_1",
+        TaskId.from_ordinal(2): "123_2",
+    }
+    command = transport.run_calls[0]
+    assert command.argv[0:2] == ("/bin/sh", "-c")
+    assert command.argv[4] == str(request.manifest_path)
+    assert command.argv[5] == render_slurm_array_manifest(request)
+    assert command.argv[6] == render_sbatch_array_script(
+        request,
+        stdout_path=PurePosixPath("/remote/run/logs/%A_%a.stdout"),
+        stderr_path=PurePosixPath("/remote/run/logs/%A_%a.stderr"),
+    )
+    assert command.argv[7:] == ("/remote/run/logs", "/opt/slurm/bin/sbatch")
+    assert "already exists" in command.argv[2]
+    assert 'chmod 500 "$manifest_tmp"' in command.argv[2]
+
+
+def test_slurm_array_submission_requires_durable_log_paths() -> None:
+    transport = ScriptedTransport(deque([]))
+
+    with pytest.raises(SlurmSubmissionError, match="configured log directory"):
+        SlurmScheduler(transport).submit_array(_array_request(count=2))
+
+    assert transport.run_calls == []
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "stdout", "stderr", "message"),
+    [
+        (73, "", "manifest exists", "exit code 73: manifest exists"),
+        (0, "Submitted batch job 123", "", "invalid parsable"),
+    ],
+)
+def test_slurm_array_submission_normalizes_remote_failures(
+    exit_code: int, stdout: str, stderr: str, message: str
+) -> None:
+    transport = ScriptedTransport(
+        deque([_command_result(Command(("unused",)), exit_code, stdout, stderr)])
+    )
+    scheduler = SlurmScheduler(
+        transport, log_directory=PurePosixPath("/remote/run/logs")
+    )
+
+    with pytest.raises(SlurmSubmissionError, match=message):
+        scheduler.submit_array(_array_request(count=2))
 
 
 def test_render_sbatch_script_translates_portable_and_allowed_native_resources() -> (

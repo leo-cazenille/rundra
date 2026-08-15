@@ -40,6 +40,24 @@ trap 'rm -f "$script"' EXIT HUP INT TERM
 printf '%s' "$1" > "$script"
 "$2" --parsable "$script"
 """
+_SUBMIT_ARRAY_SCRIPT = """\
+set -eu
+manifest=$1
+if [ -e "$manifest" ]; then
+  printf '%s\n' 'Rundra array manifest already exists' >&2
+  exit 73
+fi
+manifest_tmp=$(mktemp "${manifest}.XXXXXX")
+script=$(mktemp "${TMPDIR:-/tmp}/rundra-sbatch.XXXXXX")
+trap 'rm -f "$manifest_tmp" "$script"' EXIT HUP INT TERM
+printf '%s' "$2" > "$manifest_tmp"
+chmod 500 "$manifest_tmp"
+mv -- "$manifest_tmp" "$manifest"
+manifest_tmp=
+mkdir -p -- "$4"
+printf '%s' "$3" > "$script"
+"$5" --parsable "$script"
+"""
 
 
 class SlurmScriptError(ValueError):
@@ -205,6 +223,61 @@ class SlurmScheduler:
         job_id = match.group("job_id")
         reference = SchedulerReference(job_id)
         return SchedulerSubmission(reference, {group.units[0].task_id: job_id})
+
+    def submit_array(self, request: SlurmArrayRequest) -> SchedulerSubmission:
+        """Persist one immutable manifest and submit its bounded Slurm array."""
+        if type(request) is not SlurmArrayRequest:
+            raise TypeError("SlurmScheduler.submit_array requires a SlurmArrayRequest")
+        if self._log_directory is None:
+            raise SlurmSubmissionError(
+                "Slurm array submission requires a configured log directory"
+            )
+        manifest = render_slurm_array_manifest(request)
+        stdout_path, stderr_path = self._log_paths("%A_%a")
+        if stdout_path is None or stderr_path is None:  # pragma: no cover - invariant
+            raise AssertionError("configured Slurm logs must produce paths")
+        script = render_sbatch_array_script(
+            request,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+        )
+        command = Command(
+            (
+                "/bin/sh",
+                "-c",
+                _SUBMIT_ARRAY_SCRIPT,
+                "rundra-slurm-array-submit",
+                str(request.manifest_path),
+                manifest,
+                script,
+                str(self._log_directory),
+                self._sbatch,
+            )
+        )
+        try:
+            result = self._transport.run(command)
+        except Exception as error:
+            raise SlurmSubmissionError(
+                "Could not persist the array manifest and start sbatch submission"
+            ) from error
+        if result.exit_code != 0:
+            detail = result.stderr.strip() or "no scheduler diagnostic"
+            raise SlurmSubmissionError(
+                "Array manifest persistence or sbatch submission failed with "
+                f"exit code {result.exit_code}: {detail}"
+            )
+        output = result.stdout.strip()
+        match = _PARSABLE_SUBMISSION.fullmatch(output)
+        if match is None:
+            raise SlurmSubmissionError("sbatch returned invalid parsable output")
+        job_id = match.group("job_id")
+        return SchedulerSubmission(
+            SchedulerReference(job_id),
+            {
+                item.task_id: f"{job_id}_{item.array_index}"
+                for item in request.mapping
+            },
+        )
 
     def query(
         self, references: tuple[SchedulerReference, ...]
