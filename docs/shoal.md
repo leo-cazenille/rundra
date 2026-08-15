@@ -140,5 +140,30 @@ allocated node, terminal state and timestamps, sealed remote source, normalized
 stdout/stderr, raw result retrieval, and the artifact manifest.
 
 Ordinary system-test opt-in without `--run-shoal-cpu-test` still skips this
-resource-consuming test. A successful M4.3 Run is not claimed until its live
-evidence is recorded below.
+resource-consuming test.
+
+### Recorded M4.3 observation
+
+On 2026-08-15, the first bounded CPU workload completed on `shoal1`, but client
+reconciliation exposed that Shoal has `sacct` installed while Slurm accounting
+storage is disabled. Its scheduler output showed exit code zero, but Rundra
+correctly stopped before claiming terminal state or retrieval. A default-CI
+regression added `scontrol show job -o` as the fallback when `sacct` cannot be
+queried; `sacct` remains primary where accounting is available.
+
+The subsequent end-to-end Run passed in 18.39 seconds. Its durable record
+contained a numeric scheduler reference, allocated node, native start/end
+strings, exit code zero, `COMPLETED`, and computation/retrieval states
+`SUCCEEDED`. The isolated read-only source snapshot executed both a modified
+tracked payload and an untracked payload. The retrieved raw evidence contained
+seed 17 and the exact `label: shoal-cpu` configuration. Git commit, branch,
+dirty flag, and bounded tracked diff were preserved; container digest remained
+explicitly unavailable. `rundr logs` returned the expected separate stdout and
+stderr without manual scheduler inspection.
+
+The test leaves immutable remote evidence under
+`WORKSPACE/runs/RUN_ID` and scheduler logs under the target's managed log
+directory. The exact Run and job identifiers remain in the operator's local
+RunRecord rather than this repository. After evidence is no longer needed,
+inspect that record, verify the Run is terminal, and remove only those exact
+per-Run and per-job paths. Do not recursively clean the target workspace root.

@@ -2355,6 +2355,16 @@ commands, Apptainer and its configured image, requested resources through
 does not allocate a Run, stage source, execute a container, or submit a job.
 Arbitrary remote stderr is excluded from its layer-specific diagnostics.
 
+M4.3 validates the first bounded CPU execution with a second explicit opt-in.
+The system test constructs a pure plan and runs preflight before submission,
+then exercises one synchronous CLI Run from a temporary dirty Git repository.
+It verifies tracked and untracked source execution, exact config/seed, sealed
+remote source, Slurm identity/state/node/timestamps/exit, normalized logs, raw
+result retrieval, artifact manifest, and available Git provenance. Shoal has
+the `sacct` command but disables accounting storage, so Slurm reconciliation
+uses `scontrol show job -o` only when the primary accounting query fails. Native
+timestamp strings are retained without fabricating a site timezone.
+
 Shoal system tests should eventually cover:
 
 - SSH connectivity;

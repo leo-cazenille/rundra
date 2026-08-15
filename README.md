@@ -13,8 +13,8 @@ The project, GitHub repository, Python package, and PyPI distribution are named
 
 M1, M1E, M2, and M3 are complete. M4.1 provides a checked Shoal target
 template and an opt-in system-test harness. M4.2 validates the non-submitting
-plan and real SSH/rsync/Slurm/Apptainer preflight; CPU/GPU execution has not
-started.
+plan and real SSH/rsync/Slurm/Apptainer preflight. M4.3 validates one bounded
+dirty-source CPU Run end to end; GPU execution has not started.
 Rundra has
 portable domain and configuration models,
 deterministic planning, isolated local staging, durable versioned Run records,
