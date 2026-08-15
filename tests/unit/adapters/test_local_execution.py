@@ -86,6 +86,8 @@ def test_local_scheduler_executes_one_unit_and_reports_terminal_observation() ->
     assert observations[0].exit_code == 0
     assert observations[0].result is not None
     assert observations[0].result.stdout == "done\n"
+    assert observations[0].started_at == observations[0].result.started_at
+    assert observations[0].finished_at == observations[0].result.finished_at
     assert scheduler.cancel((submission.reference,)) == observations
 
 

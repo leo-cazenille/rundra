@@ -1,5 +1,5 @@
 from collections import deque
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -129,6 +129,8 @@ def test_scheduler_observation_optionally_carries_a_consistent_command_result() 
     )
 
     assert observation.result == result
+    assert observation.started_at == result.started_at
+    assert observation.finished_at == result.finished_at
     with pytest.raises(ValueError, match="same exit"):
         SchedulerObservation(
             reference,
@@ -143,6 +145,87 @@ def test_scheduler_observation_optionally_carries_a_consistent_command_result() 
             ExecutionState.SUCCEEDED,
             "EXITED",
             result=object(),  # type: ignore[arg-type]
+        )
+
+
+def test_remote_scheduler_observation_normalizes_available_accounting_data() -> None:
+    reference = SchedulerReference("12345")
+    started = datetime(2026, 1, 1, 12, tzinfo=UTC)
+    finished = started + timedelta(minutes=2)
+    supplied_metadata = {"partition": "cpu", "elapsed_seconds": 120}
+
+    observation = SchedulerObservation(
+        reference,
+        ExecutionState.FAILED,
+        "OUT_OF_MEMORY",
+        exit_code=137,
+        metadata=supplied_metadata,
+        started_at=started,
+        finished_at=finished,
+    )
+    supplied_metadata.clear()
+
+    assert observation.reference == reference
+    assert observation.state is ExecutionState.FAILED
+    assert observation.native_state == "OUT_OF_MEMORY"
+    assert observation.exit_code == 137
+    assert observation.metadata == {"partition": "cpu", "elapsed_seconds": 120}
+    assert observation.started_at == started
+    assert observation.finished_at == finished
+
+
+@pytest.mark.parametrize(
+    "observation",
+    [
+        lambda ref, now: SchedulerObservation(ref, ExecutionState.CREATED, "CREATED"),
+        lambda ref, now: SchedulerObservation(
+            ref, ExecutionState.QUEUED, "PENDING", exit_code=0
+        ),
+        lambda ref, now: SchedulerObservation(
+            ref, ExecutionState.RUNNING, "RUNNING", finished_at=now
+        ),
+        lambda ref, now: SchedulerObservation(
+            ref, ExecutionState.SUCCEEDED, "COMPLETED", exit_code=9
+        ),
+        lambda ref, now: SchedulerObservation(
+            ref,
+            ExecutionState.FAILED,
+            "FAILED",
+            started_at=now,
+            finished_at=now - timedelta(seconds=1),
+        ),
+    ],
+)
+def test_scheduler_observation_rejects_inconsistent_states(
+    observation: object,
+) -> None:
+    reference = SchedulerReference("12345")
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+
+    with pytest.raises(ValueError):
+        observation(reference, now)  # type: ignore[operator]
+
+
+def test_scheduler_native_identifiers_and_metadata_are_safe_and_nonempty() -> None:
+    task_id = TaskId.from_ordinal(0)
+    reference = SchedulerReference("12345")
+
+    for value in ("", "   ", "12\x003"):
+        with pytest.raises(ValueError, match="native_id"):
+            SchedulerReference(value)
+    with pytest.raises(ValueError, match="must not be empty"):
+        SchedulerSubmission(reference, {})
+    for value in ("", "   ", "12\x003"):
+        with pytest.raises(ValueError, match="native IDs"):
+            SchedulerSubmission(reference, {task_id: value})
+    with pytest.raises(ValueError, match="native_state"):
+        SchedulerObservation(reference, ExecutionState.UNKNOWN, "   ")
+    with pytest.raises(TypeError, match="metadata"):
+        SchedulerObservation(
+            reference,
+            ExecutionState.UNKNOWN,
+            "UNKNOWN",
+            metadata={"": "value"},
         )
 
 

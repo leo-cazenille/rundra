@@ -26,7 +26,10 @@ def _freeze_metadata(
     value: Mapping[str, NativeValue],
 ) -> Mapping[str, NativeValue]:
     if not isinstance(value, Mapping) or any(
-        type(key) is not str or type(item) not in (str, int, float, bool)
+        type(key) is not str
+        or not key.strip()
+        or "\x00" in key
+        or type(item) not in (str, int, float, bool)
         for key, item in value.items()
     ):
         raise TypeError("Adapter metadata must map strings to scalar values")
@@ -129,8 +132,8 @@ class SchedulerReference:
     def __post_init__(self) -> None:
         if type(self.native_id) is not str:
             raise TypeError("SchedulerReference native_id must be a string")
-        if not self.native_id:
-            raise ValueError("SchedulerReference native_id must not be empty")
+        if not self.native_id.strip() or "\x00" in self.native_id:
+            raise ValueError("SchedulerReference native_id must be nonblank and safe")
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,14 +146,22 @@ class SchedulerSubmission:
     def __post_init__(self) -> None:
         if type(self.reference) is not SchedulerReference:
             raise TypeError("SchedulerSubmission reference must be a reference")
-        if not isinstance(self.task_native_ids, Mapping) or any(
-            type(task_id) is not TaskId or type(native_id) is not str or not native_id
-            for task_id, native_id in self.task_native_ids.items()
+        if not isinstance(self.task_native_ids, Mapping):
+            raise TypeError("Scheduler Task mapping must be a mapping")
+        mapping = dict(self.task_native_ids)
+        if any(
+            type(task_id) is not TaskId or type(native_id) is not str
+            for task_id, native_id in mapping.items()
         ):
             raise TypeError("Scheduler Task mapping must map TaskIds to native IDs")
-        object.__setattr__(
-            self, "task_native_ids", MappingProxyType(dict(self.task_native_ids))
-        )
+        if not mapping:
+            raise ValueError("Scheduler Task mapping must not be empty")
+        if any(
+            not native_id.strip() or "\x00" in native_id
+            for native_id in mapping.values()
+        ):
+            raise ValueError("Scheduler Task native IDs must be nonblank and safe")
+        object.__setattr__(self, "task_native_ids", MappingProxyType(mapping))
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,14 +174,24 @@ class SchedulerObservation:
     exit_code: int | None = None
     metadata: Mapping[str, NativeValue] = field(default_factory=dict)
     result: CommandResult | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
 
     def __post_init__(self) -> None:
         if type(self.reference) is not SchedulerReference:
             raise TypeError("SchedulerObservation reference must be a reference")
         if type(self.state) is not ExecutionState:
             raise TypeError("SchedulerObservation state must be portable")
-        if type(self.native_state) is not str or not self.native_state:
-            raise ValueError("SchedulerObservation native_state must be nonblank")
+        if self.state in {ExecutionState.CREATED, ExecutionState.STAGING}:
+            raise ValueError("SchedulerObservation state must be scheduler-owned")
+        if (
+            type(self.native_state) is not str
+            or not self.native_state.strip()
+            or "\x00" in self.native_state
+        ):
+            raise ValueError(
+                "SchedulerObservation native_state must be nonblank and safe"
+            )
         if self.exit_code is not None and type(self.exit_code) is not int:
             raise TypeError("SchedulerObservation exit_code must be an integer or None")
         if self.result is not None and type(self.result) is not CommandResult:
@@ -185,6 +206,55 @@ class SchedulerObservation:
             raise ValueError(
                 "SchedulerObservation result and exit_code must describe the same exit"
             )
+        started_at = self.started_at
+        finished_at = self.finished_at
+        for name, value in (
+            ("started_at", started_at),
+            ("finished_at", finished_at),
+        ):
+            if value is not None and (
+                not isinstance(value, datetime) or value.utcoffset() is None
+            ):
+                raise ValueError(
+                    f"SchedulerObservation {name} must be timezone-aware or None"
+                )
+        if self.result is not None:
+            if started_at is None:
+                started_at = self.result.started_at
+            elif started_at != self.result.started_at:
+                raise ValueError(
+                    "SchedulerObservation result and started_at must agree"
+                )
+            if finished_at is None:
+                finished_at = self.result.finished_at
+            elif finished_at != self.result.finished_at:
+                raise ValueError(
+                    "SchedulerObservation result and finished_at must agree"
+                )
+        if (
+            started_at is not None
+            and finished_at is not None
+            and finished_at < started_at
+        ):
+            raise ValueError("SchedulerObservation cannot finish before it starts")
+        terminal = self.state in {
+            ExecutionState.SUCCEEDED,
+            ExecutionState.FAILED,
+            ExecutionState.CANCELLED,
+        }
+        if not terminal and (
+            self.exit_code is not None
+            or self.result is not None
+            or finished_at is not None
+        ):
+            raise ValueError(
+                "Nonterminal SchedulerObservation cannot have an exit, result, "
+                "or finish time"
+            )
+        if self.state is ExecutionState.SUCCEEDED and self.exit_code not in {None, 0}:
+            raise ValueError("Successful SchedulerObservation cannot have nonzero exit")
+        object.__setattr__(self, "started_at", started_at)
+        object.__setattr__(self, "finished_at", finished_at)
         object.__setattr__(self, "metadata", _freeze_metadata(self.metadata))
 
 
