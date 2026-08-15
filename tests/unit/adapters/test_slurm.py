@@ -1,14 +1,42 @@
 from __future__ import annotations
 
 import subprocess
-from datetime import timedelta
+from collections import deque
+from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 
 import pytest
 
-from rundra.adapters import SlurmScriptError, render_sbatch_script
+from rundra.adapters import (
+    SlurmScheduler,
+    SlurmScriptError,
+    SlurmSubmissionError,
+    render_sbatch_script,
+)
 from rundra.domain.models import Command, ResourceRequest, TaskId
-from rundra.ports import SchedulerGroup, SchedulerUnit
+from rundra.ports import (
+    CapabilityCheck,
+    CommandResult,
+    Scheduler,
+    SchedulerGroup,
+    SchedulerUnit,
+)
+
+
+class ScriptedTransport:
+    def __init__(self, results: deque[CommandResult | Exception]) -> None:
+        self.results = results
+        self.run_calls: list[Command] = []
+
+    def check(self) -> CapabilityCheck:
+        return CapabilityCheck("scripted")
+
+    def run(self, command: Command) -> CommandResult:
+        self.run_calls.append(command)
+        outcome = self.results.popleft()
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
 
 
 def _group(
@@ -148,3 +176,81 @@ def test_m3_renderer_rejects_multi_task_groups_and_non_groups() -> None:
         render_sbatch_script(SchedulerGroup((first, second)))
     with pytest.raises(TypeError, match="SchedulerGroup"):
         render_sbatch_script(object())  # type: ignore[arg-type]
+
+
+def _command_result(
+    command: Command, exit_code: int, stdout: str, stderr: str = ""
+) -> CommandResult:
+    now = datetime(2026, 8, 15, tzinfo=UTC)
+    return CommandResult(command, exit_code, stdout, stderr, now, now)
+
+
+def test_slurm_scheduler_submits_generated_script_with_parsable_output() -> None:
+    transport = ScriptedTransport(deque([]))
+    scheduler = SlurmScheduler(transport, sbatch="/opt/slurm/bin/sbatch")
+    group = _group()
+    expected_script = render_sbatch_script(group)
+    expected_command = Command(
+        (
+            "/bin/sh",
+            "-c",
+            "set -eu\n"
+            'script=$(mktemp "${TMPDIR:-/tmp}/rundra-sbatch.XXXXXX")\n'
+            "trap 'rm -f \"$script\"' EXIT HUP INT TERM\n"
+            'printf \'%s\' "$1" > "$script"\n'
+            '"$2" --parsable "$script"\n',
+            "rundra-slurm-submit",
+            expected_script,
+            "/opt/slurm/bin/sbatch",
+        )
+    )
+    transport.results.append(_command_result(expected_command, 0, "12345;alpha\n"))
+
+    submission = scheduler.submit(group)
+
+    assert isinstance(scheduler, Scheduler)
+    assert submission.reference.native_id == "12345"
+    assert submission.task_native_ids == {group.units[0].task_id: "12345"}
+    assert transport.run_calls == [expected_command]
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "stdout", "stderr", "message"),
+    [
+        (1, "", "invalid account", "exit code 1: invalid account"),
+        (0, "Submitted batch job 123", "", "invalid parsable"),
+        (0, "123\nextra", "", "invalid parsable"),
+        (0, "123;cluster;extra", "", "invalid parsable"),
+    ],
+)
+def test_slurm_submission_rejects_failures_and_nonparsable_output(
+    exit_code: int, stdout: str, stderr: str, message: str
+) -> None:
+    transport = ScriptedTransport(deque([]))
+    scheduler = SlurmScheduler(transport)
+    group = _group()
+    expected = Command(
+        (
+            "/bin/sh",
+            "-c",
+            "set -eu\n"
+            'script=$(mktemp "${TMPDIR:-/tmp}/rundra-sbatch.XXXXXX")\n'
+            "trap 'rm -f \"$script\"' EXIT HUP INT TERM\n"
+            'printf \'%s\' "$1" > "$script"\n'
+            '"$2" --parsable "$script"\n',
+            "rundra-slurm-submit",
+            render_sbatch_script(group),
+            "sbatch",
+        )
+    )
+    transport.results.append(_command_result(expected, exit_code, stdout, stderr))
+
+    with pytest.raises(SlurmSubmissionError, match=message):
+        scheduler.submit(group)
+
+
+def test_slurm_submission_normalizes_transport_start_failure() -> None:
+    transport = ScriptedTransport(deque([RuntimeError("connection lost")]))
+
+    with pytest.raises(SlurmSubmissionError, match="Could not start"):
+        SlurmScheduler(transport).submit(_group())

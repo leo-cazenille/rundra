@@ -33,6 +33,10 @@ from rundra.ports import (
     ContainerRequest,
     FetchRequest,
     FetchResult,
+    SchedulerGroup,
+    SchedulerObservation,
+    SchedulerReference,
+    SchedulerSubmission,
     StagedWorkspace,
     StageRequest,
 )
@@ -94,6 +98,24 @@ class FailingStageStager:
 
     def fetch(self, request: FetchRequest) -> FetchResult:
         raise AssertionError("fetch must not follow failed staging")
+
+
+class QueryFailScheduler:
+    def __init__(self, submission: SchedulerSubmission) -> None:
+        self.submission = submission
+
+    def submit(self, group: SchedulerGroup) -> SchedulerSubmission:
+        return self.submission
+
+    def query(
+        self, references: tuple[SchedulerReference, ...]
+    ) -> tuple[SchedulerObservation, ...]:
+        raise RuntimeError("accounting unavailable")
+
+    def cancel(
+        self, references: tuple[SchedulerReference, ...]
+    ) -> tuple[SchedulerObservation, ...]:
+        raise AssertionError("cancel must not be called")
 
 
 def _target(workspace: Path) -> Target:
@@ -177,13 +199,15 @@ def _service(
     *,
     stager: object | None = None,
     provenance: object | None = None,
+    scheduler: object | None = None,
 ) -> OrchestrationService:
     transport = LocalTransport()
     return OrchestrationService(
         store=JsonRunStore(tmp_path / "records"),
         stager=stager or LocalStager(),
         runtime=runtime,
-        scheduler=LocalScheduler(
+        scheduler=scheduler
+        or LocalScheduler(
             transport, reference_factory=lambda: "local-lifecycle-reference"
         ),
         transport=transport,
@@ -229,9 +253,10 @@ def test_one_task_local_lifecycle_persists_success_logs_manifest_and_fetch(
     assert record.task_exit_codes == {record.run.tasks[0].id: 0}
     assert record.scheduler_job_ids == ("local-lifecycle-reference",)
     assert record.native_state == "EXITED"
-    assert record.submitted_at == record.started_at
-    assert record.completed_at is not None
+    assert record.submitted_at is not None
     assert record.started_at is not None
+    assert record.submitted_at <= record.started_at
+    assert record.completed_at is not None
     assert record.completed_at >= record.started_at
     assert service.store.load(_RUN_ID) == record
     assert (tmp_path / "retrieved/results/result.txt").read_text(
@@ -393,6 +418,23 @@ def test_capability_failure_is_persisted_as_a_failed_run(tmp_path: Path) -> None
     assert record.run.tasks[0].state is ExecutionState.FAILED
     assert record.native_state == "CAPABILITY_CHECK_FAILED"
     assert not (tmp_path / "workspace/runs" / str(_RUN_ID)).exists()
+
+
+def test_scheduler_reference_is_durable_before_the_first_query(tmp_path: Path) -> None:
+    runtime = HostMappedRuntime()
+    request, _ = _request(tmp_path, exit_code=0)
+    task_id = request.plan.units[0].task_id
+    reference = SchedulerReference("918273")
+    scheduler = QueryFailScheduler(SchedulerSubmission(reference, {task_id: "918273"}))
+    service = _service(tmp_path, runtime, scheduler=scheduler)
+
+    with pytest.raises(OrchestrationError, match="accounting unavailable"):
+        service.execute_one(request)
+
+    record = service.store.load(_RUN_ID)
+    assert record.scheduler_job_ids == ("918273",)
+    assert record.submitted_at is not None
+    assert record.run.state is ExecutionState.FAILED
 
 
 def test_available_source_provenance_is_persisted_before_execution(

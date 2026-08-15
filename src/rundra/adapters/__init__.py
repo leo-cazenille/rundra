@@ -28,7 +28,12 @@ from rundra.adapters.rsync import (
     RsyncUnavailableError,
     RsyncUploadError,
 )
-from rundra.adapters.slurm import SlurmScriptError, render_sbatch_script
+from rundra.adapters.slurm import (
+    SlurmScheduler,
+    SlurmScriptError,
+    SlurmSubmissionError,
+    render_sbatch_script,
+)
 from rundra.adapters.ssh import (
     SSHCommandError,
     SSHExecutionError,
@@ -64,6 +69,8 @@ __all__ = [
     "SSHTransportError",
     "SSHUnavailableError",
     "SlurmScriptError",
+    "SlurmScheduler",
+    "SlurmSubmissionError",
     "WorkspaceCollisionError",
     "render_sbatch_script",
 ]

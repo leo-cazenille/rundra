@@ -225,6 +225,7 @@ class OrchestrationService:
                 run_id=run_id,
             ) from error
 
+        submission_started_at = self._clock()
         try:
             submission = self._scheduler.submit(
                 SchedulerGroup(
@@ -237,16 +238,32 @@ class OrchestrationService:
                     )
                 )
             )
-            observation = _single_observation(
-                self._scheduler.query((submission.reference,)),
-                submission.reference,
-            )
             if submission.task_native_ids != {
                 unit.task_id: submission.reference.native_id
             }:
                 raise ValueError(
                     "Scheduler submission did not map the planned Task exactly"
                 )
+        except Exception as error:
+            self._fail_before_completion(record, "EXECUTION_FAILED")
+            raise OrchestrationError(
+                code="EXECUTION_FAILED",
+                message=f"Run {run_id} execution failed before submission: {error}",
+                run_id=run_id,
+            ) from error
+
+        record = replace(
+            _with_execution_state(record, ExecutionState.SUBMITTED),
+            scheduler_job_ids=(submission.reference.native_id,),
+            submitted_at=submission_started_at,
+        )
+        self.store.update(record)
+
+        try:
+            observation = _single_observation(
+                self._scheduler.query((submission.reference,)),
+                submission.reference,
+            )
             command_result = observation.result
             if command_result is None or observation.exit_code is None:
                 raise ValueError(
@@ -279,14 +296,6 @@ class OrchestrationService:
                 message=f"Run {run_id} execution failed before reconciliation: {error}",
                 run_id=run_id,
             ) from error
-
-        record = _with_execution_state(record, ExecutionState.SUBMITTED)
-        record = replace(
-            record,
-            scheduler_job_ids=(submission.reference.native_id,),
-            submitted_at=command_result.started_at,
-        )
-        self.store.update(record)
 
         try:
             log_artifacts = _write_task_logs(

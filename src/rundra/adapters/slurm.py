@@ -1,19 +1,92 @@
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 
 from rundra.adapters._remote_shell import serialize_remote_command
-from rundra.domain.models import NativeValue, ResourceRequest
-from rundra.ports import SchedulerGroup
+from rundra.domain.models import Command, NativeValue, ResourceRequest
+from rundra.ports import (
+    SchedulerGroup,
+    SchedulerObservation,
+    SchedulerReference,
+    SchedulerSubmission,
+    Transport,
+)
 
 _MIB = 1024**2
 _VALUE_OPTIONS = ("account", "constraint", "partition", "qos")
 _FLAG_OPTIONS = ("exclusive",)
 _ALLOWED_OPTIONS = frozenset((*_VALUE_OPTIONS, *_FLAG_OPTIONS))
+_PARSABLE_SUBMISSION = re.compile(r"(?P<job_id>[0-9]+)(?:;(?P<cluster>[^;\r\n]+))?\Z")
+_SUBMIT_SCRIPT = """\
+set -eu
+script=$(mktemp "${TMPDIR:-/tmp}/rundra-sbatch.XXXXXX")
+trap 'rm -f "$script"' EXIT HUP INT TERM
+printf '%s' "$1" > "$script"
+"$2" --parsable "$script"
+"""
 
 
 class SlurmScriptError(ValueError):
     """Raised when a normalized group cannot be represented as an sbatch script."""
+
+
+class SlurmSubmissionError(RuntimeError):
+    """Raised when sbatch submission fails or returns invalid structured output."""
+
+
+class SlurmScheduler:
+    """Submit normalized groups to Slurm through a configured Transport."""
+
+    def __init__(self, transport: Transport, *, sbatch: str = "sbatch") -> None:
+        if not isinstance(transport, Transport):
+            raise TypeError("SlurmScheduler transport must implement Transport")
+        if type(sbatch) is not str or not sbatch.strip() or "\x00" in sbatch:
+            raise ValueError(
+                "SlurmScheduler sbatch executable must be nonblank and safe"
+            )
+        self._transport = transport
+        self._sbatch = sbatch
+
+    def submit(self, group: SchedulerGroup) -> SchedulerSubmission:
+        """Submit one generated script and retain opaque Slurm identity."""
+        script = render_sbatch_script(group)
+        command = Command(
+            (
+                "/bin/sh",
+                "-c",
+                _SUBMIT_SCRIPT,
+                "rundra-slurm-submit",
+                script,
+                self._sbatch,
+            )
+        )
+        try:
+            result = self._transport.run(command)
+        except Exception as error:
+            raise SlurmSubmissionError("Could not start sbatch submission") from error
+        if result.exit_code != 0:
+            detail = result.stderr.strip() or "no scheduler diagnostic"
+            raise SlurmSubmissionError(
+                f"sbatch failed with exit code {result.exit_code}: {detail}"
+            )
+        output = result.stdout.strip()
+        match = _PARSABLE_SUBMISSION.fullmatch(output)
+        if match is None:
+            raise SlurmSubmissionError("sbatch returned invalid parsable output")
+        job_id = match.group("job_id")
+        reference = SchedulerReference(job_id)
+        return SchedulerSubmission(reference, {group.units[0].task_id: job_id})
+
+    def query(
+        self, references: tuple[SchedulerReference, ...]
+    ) -> tuple[SchedulerObservation, ...]:
+        raise NotImplementedError("Slurm query is implemented in M3.4")
+
+    def cancel(
+        self, references: tuple[SchedulerReference, ...]
+    ) -> tuple[SchedulerObservation, ...]:
+        raise NotImplementedError("Slurm cancellation is implemented in M3.5")
 
 
 def render_sbatch_script(group: SchedulerGroup) -> str:
