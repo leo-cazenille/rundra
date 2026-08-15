@@ -17,6 +17,7 @@ from rundra.orchestration.models import ExecutionPlan, ExecutionUnit, PlanningEr
 
 _PLACEHOLDER_PATTERN = re.compile(r"\{[^{}]+\}")
 _REQUIRED_PLACEHOLDERS = frozenset({"{config}", "{seed}"})
+_SEED_RANGE_PATTERN = re.compile(r"(-?[0-9]+):(-?[0-9]+)\Z")
 
 
 def expand_seeds(*, seed: object = None, seeds: object = None) -> tuple[int, ...]:
@@ -40,23 +41,18 @@ def expand_seeds(*, seed: object = None, seeds: object = None) -> tuple[int, ...
             code="INVALID_SEED_RANGE",
             message="seeds must use inclusive START:STOP syntax",
         )
-    parts = seeds.split(":")
-    if len(parts) != 2:
+    match = _SEED_RANGE_PATTERN.fullmatch(seeds)
+    if match is None:
         raise PlanningError(
             code="INVALID_SEED_RANGE",
             message="seeds must use inclusive START:STOP syntax",
         )
-    try:
-        start, stop = (int(part) for part in parts)
-    except ValueError as error:
-        raise PlanningError(
-            code="INVALID_SEED_RANGE",
-            message="seed range endpoints must be integers",
-        ) from error
+    start, stop = (int(part) for part in match.groups())
     if stop < start:
         raise PlanningError(
             code="INVALID_SEED_RANGE",
             message="seed range stop must not precede start",
+            details={"start": start, "stop": stop},
         )
     return tuple(range(start, stop + 1))
 
@@ -123,7 +119,7 @@ def _validate_seed_set(seeds: Sequence[object]) -> tuple[int, ...]:
     integer_seeds = cast(tuple[int, ...], normalized)
     if len(set(integer_seeds)) != len(integer_seeds):
         raise PlanningError(
-            code="INVALID_SEEDS",
+            code="DUPLICATE_SEED",
             message="duplicate seeds are not supported in version 0.1",
         )
     return integer_seeds

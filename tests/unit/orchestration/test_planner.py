@@ -44,7 +44,12 @@ def _target() -> Target:
 
 @pytest.mark.parametrize(
     "seed, seeds, expected",
-    [(17, None, (17,)), (None, "0:3", (0, 1, 2, 3)), (None, "-2:0", (-2, -1, 0))],
+    [
+        (17, None, (17,)),
+        (None, "0:0", (0,)),
+        (None, "0:3", (0, 1, 2, 3)),
+        (None, "-2:0", (-2, -1, 0)),
+    ],
 )
 def test_expand_seeds_supports_one_seed_or_an_inclusive_range(
     seed: int | None,
@@ -65,6 +70,10 @@ def test_expand_seeds_supports_one_seed_or_an_inclusive_range(
         (True, None, "INVALID_SEED"),
         (None, "3:1", "INVALID_SEED_RANGE"),
         (None, "1:2:3", "INVALID_SEED_RANGE"),
+        (None, " 1:2", "INVALID_SEED_RANGE"),
+        (None, "1:2 ", "INVALID_SEED_RANGE"),
+        (None, "+1:2", "INVALID_SEED_RANGE"),
+        (None, "1.0:2", "INVALID_SEED_RANGE"),
     ],
 )
 def test_expand_seeds_rejects_ambiguous_or_invalid_requests(
@@ -149,13 +158,35 @@ def test_create_plan_rejects_incomplete_or_unknown_placeholders(
     assert caught.value.code == code
 
 
-@pytest.mark.parametrize("seeds", [(), (1, 1), (1, True)])
+@pytest.mark.parametrize(
+    "seeds, code",
+    [
+        ((), "INVALID_SEEDS"),
+        ((1, 1), "DUPLICATE_SEED"),
+        ((1, True), "INVALID_SEEDS"),
+    ],
+)
 def test_create_plan_rejects_empty_duplicate_or_non_integer_seeds(
-    seeds: tuple[object, ...],
+    seeds: tuple[object, ...], code: str
 ) -> None:
     """Catches plans whose logical task set is unstable or lacks explicit seeds."""
     from rundra.orchestration.models import PlanningError
     from rundra.orchestration.planner import create_plan
 
-    with pytest.raises(PlanningError, match="seed"):
+    with pytest.raises(PlanningError, match="seed") as caught:
         create_plan(_spec(), _config(), _target(), seeds=seeds)
+
+    assert caught.value.code == code
+
+
+def test_create_plan_preserves_requested_seed_order() -> None:
+    """Catches sorting seeds and silently changing Task identity."""
+    from rundra.orchestration.planner import create_plan
+
+    plan = create_plan(_spec(), _config(), _target(), seeds=(9, -2, 4))
+
+    assert [(str(unit.task_id), unit.seed) for unit in plan.units] == [
+        ("task_000000", 9),
+        ("task_000001", -2),
+        ("task_000002", 4),
+    ]
