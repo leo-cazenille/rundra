@@ -2085,6 +2085,22 @@ Benefits include:
 
 Each Run must still receive an immutable source snapshot after staging.
 
+The M2 rsync stager first allocates the validated unique remote workspace, then
+invokes the locally installed `rsync` with argument arrays, archive mode,
+copy-link snapshot semantics, protected arguments, deletion within the new
+empty source directory, and one explicit exclusion argument per default or
+experiment pattern. It copies the current filesystem tree directly, including
+uncommitted and non-Git files; Git is not involved in transfer.
+
+The exact effective configuration bytes are flushed to a private temporary
+local file and transferred separately to `input/config.yaml`. Only after both
+transfers succeed does the stager recursively remove write permissions from the
+remote `source` and `input` trees. A failed or interrupted transfer raises a
+staging error and leaves the unique Run directory reserved, so partial content
+cannot be reused or reported as a completed immutable snapshot. Transfer
+diagnostics contain the Run ID and exit category, not rsync output or source and
+configuration values.
+
 Result retrieval should remain possible separately from submission.
 
 ---

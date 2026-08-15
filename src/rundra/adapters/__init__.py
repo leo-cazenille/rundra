@@ -21,6 +21,12 @@ from rundra.adapters.remote import (
     RemoteWorkspaceCollisionError,
     RemoteWorkspaceError,
 )
+from rundra.adapters.rsync import (
+    RsyncStager,
+    RsyncStagerError,
+    RsyncUnavailableError,
+    RsyncUploadError,
+)
 from rundra.adapters.ssh import (
     SSHCommandError,
     SSHExecutionError,
@@ -45,6 +51,10 @@ __all__ = [
     "RemoteWorkspaceAllocator",
     "RemoteWorkspaceCollisionError",
     "RemoteWorkspaceError",
+    "RsyncStager",
+    "RsyncStagerError",
+    "RsyncUnavailableError",
+    "RsyncUploadError",
     "SSHCommandError",
     "SSHExecutionError",
     "SSHTransport",
