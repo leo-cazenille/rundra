@@ -18,6 +18,7 @@ from rundra.cli.operations import (
     inspect_operation,
     list_runs_operation,
     logs_operation,
+    resolve_plan_inputs_operation,
     resolve_run_inputs_operation,
     run_operation,
     status_operation,
@@ -357,3 +358,57 @@ def test_seed_generation_rejects_conflicts_and_invalid_provider_values(
     assert conflict.error is not None and conflict.error.code == "SEED_CONFLICT"
     assert invalid.error is not None
     assert invalid.error.code == "SEED_GENERATION_FAILED"
+
+
+def test_plan_input_resolution_generates_a_preview_without_planner_entropy(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "rundra.yaml"
+    project.write_text(
+        "version: 1\ndefaults: {config: config.yaml, target: local}\n",
+        encoding="utf-8",
+    )
+    calls = 0
+
+    def generate() -> int:
+        nonlocal calls
+        calls += 1
+        return 41
+
+    result = resolve_plan_inputs_operation(
+        tmp_path / "experiment.yaml",
+        project_file=project,
+        targets_file=tmp_path / "targets.yaml",
+        user_config_source=tmp_path / "absent.yaml",
+        seed_factory=generate,
+    )
+
+    assert result.ok and result.value is not None
+    assert result.value.seed == 41
+    assert result.value.seeds is None
+    assert result.value.resolution.sources["seed"] == "generated"
+    assert calls == 1
+
+
+def test_explicit_seed_range_overrides_a_configured_single_seed_for_plan(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "rundra.yaml"
+    project.write_text(
+        "version: 1\ndefaults: {config: config.yaml, target: local, seed: 17}\n",
+        encoding="utf-8",
+    )
+
+    result = resolve_plan_inputs_operation(
+        tmp_path / "experiment.yaml",
+        project_file=project,
+        targets_file=tmp_path / "targets.yaml",
+        seeds="0:2",
+        user_config_source=tmp_path / "absent.yaml",
+        seed_factory=lambda: (_ for _ in ()).throw(AssertionError("no entropy")),
+    )
+
+    assert result.ok and result.value is not None
+    assert result.value.seed is None
+    assert result.value.seeds == "0:2"
+    assert "seed" not in result.value.resolution.sources

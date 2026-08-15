@@ -13,6 +13,7 @@ from rundra.cli.operations import (
     list_runs_operation,
     logs_operation,
     plan_operation,
+    resolve_plan_inputs_operation,
     resolve_run_inputs_operation,
     run_operation,
     status_operation,
@@ -39,12 +40,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     plan = subparsers.add_parser("plan", help="inspect a plan without executing it")
     plan.add_argument("experiment", type=Path)
-    plan.add_argument("--config", required=True, type=Path)
-    seed_group = plan.add_mutually_exclusive_group(required=True)
+    plan.add_argument("--config", type=Path)
+    seed_group = plan.add_mutually_exclusive_group()
     seed_group.add_argument("--seed", type=int)
     seed_group.add_argument("--seeds")
-    plan.add_argument("--target", required=True)
-    plan.add_argument("--targets-file", type=Path, default=_default_targets_file())
+    seed_group.add_argument("--random-seed", action="store_true")
+    plan.add_argument("--target")
+    plan.add_argument("--targets-file", type=Path)
+    plan.add_argument("--project-file", type=Path)
+    plan.add_argument("--profile")
     _add_json_option(plan)
 
     targets = subparsers.add_parser("targets", help="list configured targets")
@@ -156,14 +160,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     if arguments.command == "validate":
         result = validate_operation(arguments.experiment)
     elif arguments.command == "plan":
-        result = plan_operation(
+        resolved_plan = resolve_plan_inputs_operation(
             arguments.experiment,
-            arguments.config,
-            arguments.targets_file,
-            arguments.target,
+            config=arguments.config,
             seed=arguments.seed,
             seeds=arguments.seeds,
+            target=arguments.target,
+            targets_file=arguments.targets_file,
+            project_file=arguments.project_file,
+            profile=arguments.profile,
+            random_seed=arguments.random_seed,
         )
+        if not resolved_plan.ok:
+            result = resolved_plan
+        else:
+            assert resolved_plan.value is not None
+            plan_inputs = resolved_plan.value
+            result = plan_operation(
+                arguments.experiment,
+                plan_inputs.config,
+                plan_inputs.targets_file,
+                plan_inputs.target,
+                seed=plan_inputs.seed,
+                seeds=plan_inputs.seeds,
+            )
     elif arguments.command == "targets":
         result = targets_operation(arguments.targets_file)
     elif arguments.command == "run":
@@ -184,16 +204,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = resolved
         else:
             assert resolved.value is not None
-            inputs = resolved.value
+            run_inputs = resolved.value
             result = run_operation(
                 arguments.experiment,
-                inputs.config,
-                inputs.targets_file,
-                inputs.target,
-                inputs.source_root,
-                inputs.destination,
-                JsonRunStore(inputs.data_dir),
-                seed=inputs.seed,
+                run_inputs.config,
+                run_inputs.targets_file,
+                run_inputs.target,
+                run_inputs.source_root,
+                run_inputs.destination,
+                JsonRunStore(run_inputs.data_dir),
+                seed=run_inputs.seed,
             )
     elif arguments.command == "submit":
         result = submit_unavailable_operation()

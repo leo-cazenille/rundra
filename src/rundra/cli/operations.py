@@ -151,6 +151,30 @@ class ResolvedRunInputs:
             raise TypeError("ResolvedRunInputs resolution must be ResolvedLaunch")
 
 
+@dataclass(frozen=True, slots=True)
+class ResolvedPlanInputs:
+    config: Path
+    target: str
+    targets_file: Path
+    seed: int | None
+    seeds: str | None
+    resolution: ResolvedLaunch
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.config, Path) or not isinstance(self.targets_file, Path):
+            raise TypeError("ResolvedPlanInputs paths must be Paths")
+        if type(self.target) is not str or not self.target:
+            raise ValueError("ResolvedPlanInputs target must be nonblank")
+        if self.seed is not None and type(self.seed) is not int:
+            raise TypeError("ResolvedPlanInputs seed must be an integer or None")
+        if self.seeds is not None and type(self.seeds) is not str:
+            raise TypeError("ResolvedPlanInputs seeds must be a string or None")
+        if (self.seed is None) == (self.seeds is None):
+            raise ValueError("ResolvedPlanInputs requires exactly one seed form")
+        if type(self.resolution) is not ResolvedLaunch:
+            raise TypeError("ResolvedPlanInputs resolution must be ResolvedLaunch")
+
+
 def validate_operation(source: Path) -> OperationResult[ValidationValue]:
     try:
         return OperationResult.success(
@@ -204,6 +228,130 @@ def targets_operation(source: Path) -> OperationResult[TargetsValue]:
         )
     except ConfigError as error:
         return OperationResult.failure("targets", _config_error(error))
+
+
+def resolve_plan_inputs_operation(
+    experiment_source: Path,
+    *,
+    config: Path | None = None,
+    seed: int | None = None,
+    seeds: str | None = None,
+    target: str | None = None,
+    targets_file: Path | None = None,
+    project_file: Path | None = None,
+    profile: str | None = None,
+    user_config_source: Path | None = None,
+    random_seed: bool = False,
+    seed_factory: Callable[[], int] | None = None,
+) -> OperationResult[ResolvedPlanInputs]:
+    """Resolve plan inputs without submitting, staging, or mutating a workspace."""
+    if type(random_seed) is not bool:
+        raise TypeError("random_seed must be a boolean")
+    requested_seed_forms = sum(
+        (seed is not None, seeds is not None, random_seed), start=0
+    )
+    if requested_seed_forms > 1:
+        return OperationResult.failure(
+            "plan",
+            OperationError(
+                "SEED_CONFLICT",
+                "--seed, --seeds, and --random-seed are mutually exclusive",
+            ),
+        )
+    try:
+        fully_explicit = (
+            all(value is not None for value in (config, target, targets_file))
+            and requested_seed_forms == 1
+        )
+        use_defaults = (
+            not fully_explicit or project_file is not None or profile is not None
+        )
+        project = (
+            discover_project_launch(experiment_source, project_file=project_file)
+            if use_defaults
+            else None
+        )
+        user = discover_user_launch(user_config_source) if use_defaults else None
+        resolved = resolve_launch(
+            cli=LaunchValues(
+                config=config,
+                seed=seed,
+                target=target,
+                targets_file=targets_file,
+            ),
+            project=project,
+            user=user,
+            builtins=LaunchValues(
+                targets_file=Path("~/.config/rundra/targets.yaml").expanduser()
+            ),
+            profile=profile,
+        )
+    except ConfigError as error:
+        return OperationResult.failure("plan", _config_error(error))
+    except LaunchResolutionError as error:
+        return OperationResult.failure(
+            "plan", OperationError(error.code, error.message)
+        )
+    missing = tuple(
+        name for name in ("config", "target") if getattr(resolved.values, name) is None
+    )
+    if missing:
+        return OperationResult.failure(
+            "plan",
+            OperationError(
+                "LAUNCH_VALUE_REQUIRED",
+                f"Launch values could not resolve: {', '.join(missing)}",
+                {"fields": missing},
+            ),
+        )
+    values = resolved.values
+    resolved_seed = values.seed
+    if seeds is not None:
+        resolved_seed = None
+        resolved = ResolvedLaunch(
+            replace(values, seed=None),
+            {
+                name: source
+                for name, source in resolved.sources.items()
+                if name != "seed"
+            },
+            resolved.profile,
+        )
+    elif resolved_seed is None or random_seed:
+        generator = seed_factory or (lambda: secrets.randbits(63))
+        resolved_seed = generator()
+        if (
+            type(resolved_seed) is not int
+            or resolved_seed < 0
+            or resolved_seed >= 2**63
+        ):
+            return OperationResult.failure(
+                "plan",
+                OperationError(
+                    "SEED_GENERATION_FAILED",
+                    "Seed generator did not return a non-negative 63-bit integer",
+                ),
+            )
+        values = replace(values, seed=resolved_seed)
+        resolved = ResolvedLaunch(
+            values,
+            {**resolved.sources, "seed": "generated"},
+            resolved.profile,
+        )
+    assert values.config is not None
+    assert values.target is not None
+    assert values.targets_file is not None
+    return OperationResult.success(
+        "plan",
+        ResolvedPlanInputs(
+            config=values.config,
+            target=values.target,
+            targets_file=values.targets_file,
+            seed=resolved_seed,
+            seeds=seeds,
+            resolution=resolved,
+        ),
+    )
 
 
 def resolve_run_inputs_operation(

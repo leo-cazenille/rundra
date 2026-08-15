@@ -61,16 +61,28 @@ defaults:
         encoding="utf-8",
     )
 
+    environment = {**os.environ, "HOME": str(home)}
+    planned = subprocess.run(
+        ["rundr", "plan", "experiment.yaml", "--json"],
+        cwd=project,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
     result = subprocess.run(
         ["rundr", "run", "experiment.yaml", "--json"],
         cwd=project,
-        env={**os.environ, "HOME": str(home)},
+        env=environment,
         check=False,
         capture_output=True,
         text=True,
     )
 
     try:
+        assert planned.returncode == 0, planned.stderr or planned.stdout
+        preview_seed = json.loads(planned.stdout)["plan"]["units"][0]["seed"]
+        assert type(preview_seed) is int and 0 <= preview_seed < 2**63
         assert result.returncode == 0, result.stderr or result.stdout
         document = json.loads(result.stdout)
         assert document["run"]["state"] == "SUCCEEDED"

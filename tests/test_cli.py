@@ -38,3 +38,18 @@ def test_run_parser_accepts_launch_resolution_without_repeated_arguments() -> No
         build_parser().parse_args(
             ["run", "experiment.yaml", "--seed", "1", "--random-seed"]
         )
+
+
+def test_plan_parser_accepts_defaults_and_mutually_exclusive_seed_forms() -> None:
+    arguments = build_parser().parse_args(["plan", "experiment.yaml"])
+
+    assert arguments.config is None
+    assert arguments.seed is None
+    assert arguments.seeds is None
+    assert arguments.random_seed is False
+    assert arguments.target is None
+
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(
+            ["plan", "experiment.yaml", "--seeds", "0:2", "--random-seed"]
+        )
