@@ -86,6 +86,58 @@ def test_plan_json_is_byte_for_byte_deterministic() -> None:
     assert _run(*arguments).stdout == _run(*arguments).stdout
 
 
+def test_slurm_array_plan_json_exposes_explicit_task_seed_index_mapping(
+    tmp_path: Path,
+) -> None:
+    targets = tmp_path / "targets.yaml"
+    targets.write_text(
+        """version: 1
+targets:
+  shoal:
+    transport: {type: ssh, host: fishvision}
+    scheduler: {type: slurm}
+    staging: {type: rsync}
+    container: {type: apptainer}
+    workspace: /tmp/rundra-array-plan
+""",
+        encoding="utf-8",
+    )
+
+    completed = _run(
+        "plan",
+        "examples/minimal/experiment.yaml",
+        "--config",
+        "examples/minimal/config.yaml",
+        "--seeds",
+        "7:9",
+        "--target",
+        "shoal",
+        "--targets-file",
+        str(targets),
+        "--json",
+    )
+    document = json.loads(completed.stdout)
+
+    assert completed.returncode == 0
+    assert document["plan"]["strategy"] == "slurm_array"
+    assert document["plan"]["groups"] == [
+        {
+            "task_ids": [
+                "task_000000",
+                "task_000001",
+                "task_000002",
+            ]
+        }
+    ]
+    assert document["plan"]["array_mapping"] == [
+        {"task_id": "task_000000", "seed": 7, "array_index": 0},
+        {"task_id": "task_000001", "seed": 8, "array_index": 1},
+        {"task_id": "task_000002", "seed": 9, "array_index": 2},
+    ]
+    assert "run_id" not in document["plan"]
+    assert "scheduler_job_id" not in document["plan"]
+
+
 def test_human_commands_use_the_same_operations_and_separate_errors() -> None:
     valid = _run("validate", "examples/minimal/experiment.yaml")
     planned = _run(

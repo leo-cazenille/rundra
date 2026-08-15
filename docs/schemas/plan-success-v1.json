@@ -18,7 +18,12 @@
   "ok": true,
   "operation": "plan",
   "plan": {
+    "array_mapping": [],
     "experiment": "minimal",
+    "groups": [
+      {"task_ids": ["task_000000"]},
+      {"task_ids": ["task_000001"]}
+    ],
     "staging_backend": "local",
     "strategy": "one_unit_per_task",
     "target": {

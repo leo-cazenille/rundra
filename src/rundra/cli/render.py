@@ -118,6 +118,12 @@ def render_human(result: OperationResult[Any]) -> str:
             f"{len(plan.units)} task(s)\nSeeds: {seeds}\n"
             f"Strategy: {plan.strategy}\nStaging: {plan.staging_backend}"
         )
+        if plan.array_mapping:
+            mapping = ", ".join(
+                f"{item.array_index}={item.task_id}/seed={item.seed}"
+                for item in plan.array_mapping
+            )
+            rendered = f"{rendered}\nArray mapping: {mapping}"
         return _with_launch(rendered, value.launch)
     if isinstance(value, TargetsValue):
         lines = ["Configured targets:"]
@@ -184,6 +190,18 @@ def _plan_document(plan: ExecutionPlan) -> dict[str, Any]:
         "target": _target_document(plan.target),
         "strategy": plan.strategy,
         "staging_backend": plan.staging_backend,
+        "groups": [
+            {"task_ids": [str(task_id) for task_id in group.task_ids]}
+            for group in plan.groups
+        ],
+        "array_mapping": [
+            {
+                "task_id": str(item.task_id),
+                "seed": item.seed,
+                "array_index": item.array_index,
+            }
+            for item in plan.array_mapping
+        ],
         "units": [
             {
                 "task_id": str(unit.task_id),

@@ -16,6 +16,7 @@ from rundra.domain.models import (
 from rundra.orchestration.models import (
     ONE_UNIT_PER_TASK,
     SLURM_ARRAY,
+    ArrayTaskMapping,
     ExecutionGroup,
     ExecutionPlan,
     ExecutionUnit,
@@ -84,17 +85,22 @@ def create_plan(
         )
         for index, seed in enumerate(normalized_seeds)
     )
+    uses_array = target.scheduler.kind == "slurm" and len(units) > 1
     return ExecutionPlan(
         version=1,
         experiment_name=spec.name,
         target=target,
         units=units,
         groups=_execution_groups(target, units),
-        strategy=(
-            SLURM_ARRAY
-            if target.scheduler.kind == "slurm" and len(units) > 1
-            else ONE_UNIT_PER_TASK
+        array_mapping=(
+            tuple(
+                ArrayTaskMapping(unit.task_id, unit.seed, index)
+                for index, unit in enumerate(units)
+            )
+            if uses_array
+            else ()
         ),
+        strategy=SLURM_ARRAY if uses_array else ONE_UNIT_PER_TASK,
     )
 
 

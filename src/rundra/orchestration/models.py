@@ -74,6 +74,25 @@ class ExecutionGroup:
 
 
 @dataclass(frozen=True, slots=True)
+class ArrayTaskMapping:
+    """Explicit planned identity for one logical Task in a scheduler array."""
+
+    task_id: TaskId
+    seed: int
+    array_index: int
+
+    def __post_init__(self) -> None:
+        if type(self.task_id) is not TaskId:
+            raise TypeError("ArrayTaskMapping task_id must be a TaskId")
+        if type(self.seed) is not int:
+            raise TypeError("ArrayTaskMapping seed must be an integer")
+        if type(self.array_index) is not int:
+            raise TypeError("ArrayTaskMapping array_index must be an integer")
+        if self.array_index < 0:
+            raise ValueError("ArrayTaskMapping array_index must be non-negative")
+
+
+@dataclass(frozen=True, slots=True)
 class ExecutionPlan:
     """A pure prospective plan; it is not a Run and submits nothing."""
 
@@ -82,6 +101,7 @@ class ExecutionPlan:
     target: Target
     units: tuple[ExecutionUnit, ...]
     groups: tuple[ExecutionGroup, ...]
+    array_mapping: tuple[ArrayTaskMapping, ...]
     strategy: str = ONE_UNIT_PER_TASK
     staging_backend: str = field(init=False)
 
@@ -131,6 +151,27 @@ class ExecutionPlan:
                 raise ValueError(
                     "slurm_array strategy requires one multi-Task execution group"
                 )
+            if any(unit.resources != units[0].resources for unit in units[1:]):
+                raise ValueError("slurm_array strategy requires uniform Task resources")
+        array_mapping = tuple(self.array_mapping)
+        if any(type(item) is not ArrayTaskMapping for item in array_mapping):
+            raise TypeError(
+                "ExecutionPlan array_mapping must contain ArrayTaskMappings"
+            )
+        if self.strategy == ONE_UNIT_PER_TASK and array_mapping:
+            raise ValueError(
+                "one_unit_per_task strategy cannot define an array mapping"
+            )
+        if self.strategy == SLURM_ARRAY:
+            expected_mapping = tuple(
+                ArrayTaskMapping(unit.task_id, unit.seed, index)
+                for index, unit in enumerate(units)
+            )
+            if array_mapping != expected_mapping:
+                raise ValueError(
+                    "ExecutionPlan array mapping must match Task order and seeds"
+                )
         object.__setattr__(self, "units", units)
         object.__setattr__(self, "groups", groups)
+        object.__setattr__(self, "array_mapping", array_mapping)
         object.__setattr__(self, "staging_backend", self.target.staging.kind)

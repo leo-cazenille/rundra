@@ -103,6 +103,7 @@ def test_create_plan_is_deterministic_inspectable_and_does_not_create_a_run() ->
     assert first.experiment_name == "example"
     assert first.target == _target()
     assert first.strategy == "one_unit_per_task"
+    assert first.array_mapping == ()
     assert [group.task_ids for group in first.groups] == [
         (first.units[0].task_id,),
         (first.units[1].task_id,),
@@ -209,6 +210,7 @@ def test_execution_plan_rejects_unstable_ids_duplicate_seeds_and_configs() -> No
         "experiment_name": plan.experiment_name,
         "target": plan.target,
         "groups": plan.groups,
+        "array_mapping": plan.array_mapping,
     }
 
     with pytest.raises(ValueError, match="contiguous ordinal Task IDs"):
@@ -241,6 +243,13 @@ def test_slurm_multi_task_plan_selects_one_array_group() -> None:
     assert len(plan.groups) == 1
     assert plan.groups[0].task_ids == tuple(unit.task_id for unit in plan.units)
     assert [unit.seed for unit in plan.units] == [4, 9, 12]
+    assert [
+        (str(item.task_id), item.seed, item.array_index) for item in plan.array_mapping
+    ] == [
+        ("task_000000", 4, 0),
+        ("task_000001", 9, 1),
+        ("task_000002", 12, 2),
+    ]
 
 
 def test_single_task_slurm_plan_does_not_select_an_array() -> None:
@@ -253,6 +262,7 @@ def test_single_task_slurm_plan_does_not_select_an_array() -> None:
     plan = create_plan(_spec(), _config(), target, seeds=(4,))
 
     assert plan.strategy == "one_unit_per_task"
+    assert plan.array_mapping == ()
     assert plan.groups[0].task_ids == (plan.units[0].task_id,)
 
 
@@ -269,6 +279,7 @@ def test_execution_plan_rejects_invalid_group_partitions_and_strategies() -> Non
         "experiment_name": local.experiment_name,
         "target": local.target,
         "units": local.units,
+        "array_mapping": local.array_mapping,
     }
 
     with pytest.raises(ValueError, match="partition Task IDs in plan order"):
@@ -289,7 +300,68 @@ def test_execution_plan_rejects_invalid_group_partitions_and_strategies() -> Non
             target=slurm_target,
             units=local.units,
             groups=local.groups,
+            array_mapping=(),
             strategy="slurm_array",
         )
     with pytest.raises(ValueError, match="unsupported"):
         ExecutionPlan(groups=local.groups, strategy="future", **common)
+
+
+def test_execution_plan_rejects_array_mapping_that_changes_task_identity() -> None:
+    from dataclasses import replace
+
+    from rundra.domain.models import BackendConfig
+    from rundra.orchestration.models import ArrayTaskMapping, ExecutionPlan
+    from rundra.orchestration.planner import create_plan
+
+    target = replace(_target(), scheduler=BackendConfig("slurm"))
+    plan = create_plan(_spec(), _config(), target, seeds=(4, 9))
+    first, second = plan.array_mapping
+    common = {
+        "version": plan.version,
+        "experiment_name": plan.experiment_name,
+        "target": plan.target,
+        "units": plan.units,
+        "groups": plan.groups,
+        "strategy": plan.strategy,
+    }
+
+    with pytest.raises(ValueError, match="match Task order and seeds"):
+        ExecutionPlan(array_mapping=(second, first), **common)
+    with pytest.raises(ValueError, match="match Task order and seeds"):
+        ExecutionPlan(
+            array_mapping=(first, replace(second, seed=10)),
+            **common,
+        )
+    with pytest.raises(ValueError, match="match Task order and seeds"):
+        ExecutionPlan(
+            array_mapping=(first, replace(second, array_index=7)),
+            **common,
+        )
+    with pytest.raises(ValueError, match="non-negative"):
+        ArrayTaskMapping(first.task_id, first.seed, -1)
+
+
+def test_execution_plan_rejects_heterogeneous_array_resources() -> None:
+    from dataclasses import replace
+
+    from rundra.domain.models import BackendConfig, ResourceRequest
+    from rundra.orchestration.models import ExecutionPlan
+    from rundra.orchestration.planner import create_plan
+
+    target = replace(_target(), scheduler=BackendConfig("slurm"))
+    plan = create_plan(_spec(), _config(), target, seeds=(4, 9))
+
+    with pytest.raises(ValueError, match="uniform Task resources"):
+        ExecutionPlan(
+            version=plan.version,
+            experiment_name=plan.experiment_name,
+            target=plan.target,
+            units=(
+                plan.units[0],
+                replace(plan.units[1], resources=ResourceRequest(cpus_per_task=8)),
+            ),
+            groups=plan.groups,
+            array_mapping=plan.array_mapping,
+            strategy=plan.strategy,
+        )
