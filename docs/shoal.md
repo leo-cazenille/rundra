@@ -25,12 +25,29 @@ experiment's explicit `resources.native.slurm` section and must follow Shoal
 policy. The example also does not claim that the placeholder workspace exists,
 is writable, or that any backend is reachable.
 
+For ordinary `plan`, `run`, `submit`, and Run-ID lifecycle examples, see
+[Running and managing experiments](usage.md). The remainder of this document is
+the developer-owned, resource-gated Shoal test procedure and its recorded
+point-in-time evidence.
+
 ## Opt-in system-test harness
 
 Shoal tests carry the registered `shoal_system` marker and are skipped unless
 the explicit command-line switch is present. The harness additionally requires
 the paths to the operator's edited target, experiment, and opaque configuration
 files. The target name defaults to `shoal` and can be overridden when needed:
+
+| Scope | Additional required switch | Submits work |
+|---|---|---|
+| target validation and preflight | none beyond `--run-shoal-system-tests` | no |
+| bounded CPU | `--run-shoal-cpu-test` | yes |
+| bounded GPU | `--run-shoal-gpu-test` | yes |
+| controlled failure scenarios | `--run-shoal-failure-tests` | one experiment-failure case |
+| three-element CPU array | `--run-shoal-array-test` | yes |
+
+Passing only a resource-specific switch is insufficient; the general switch is
+always required. Run one bounded module at a time and inspect its plan/preflight
+output before allowing submission.
 
 ```bash
 RUNDRA_SHOAL_TARGETS_FILE=/tmp/rundra-shoal-targets.yaml \

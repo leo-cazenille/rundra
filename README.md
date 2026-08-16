@@ -82,6 +82,7 @@ Implementation progress is tracked in
 User documentation:
 
 - [installation, configuration, and target setup](docs/getting-started.md);
+- [local and remote execution, lifecycle commands, and troubleshooting](docs/usage.md);
 - [versioned JSON contracts for agents](docs/schemas/README.md);
 - [Shoal setup and explicitly opted-in system tests](docs/shoal.md).
 
