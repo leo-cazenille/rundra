@@ -2676,7 +2676,16 @@ config/seeds, logs/results, accounting-enabled and fallback reconciliation,
 and failure-state separation all fit the existing adapter-owned metadata and
 semantic port values.
 
-Shoal system tests should eventually cover:
+M6.6 adds the final separately gated disconnected-client lifecycle scenario.
+Two short CPU Runs are submitted before either is reconciled and are then
+managed through new CLI processes by Run ID. A third Run is observed running
+with positive started-log evidence before cancellation. The test covers
+new-process status/log/fetch/cancel, repeat fetch/cancel, distinct concurrent
+Run workspaces and scheduler identities, final cancellation reconciliation,
+and partial output retrieval. Queue state, empty-log creation, and
+scheduler-appended cancellation diagnostics are treated as legitimate races.
+
+The resulting opt-in Shoal matrix covers:
 
 - SSH connectivity;
 - rsync staging;
@@ -3035,6 +3044,11 @@ Deliver:
 - result retrieval.
 
 Do not require Slurm yet for the transport tests.
+
+On 2026-08-16, one all-opt-in invocation passed all nine Shoal system tests in
+121.24 seconds. The ordinary default invocation continued to skip all nine and
+contacted no real infrastructure. Exact Run/job evidence is recorded in
+`docs/shoal.md`; observed versions remain point-in-time deployment evidence.
 
 ---
 

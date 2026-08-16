@@ -44,6 +44,7 @@ files. The target name defaults to `shoal` and can be overridden when needed:
 | bounded GPU | `--run-shoal-gpu-test` | yes |
 | controlled failure scenarios | `--run-shoal-failure-tests` | one experiment-failure case |
 | three-element CPU array | `--run-shoal-array-test` | yes |
+| disconnected lifecycle and cancellation | `--run-shoal-lifecycle-test` | three bounded CPU jobs |
 
 Passing only a resource-specific switch is insufficient; the general switch is
 always required. Run one bounded module at a time and inspect its plan/preflight
@@ -374,3 +375,61 @@ The system test retains evidence under its exact Run ID. If cleanup is wanted,
 inspect the record first and remove only that Run's configured workspace path
 and its exact array-element scheduler log files; do not recursively clean the
 workspace root.
+
+## M6.6 disconnected lifecycle and final matrix
+
+The checked `examples/shoal/lifecycle` experiment adds one final independent
+opt-in. Seeds 71 and 72 each run for twelve seconds; they are submitted before
+either is reconciled so two distinct asynchronous Runs coexist. Seed 73 writes
+started evidence and then sleeps for up to four minutes, allowing the harness to
+observe `RUNNING` and readable started stdout before cancellation. Every Task
+requests one CPU, no GPU, 1 GiB, and a five-minute walltime.
+
+```bash
+RUNDRA_SHOAL_TARGETS_FILE=/tmp/rundra-shoal-targets.yaml \
+RUNDRA_SHOAL_CPU_IMAGE=/absolute/path/to/cpu-image.sif \
+  uv run pytest tests/system/test_shoal_lifecycle.py \
+    -m 'shoal_system and shoal_lifecycle' \
+    --run-shoal-system-tests \
+    --run-shoal-lifecycle-test \
+    -vv
+```
+
+Each `submit`, `status`, `logs`, `fetch`, and `cancel` call is a fresh CLI
+process sharing only the explicit client RunRecord directory. The test requires
+distinct Run IDs, scheduler IDs, and workspaces; successful isolated seed/config
+results; repeat fetch without duplicate manifest keys; terminal cancel
+idempotency; active cancellation followed by final status; stable started
+stdout even when Slurm appends cancellation diagnostics to stderr; and partial
+result retrieval from the cancelled Run.
+
+### Recorded M6.6 observation
+
+On 2026-08-16, the standalone lifecycle proof passed in 55.43 seconds. The final
+all-opt-in system invocation then passed all nine tests in 121.24 seconds using
+the configured `/shoalhome/shoal/rundra-m66` workspace. Its lifecycle Runs were:
+
+| Seed | Run ID | Slurm job | Final computation | Retrieval |
+|---|---|---:|---|---|
+| 71 | `run_a99c74ada5a744e28a50573eb701838e` | 125 | `SUCCEEDED` | `SUCCEEDED` |
+| 72 | `run_37dcadc467cf4cddabb4a6b126109a3a` | 126 | `SUCCEEDED` | `SUCCEEDED` |
+| 73 | `run_471089bee93041138691bd12efdf3d68` | 127 | `CANCELLED` | `SUCCEEDED` |
+
+The same final invocation passed array job 115 (`FAILED` only because its
+middle seed deliberately exited 23, retrieval `SUCCEEDED`), dirty-source CPU
+job 119, deliberate-failure job 121, GPU job 123, target validation, remote
+preflight, and the safe non-submitting staging failure. The latter retained no
+scheduler ID and retrieval `NOT_REQUESTED`.
+
+Three preliminary lifecycle assertions were corrected before the green matrix:
+the cancel payload is named `cancel`; a queued cancellation need not have log
+files, so the partial-evidence case now waits for positive started output; and
+Slurm may create an empty log before the first write and append legitimate
+cancellation diagnostics afterward. These were harness expectation races, not
+production lifecycle failures. Every submitted preliminary job reached a
+terminal scheduler state.
+
+Ordinary `uv run pytest` skips this lifecycle test along with every other Shoal
+test. The final default run reported nine explicit skips and made no network
+connection. Retained live evidence and logs are Run-specific; inspect terminal
+records and remove only exact Run/job paths if site-approved cleanup is wanted.

@@ -31,6 +31,11 @@ target setup, executable local/remote lifecycle examples, troubleshooting,
 versioned JSON contract inventory, artifact/provenance semantics, and explicit
 Shoal system-test opt-ins. The specification now distinguishes implemented
 provenance from optional fields that remain unavailable in v0.1.
+M6.6 completes the release validation matrix: default tests remain
+infrastructure-free, source distributions and wheels install cleanly, and all
+nine explicitly opted-in Shoal tests pass, including disconnected asynchronous
+status/log/fetch/cancel, repeat operations, concurrent isolation, and active
+cancellation with partial retrieval.
 
 Rundra has
 portable domain and configuration models,
