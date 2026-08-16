@@ -26,6 +26,11 @@ destinations and Slurm native tokens, rejects symlinked fetch destinations,
 redacts adapter diagnostics, and enforces the no-credential invariant at both
 configuration and RunStore boundaries without weakening normal SSH host-key
 verification.
+M6.5 completes the user/agent documentation set with source installation and
+target setup, executable local/remote lifecycle examples, troubleshooting,
+versioned JSON contract inventory, artifact/provenance semantics, and explicit
+Shoal system-test opt-ins. The specification now distinguishes implemented
+provenance from optional fields that remain unavailable in v0.1.
 
 Rundra has
 portable domain and configuration models,
