@@ -3148,21 +3148,20 @@ The second backend should preferably correspond to a real cluster used by projec
 
 ## 49. Public API stability
 
-Before v1.0, internal Python APIs may evolve significantly.
+M6.7 freezes the documented v0.1 external surface: version-1 experiment,
+target, and launch YAML; CLI command/argument semantics; portable Run and
+retrieval state names; stable Run/Task identifiers; version-1 JSON operation
+documents; and the persisted version-1 RunRecord. The checked fixtures under
+`docs/schemas/` and `docs/cli-reference.md` are normative. Removing a field,
+changing its type or meaning, or reinterpreting a version-1 YAML field requires
+an explicit new version. Additive CLI JSON fields remain compatible within
+version 1; persisted RunRecords reject unknown fields.
 
-However, the following should be treated with increasing stability once documented:
-
-- experiment schema;
-- target schema;
-- CLI command names;
-- CLI argument semantics;
-- Run state names;
-- JSON output;
-- persisted RunRecord format.
-
-Breaking changes should be explicit and versioned.
-
-Human-readable formatting is not a stable API.
+Rundra v0.1 exposes no supported Python API. Every `rundra.*` module, class,
+function, protocol, and import path is internal and may evolve before a future
+documented Python API is introduced above orchestration. Human-readable
+formatting and physical local/remote storage layouts are also not stable APIs.
+The complete compatibility policy is in `docs/stability.md`.
 
 ---
 

@@ -5,6 +5,11 @@ interfaces. They are concrete contract fixtures, not JSON Schema documents.
 Contract tests construct or execute the corresponding operation and compare the
 parsed result with each file.
 
+M6.7 freezes these version-1 structures for the v0.1 release. The checked
+[`cli-surface-v1.json`](cli-surface-v1.json) fixture separately freezes command,
+positional, and option names; their semantics are in the
+[CLI reference](../cli-reference.md).
+
 Every CLI document has `format_version: 1`, an `operation` name, and an `ok`
 flag. A successful document contains an operation-specific value. A failed
 document contains `error.code`, `error.message`, and `error.details` instead.
@@ -14,6 +19,7 @@ Use the fields, not object-key order or human output, as the interface.
 
 | Operation or document | Checked example | Primary payload |
 |---|---|---|
+| CLI surface | [`cli-surface-v1.json`](cli-surface-v1.json) | program, commands, positionals, options |
 | `validate` | [`validate-success-v1.json`](validate-success-v1.json) | `experiment` |
 | `plan` | [`plan-success-v1.json`](plan-success-v1.json) | `plan`, plus launch resolution |
 | `targets` | [`targets-success-v1.json`](targets-success-v1.json) | `targets` |

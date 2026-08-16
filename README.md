@@ -92,9 +92,11 @@ Implementation progress is tracked in
 User documentation:
 
 - [installation, configuration, and target setup](docs/getting-started.md);
+- [v0.1 CLI reference](docs/cli-reference.md);
 - [local and remote execution, lifecycle commands, and troubleshooting](docs/usage.md);
 - [artifact, provenance, and reproducibility semantics](docs/artifacts-and-provenance.md);
 - [versioned JSON contracts for agents](docs/schemas/README.md);
+- [interface stability and internal Python API policy](docs/stability.md);
 - [Shoal setup and explicitly opted-in system tests](docs/shoal.md).
 
 ## Development setup

@@ -1,0 +1,60 @@
+# v0.1 CLI reference
+
+The supported executable is `rundr`. `--json` may appear before or after every
+command. `-h`/`--help` is human-oriented and its formatting is not stable.
+
+## Command surface
+
+| Command | Positional | Options | Semantics |
+|---|---|---|---|
+| `validate` | `EXPERIMENT` | `--json` | Validate experiment YAML without executing. |
+| `plan` | `EXPERIMENT` | `--config`, `--seed`/`--seeds`/`--random-seed`, `--target`, `--targets-file`, `--project-file`, `--profile`, `--json` | Resolve and inspect execution without target contact or state changes. |
+| `targets` | none | `--targets-file`, `--json` | Validate and list configured targets. |
+| `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
+| `submit` | `EXPERIMENT` | same as `run` | Submit asynchronously when the selected scheduler supports it. |
+| `status` | `RUN_ID` | `--data-dir`, `--json` | Reconcile scheduler state and return portable Run/Task status. |
+| `list` | none | `--data-dir`, `--json` | List persisted Runs in deterministic order. |
+| `logs` | `RUN_ID` | `--task`, `--data-dir`, `--json` | Read one Task's framework-managed stdout/stderr. |
+| `fetch` | `RUN_ID` | required `--destination`; repeatable `--task`; `--data-dir`, `--json` | Idempotently retrieve all or selected Task artifacts. |
+| `inspect` | `RUN_ID` | `--data-dir`, `--json` | Return the complete persisted RunRecord. |
+| `cancel` | `RUN_ID` | `--data-dir`, `--json` | Reconcile and cancel only active scheduler work; repeat safely. |
+
+`--seeds START:STOP` is an inclusive integer range. Seed selectors are mutually
+exclusive. If no seed is supplied, launch resolution uses a configured seed or
+generates and persists one; `--random-seed` forces generation even when a fixed
+default exists. `--task` accepts a stable `task_NNNNNN` ID or zero-based
+ordinal. Without a selector, `fetch` addresses all Tasks and `logs` requires a
+single-Task Run.
+
+Launch values resolve in this order: explicit CLI, selected project profile,
+project defaults, user defaults, then built-ins. Automatic locations are:
+
+- targets: `~/.config/rundra/targets.yaml`;
+- user launch defaults: `~/.config/rundra/config.yaml`;
+- adjacent project launch defaults: `rundra.yaml`;
+- client RunRecords: `~/.local/share/rundra/runs`.
+
+`plan` deliberately has no `--source-root`, `--destination`, or `--data-dir`
+because it creates no snapshot, retrieval, or RunRecord. Local `submit` returns
+`ASYNC_UNAVAILABLE`; SSH/Slurm submission persists scheduler identities before
+returning so later processes can operate by Run ID.
+
+## Machine output and exits
+
+All programmatically useful commands support the checked
+[`format_version: 1` contracts](schemas/README.md). JSON goes to stdout with an
+empty stderr. Human errors go to stderr. Both renderers consume the same
+operation result.
+
+| Exit | Meaning |
+|---|---|
+| 0 | the requested operation completed successfully |
+| 1 | CLI usage or an operation failed |
+| 2 | synchronous `run` returned a durable failed or cancelled experiment |
+
+Operation success is distinct from scientific success: a successful `status`,
+`logs`, `fetch`, or `inspect` may describe a failed Run. Read `ok` first, then
+the nested execution and retrieval states.
+
+See [running and managing experiments](usage.md) for executable workflows and
+[v0.1 interface stability](stability.md) for compatibility guarantees.
