@@ -38,7 +38,7 @@ def _prepare_source(root: Path, image: Path) -> Path:
 def _invoke_cli(
     arguments: tuple[str, ...],
     *,
-    expected_exit: int = 0,
+    expected_exit: int | tuple[int, ...] = 0,
     timeout: float = 600,
 ) -> dict[str, object]:
     completed = subprocess.run(
@@ -51,10 +51,14 @@ def _invoke_cli(
         shell=False,
         timeout=timeout,
     )
-    if completed.returncode != expected_exit:
+    expected_exits = (
+        (expected_exit,) if isinstance(expected_exit, int) else expected_exit
+    )
+    if completed.returncode not in expected_exits:
         pytest.fail(
             f"rundr {arguments[0]} exited {completed.returncode}, expected "
-            f"{expected_exit}: {completed.stdout.strip() or completed.stderr.strip()}"
+            f"one of {expected_exits}: "
+            f"{completed.stdout.strip() or completed.stderr.strip()}"
         )
     try:
         value = json.loads(completed.stdout)
@@ -166,6 +170,27 @@ def _wait_for(
     pytest.fail(f"Run {run_id} did not reach one of {sorted(wanted)}")
 
 
+def _wait_for_started_logs(
+    run_id: RunId, data_dir: Path, *, timeout: float = 120
+) -> dict[str, object]:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        document = _invoke_cli(
+            ("logs", str(run_id), "--data-dir", str(data_dir)),
+            expected_exit=(0, 1),
+        )
+        logs = document.get("logs")
+        if isinstance(logs, dict) and logs.get("stdout") == (
+            "RUNDRA_LIFECYCLE_STDOUT started seed=73\n"
+        ):
+            return logs
+        error = document.get("error")
+        if not isinstance(error, dict) or error.get("code") != "LOG_READ_FAILED":
+            pytest.fail(f"Unexpected pre-cancellation logs result for {run_id}")
+        time.sleep(1)
+    pytest.fail(f"Run {run_id} did not expose its started log before cancellation")
+
+
 def _fetch_twice(run_id: RunId, data_dir: Path, destination: Path) -> None:
     arguments = (
         "fetch",
@@ -264,7 +289,8 @@ def test_shoal_disconnected_async_lifecycle_is_repeatable_and_isolated(
         tmp_path / "cancel-auto",
         73,
     )
-    _wait_for(cancel_id, data_dir, {"QUEUED", "RUNNING"})
+    _wait_for(cancel_id, data_dir, {"RUNNING"})
+    started_logs = _wait_for_started_logs(cancel_id, data_dir)
     cancelled = _invoke_cli(
         ("cancel", str(cancel_id), "--data-dir", str(data_dir)), timeout=300
     )
@@ -279,7 +305,7 @@ def test_shoal_disconnected_async_lifecycle_is_repeatable_and_isolated(
 
     logs = _invoke_cli(("logs", str(cancel_id), "--data-dir", str(data_dir)))["logs"]
     assert isinstance(logs, dict)
-    assert logs["stdout"] == "RUNDRA_LIFECYCLE_STDOUT started seed=73\n"
+    assert logs == started_logs
     cancel_destination = tmp_path / "cancel-retrieved"
     _fetch_twice(cancel_id, data_dir, cancel_destination)
     partial = cancel_destination / "output/results/evidence.txt"
