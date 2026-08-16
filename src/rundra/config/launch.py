@@ -11,10 +11,10 @@ from rundra.config._schema import (
     expect_mapping,
     expect_string,
     fail,
-    is_credential_field,
     require_version_one,
 )
 from rundra.config._yaml import read_yaml_document
+from rundra.security import is_credential_field
 
 _PROJECT_FIELDS = frozenset({"version", "default_profile", "defaults", "profiles"})
 _LAUNCH_VALUE_FIELDS = frozenset(

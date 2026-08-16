@@ -5,7 +5,7 @@ import json
 import os
 import stat
 import tempfile
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -23,6 +23,7 @@ from rundra.persistence.errors import (
     RunStoreError,
 )
 from rundra.persistence.serialization import record_from_dict, record_to_dict
+from rundra.security import is_credential_field
 
 
 class JsonRunStore:
@@ -155,6 +156,10 @@ class JsonRunStore:
 
     def _write_temporary(self, record: RunRecord) -> Path:
         document = record_to_dict(record)
+        if _contains_credential_field(document):
+            raise RunStoreError(
+                f"Run {record.run.id} contains a forbidden credential field"
+            )
         temporary: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(
@@ -203,6 +208,10 @@ class JsonRunStore:
             )
         except (json.JSONDecodeError, RunRecordFormatError) as error:
             raise RunRecordFormatError(f"Invalid Run record {path}: {error}") from error
+        if _contains_credential_field(value):
+            raise RunRecordFormatError(
+                f"Invalid Run record {path}: forbidden credential field"
+            )
         try:
             return record_from_dict(value)
         except RunRecordFormatError as error:
@@ -289,3 +298,15 @@ def _unique_object(pairs: Sequence[tuple[str, object]]) -> dict[str, object]:
 
 def _reject_nonfinite(value: str) -> object:
     raise RunRecordFormatError(f"non-finite JSON value {value!r} is not supported")
+
+
+def _contains_credential_field(value: object) -> bool:
+    if isinstance(value, Mapping):
+        return any(
+            (type(key) is str and is_credential_field(key))
+            or _contains_credential_field(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return any(_contains_credential_field(item) for item in value)
+    return False

@@ -181,32 +181,3 @@ def require_version_one(
             message=f"Unsupported schema version {version}; expected version 1",
         )
     return version
-
-
-def is_credential_field(field: str) -> bool:
-    normalized = field.casefold().replace("-", "_")
-    return normalized in {
-        "password",
-        "passphrase",
-        "api_key",
-        "access_key",
-        "authorization",
-        "auth_header",
-        "private_key",
-        "secret",
-        "secret_key",
-        "token",
-        "credential",
-        "credentials",
-    } or normalized.endswith(
-        (
-            "_password",
-            "_secret",
-            "_token",
-            "_api_key",
-            "_access_key",
-            "_secret_key",
-            "_credential",
-            "_credentials",
-        )
-    )

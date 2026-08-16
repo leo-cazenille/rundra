@@ -11,6 +11,7 @@ from rundra.adapters._remote_shell import (
 )
 from rundra.domain.models import Command
 from rundra.ports import CapabilityCheck, CommandResult
+from rundra.security import is_safe_ssh_destination
 
 
 class SSHTransportError(RuntimeError):
@@ -37,8 +38,8 @@ class SSHTransport:
             raise TypeError("SSH host must be a string")
         if not host.strip():
             raise ValueError("SSH host must not be blank")
-        if "\x00" in host:
-            raise ValueError("SSH host must not contain NUL")
+        if not is_safe_ssh_destination(host):
+            raise ValueError("SSH host must be a safe host alias or user@host")
         if type(executable) is not str:
             raise TypeError("SSH executable must be a string")
         if not executable.strip():

@@ -63,6 +63,41 @@ def test_interrupted_temporary_write_is_cleaned_without_publishing_a_record(
     assert list(tmp_path.glob(".*.tmp")) == []
 
 
+def test_store_rejects_programmatic_and_tampered_credential_fields(
+    tmp_path: Path,
+) -> None:
+    original = _record()
+    secret = "must-not-appear"
+    credential_command = replace(
+        original.experiment.command,
+        environment={"OPENAI_API_KEY": secret},
+    )
+    credential_record = replace(
+        original,
+        experiment=replace(original.experiment, command=credential_command),
+    )
+    store = JsonRunStore(tmp_path)
+
+    with pytest.raises(RunStoreError) as create_error:
+        store.create(credential_record)
+
+    assert "forbidden credential field" in str(create_error.value)
+    assert secret not in str(create_error.value)
+    assert not (tmp_path / f"{original.run.id}.json").exists()
+
+    store.create(original)
+    path = tmp_path / f"{original.run.id}.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["experiment"]["command"]["environment"] = {"AUTH_TOKEN": secret}
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(RunRecordFormatError) as load_error:
+        store.load(original.run.id)
+
+    assert "forbidden credential field" in str(load_error.value)
+    assert secret not in str(load_error.value)
+
+
 def test_load_and_list_reject_unknown_versions_without_hiding_valid_records(
     tmp_path: Path,
 ) -> None:

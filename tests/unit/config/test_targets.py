@@ -82,6 +82,14 @@ targets:
             "FORBIDDEN_FIELD",
             ("targets", "bad", "transport", "password"),
         ),
+        (
+            "version: 1\ntargets:\n  bad:\n"
+            "    transport: {type: ssh, host: '-oProxyCommand=danger'}\n"
+            "    scheduler: {type: slurm}\n    staging: {type: rsync}\n"
+            "    container: {type: apptainer}\n    workspace: /tmp/rundra\n",
+            "INVALID_VALUE",
+            ("targets", "bad", "transport", "host"),
+        ),
     ],
 )
 def test_load_targets_reports_strict_actionable_schema_errors(

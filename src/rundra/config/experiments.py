@@ -13,7 +13,6 @@ from rundra.config._schema import (
     expect_string,
     expect_string_list,
     fail,
-    is_credential_field,
     require_version_one,
 )
 from rundra.config._yaml import (
@@ -29,6 +28,7 @@ from rundra.domain.models import (
     NativeValue,
     ResourceRequest,
 )
+from rundra.security import is_credential_field
 
 _ROOT_FIELDS = frozenset(
     {"version", "experiment", "command", "container", "resources", "outputs", "sync"}

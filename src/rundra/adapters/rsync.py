@@ -33,6 +33,7 @@ from rundra.ports import (
     StageRequest,
     Transport,
 )
+from rundra.security import is_safe_ssh_destination
 
 _DEFAULT_EXCLUDES = (
     ".git",
@@ -376,11 +377,7 @@ def _target_host(options: Mapping[str, NativeValue]) -> str:
 
 
 def _safe_host(value: str) -> str:
-    if not value:
-        raise RsyncStagerError("SSH target requires a host alias for rsync")
-    if any(character.isspace() for character in value) or any(
-        character in value for character in ("\x00", ":")
-    ):
+    if not is_safe_ssh_destination(value):
         raise RsyncStagerError("SSH target host cannot be represented safely for rsync")
     return value
 

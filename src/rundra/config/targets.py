@@ -9,11 +9,11 @@ from rundra.config._schema import (
     expect_mapping,
     expect_string,
     fail,
-    is_credential_field,
     require_version_one,
 )
 from rundra.config._yaml import read_yaml_document
 from rundra.domain.models import BackendConfig, NativeValue, Target
+from rundra.security import is_credential_field, is_safe_ssh_destination
 
 _TARGET_FIELDS = frozenset(
     {"transport", "scheduler", "staging", "container", "workspace"}
@@ -146,12 +146,20 @@ def _backend_config(
                 code="MISSING_FIELD",
                 message="SSH transport requires field 'host'",
             )
-        options["host"] = expect_string(
+        host = expect_string(
             section["host"],
             source=source,
             path=(*path, "host"),
             nonblank=True,
         )
+        if not is_safe_ssh_destination(host):
+            fail(
+                source=source,
+                path=(*path, "host"),
+                code="INVALID_VALUE",
+                message="SSH host must be a safe host alias or user@host destination",
+            )
+        options["host"] = host
     elif "host" in section:
         fail(
             source=source,

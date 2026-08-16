@@ -67,6 +67,11 @@ def test_ssh_transport_reports_client_search_failures(
         ("", ValueError),
         ("   ", ValueError),
         ("cluster\x00alias", ValueError),
+        ("-oProxyCommand=danger", ValueError),
+        ("cluster;danger", ValueError),
+        ("$(danger)", ValueError),
+        ("cluster alias", ValueError),
+        ("cluster:22", ValueError),
         (object(), TypeError),
     ],
 )
@@ -147,6 +152,9 @@ def test_ssh_transport_runs_exact_openssh_argv_and_returns_typed_result(
     assert result.exit_code == 7
     assert result.stdout == "remote output\n"
     assert result.stderr == "remote error\n"
+    rendered_argv = " ".join(calls[0][0])
+    assert "StrictHostKeyChecking" not in rendered_argv
+    assert "UserKnownHostsFile" not in rendered_argv
     assert before <= result.started_at <= result.finished_at <= after
 
 
