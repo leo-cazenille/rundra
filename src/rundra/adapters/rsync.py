@@ -8,6 +8,11 @@ from collections.abc import Mapping
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePath, PurePosixPath
 
+from rundra.adapters._local_paths import (
+    UnsafeLocalPathError,
+    reject_destination_tree_symlinks,
+    resolve_write_destination,
+)
 from rundra.adapters.remote import (
     RemoteWorkspaceAllocator,
     RemoteWorkspaceError,
@@ -204,6 +209,10 @@ class RsyncStager:
         if any("\x00" in pattern for pattern in request.patterns):
             raise RsyncRetrievalError("Fetch patterns must not contain NUL")
         destination = _fetch_destination(request.destination)
+        try:
+            reject_destination_tree_symlinks(destination)
+        except UnsafeLocalPathError as error:
+            raise RsyncRetrievalError(str(error)) from error
         self.check()
         output_destination = destination / "output"
         logs_destination = destination / "logs"
@@ -387,7 +396,10 @@ def _seal_command(source: PurePath, inputs: PurePath) -> Command:
 
 
 def _fetch_destination(value: PurePath) -> Path:
-    destination = Path(str(value)).expanduser().resolve()
+    try:
+        destination = resolve_write_destination(value)
+    except UnsafeLocalPathError as error:
+        raise RsyncRetrievalError(str(error)) from error
     if destination == Path(destination.anchor):
         raise RsyncRetrievalError(
             "Local retrieval destination must not be filesystem root"

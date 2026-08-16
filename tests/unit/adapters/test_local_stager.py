@@ -324,3 +324,26 @@ def test_fetch_rejects_path_traversal_symlinks_and_run_destinations(
             )
     finally:
         _restore_writes(workspace.source, workspace.inputs)
+
+
+def test_fetch_rejects_symlinked_destination_before_writing_outside(
+    tmp_path: Path,
+) -> None:
+    source = _make_source(tmp_path)
+    workspace = LocalStager().stage(_request(source, tmp_path / "workspace"))
+    result = workspace.outputs / "results/result.txt"
+    result.parent.mkdir(parents=True)
+    result.write_text("science\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    destination = tmp_path / "retrieved"
+    destination.mkdir()
+    (destination / "results").symlink_to(outside, target_is_directory=True)
+
+    try:
+        with pytest.raises(LocalStagerError, match="destination tree.*symbolic links"):
+            LocalStager().fetch(FetchRequest(workspace, ("results/**",), destination))
+    finally:
+        _restore_writes(workspace.source, workspace.inputs)
+
+    assert list(outside.iterdir()) == []

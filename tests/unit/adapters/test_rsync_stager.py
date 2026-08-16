@@ -428,6 +428,30 @@ def test_rsync_fetch_rejects_unsafe_inputs_and_redacts_transfer_failure(
     assert "SECRET_REMOTE_DATA" not in str(captured.value)
 
 
+def test_rsync_fetch_rejects_symlinked_destination_before_transfer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda executable: "/usr/bin/rsync")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    destination = tmp_path / "retrieved"
+    destination.mkdir()
+    (destination / "output").symlink_to(outside, target_is_directory=True)
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        pytest.fail("rsync must not run for an unsafe destination")
+
+    monkeypatch.setattr(subprocess, "run", forbidden)
+    stager = RsyncStager(RecordingTransport(deque()), host="cluster")
+
+    with pytest.raises(RsyncRetrievalError, match="destination tree.*symbolic links"):
+        stager.fetch(FetchRequest(_workspace(), ("results/**",), destination))
+
+    assert list(outside.iterdir()) == []
+
+
 def test_rsync_fetch_requires_host_and_valid_semantic_workspace(tmp_path: Path) -> None:
     with pytest.raises(RsyncRetrievalError, match="requires a host"):
         RsyncStager(RecordingTransport(deque())).fetch(

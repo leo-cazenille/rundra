@@ -11,6 +11,11 @@ from fnmatch import fnmatchcase
 from pathlib import Path, PurePath, PurePosixPath
 from uuid import uuid4
 
+from rundra.adapters._local_paths import (
+    UnsafeLocalPathError,
+    reject_destination_tree_symlinks,
+    resolve_write_destination,
+)
 from rundra.domain.models import Artifact, ArtifactKind, Command
 from rundra.domain.states import ExecutionState
 from rundra.ports import (
@@ -286,7 +291,11 @@ class LocalStager:
             raise LocalStagerError(
                 "Output directory escapes the Run workspace"
             ) from error
-        destination = Path(str(request.destination)).expanduser().resolve()
+        try:
+            destination = resolve_write_destination(request.destination)
+            reject_destination_tree_symlinks(destination)
+        except UnsafeLocalPathError as error:
+            raise LocalStagerError(str(error)) from error
         if _is_relative_to(destination, root):
             raise LocalStagerError(
                 "Fetch destination must remain outside the Run workspace"
