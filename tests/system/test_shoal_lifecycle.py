@@ -268,7 +268,7 @@ def test_shoal_disconnected_async_lifecycle_is_repeatable_and_isolated(
     cancelled = _invoke_cli(
         ("cancel", str(cancel_id), "--data-dir", str(data_dir)), timeout=300
     )
-    status = cancelled.get("status")
+    status = cancelled.get("cancel")
     assert isinstance(status, dict)
     assert status["state"] == "CANCELLED"
     assert _status(cancel_id, data_dir)["state"] == "CANCELLED"
