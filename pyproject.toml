@@ -35,6 +35,7 @@ markers = [
   "shoal_gpu: resource-consuming Shoal tests requiring a separate GPU opt-in",
   "shoal_failure: bounded Shoal M4.5 tests requiring a separate failure opt-in",
   "shoal_array: bounded Shoal M5.6 array test requiring a separate array opt-in",
+  "shoal_lifecycle: bounded Shoal M6.6 async lifecycle test requiring a separate opt-in",
 ]
 
 [tool.ruff]

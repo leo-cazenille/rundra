@@ -34,6 +34,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="enable the bounded Shoal M5.6 array test in addition to preflight",
     )
+    parser.addoption(
+        "--run-shoal-lifecycle-test",
+        action="store_true",
+        default=False,
+        help="enable the bounded Shoal M6.6 async lifecycle test",
+    )
 
 
 def pytest_collection_modifyitems(
@@ -45,6 +51,7 @@ def pytest_collection_modifyitems(
     run_gpu = bool(config.getoption("--run-shoal-gpu-test"))
     run_failures = bool(config.getoption("--run-shoal-failure-tests"))
     run_array = bool(config.getoption("--run-shoal-array-test"))
+    run_lifecycle = bool(config.getoption("--run-shoal-lifecycle-test"))
     skip_system = pytest.mark.skip(
         reason="requires the explicit --run-shoal-system-tests opt-in"
     )
@@ -60,8 +67,13 @@ def pytest_collection_modifyitems(
     skip_array = pytest.mark.skip(
         reason="requires both Shoal system and M5.6 array submission opt-ins"
     )
+    skip_lifecycle = pytest.mark.skip(
+        reason="requires both Shoal system and M6.6 lifecycle opt-ins"
+    )
     for item in items:
-        if "shoal_array" in item.keywords and not (run_system and run_array):
+        if "shoal_lifecycle" in item.keywords and not (run_system and run_lifecycle):
+            item.add_marker(skip_lifecycle)
+        elif "shoal_array" in item.keywords and not (run_system and run_array):
             item.add_marker(skip_array)
         elif "shoal_failure" in item.keywords and not (run_system and run_failures):
             item.add_marker(skip_failures)
