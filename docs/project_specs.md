@@ -1880,7 +1880,8 @@ Remote execution is a security boundary.
 
 Requirements:
 
-- prefer subprocess argument arrays over `shell=True`;
+- invoke every local subprocess with an argument array and explicit
+  `shell=False`;
 - never concatenate untrusted YAML values directly into executable shell syntax;
 - quote values safely when shell scripts are unavoidable;
 - never log credentials;
@@ -1891,6 +1892,23 @@ Requirements:
 - make backend-native options explicit and auditable.
 
 Generated scheduler scripts should be inspectable where practical.
+
+The v0.1 implementation has exactly two shell serialization formats. OpenSSH
+requires one remote login-shell command, whose arguments, environment, and
+working directory are serialized by the shared POSIX quoting boundary described
+in section 36. Slurm requires an sbatch script; framework-owned directives are
+rendered from typed portable resources, allowed native values are restricted to
+one unambiguous directive token, and experiment commands and array manifests use
+the same quoting boundary without `eval`. A static test audits every production
+`subprocess.run` call for the local argument-array invariant, while executable
+tests pass shell metacharacters, substitutions, quotes, wildcards, and newlines
+through both unavoidable formats as literal data.
+
+Local native execution deliberately inherits the invoking environment and then
+overlays the explicit experiment environment. Container execution instead uses
+Apptainer `--cleanenv --no-eval` and its runtime-owned environment mapping. No
+environment value, external-tool stderr, generated remote command, or
+process-start exception text is included in framework failure diagnostics.
 
 ---
 
@@ -2281,8 +2299,11 @@ network connection. Command execution invokes OpenSSH with a local subprocess
 argument array and `shell=False`, disables pseudo-terminal allocation, and
 returns the same typed `CommandResult` used by local transport.
 
-The adapter deliberately supplies no authentication, jump-host, host-key, or
-user options of its own. OpenSSH therefore continues to use:
+The adapter accepts only an unambiguous host alias or `user@host` destination;
+option-like, whitespace-bearing, shell-bearing, and colon-bearing destinations
+are rejected before OpenSSH or rsync starts. It deliberately supplies no
+authentication, jump-host, host-key, or user options of its own. OpenSSH
+therefore continues to use:
 
 - host aliases;
 - SSH agent authentication;
@@ -2366,6 +2387,10 @@ same request safely updates the same paths. Only after all three transfers
 succeed are regular files scanned into raw-result, stdout/stderr, and scheduler
 metadata artifacts with measured sizes. Nonzero or interrupted transfers do not
 return a successful `FetchResult` and their diagnostics omit remote output.
+Before local or rsync retrieval writes, every existing destination path
+component and existing descendant is checked without following symlinks. A
+symlink therefore cannot redirect a fetched artifact outside the selected local
+destination.
 
 Portable computation and retrieval states remain independent. A transfer
 failure moves retrieval from `PENDING` to `FAILED` without changing a completed
@@ -2415,6 +2440,10 @@ compares the observed record while holding the lock. A changed record produces
 `RunStoreConflictError` rather than silently losing the newer state. If the
 desired replacement is already present, the update succeeds idempotently.
 Readers remain lock-free and see either complete old or complete new JSON.
+The store also recursively rejects credential-bearing field names before a
+programmatic record is written and after JSON is loaded. This preserves the
+no-credential invariant even when a caller bypasses YAML loaders or a persisted
+document is modified outside Rundra.
 
 ---
 
@@ -2482,7 +2511,10 @@ scientific application stdout/stderr
 
 Machine-readable result objects should expose paths or identifiers for relevant logs.
 
-Debug logging may include generated commands but must redact secrets.
+Framework diagnostics must describe command shape and failure category without
+including argument values, environment values, generated remote command text,
+or external-tool stderr. Experiment stdout/stderr remains explicit user-facing
+run data and is not reclassified as framework diagnostic output.
 
 ---
 

@@ -21,6 +21,11 @@ execution, while making `plan` safety and staging behavior explicit.
 M6.3 hardens Run persistence with per-Run writer locking, mandatory optimistic
 updates, retryable conflict reporting, and concurrent status/fetch/cancel stress
 coverage; readers remain lock-free over atomically replaced JSON records.
+M6.4 audits every subprocess and the SSH/sbatch shell boundaries, restricts SSH
+destinations and Slurm native tokens, rejects symlinked fetch destinations,
+redacts adapter diagnostics, and enforces the no-credential invariant at both
+configuration and RunStore boundaries without weakening normal SSH host-key
+verification.
 
 Rundra has
 portable domain and configuration models,
