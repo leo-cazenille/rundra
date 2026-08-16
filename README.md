@@ -11,7 +11,9 @@ The project, GitHub repository, Python package, and PyPI distribution are named
 
 ## Development status
 
-M0 through M5 are complete; M6 release hardening is in progress. The checked
+M0 through M6 implementation and release hardening are complete. The source
+version remains `0.1.0.dev0`; no public release, tag, PyPI publication, or
+domain reservation is claimed. The checked
 Shoal path has passed separately gated CPU, GPU, controlled-failure, and
 three-element Slurm-array system tests. M6.1 audits every public CLI operation,
 common `--json` placement, deterministic output, structured usage errors, and
@@ -36,6 +38,10 @@ infrastructure-free, source distributions and wheels install cleanly, and all
 nine explicitly opted-in Shoal tests pass, including disconnected asynchronous
 status/log/fetch/cancel, repeat operations, concurrent isolation, and active
 cancellation with partial retrieval.
+M6.7 restores the final adapter dependency boundary, adds executable
+architecture and CLI-surface guards, freezes the documented v0.1 serialized
+contracts, marks Python imports unstable, and supplies the changelog and
+authorization-aware release checklist.
 
 Rundra has
 portable domain and configuration models,

@@ -3119,7 +3119,9 @@ Deliver:
 - security/quoting review;
 - cleanup of premature abstractions.
 
-Version 0.1 is reached after M6 acceptance tests pass.
+M6 implementation acceptance passed on 2026-08-16. The source remains
+`0.1.0.dev0`; version 0.1 is not a published release until the checked release
+procedure is explicitly authorized and completed.
 
 ---
 
