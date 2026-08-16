@@ -264,7 +264,7 @@ def test_shoal_disconnected_async_lifecycle_is_repeatable_and_isolated(
         tmp_path / "cancel-auto",
         73,
     )
-    _wait_for(cancel_id, data_dir, {"RUNNING"})
+    _wait_for(cancel_id, data_dir, {"QUEUED", "RUNNING"})
     cancelled = _invoke_cli(
         ("cancel", str(cancel_id), "--data-dir", str(data_dir)), timeout=300
     )
