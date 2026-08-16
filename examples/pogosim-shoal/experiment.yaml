@@ -1,0 +1,27 @@
+version: 1
+experiment:
+  name: pogosim-run-and-tumble
+command:
+  argv:
+    - examples/run_and_tumble/run_and_tumble
+    - -c
+    - "{config}"
+    - -g
+    - -q
+    - -nr
+    - --seed
+    - "{seed}"
+container:
+  image: /shoalhome/YOUR_USERNAME/images/pogosim.sif
+  gpu: false
+resources:
+  nodes: 1
+  tasks: 1
+  cpus_per_task: 1
+  gpus_per_task: 0
+  memory: 2GiB
+  walltime: "00:15:00"
+outputs:
+  include:
+    - data.feather
+    - console.txt

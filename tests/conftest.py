@@ -40,6 +40,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="enable the bounded Shoal M6.6 async lifecycle test",
     )
+    parser.addoption(
+        "--run-shoal-pogosim-test",
+        action="store_true",
+        default=False,
+        help="enable the bounded three-seed Pogosim test on Shoal",
+    )
 
 
 def pytest_collection_modifyitems(
@@ -52,6 +58,7 @@ def pytest_collection_modifyitems(
     run_failures = bool(config.getoption("--run-shoal-failure-tests"))
     run_array = bool(config.getoption("--run-shoal-array-test"))
     run_lifecycle = bool(config.getoption("--run-shoal-lifecycle-test"))
+    run_pogosim = bool(config.getoption("--run-shoal-pogosim-test"))
     skip_system = pytest.mark.skip(
         reason="requires the explicit --run-shoal-system-tests opt-in"
     )
@@ -70,8 +77,13 @@ def pytest_collection_modifyitems(
     skip_lifecycle = pytest.mark.skip(
         reason="requires both Shoal system and M6.6 lifecycle opt-ins"
     )
+    skip_pogosim = pytest.mark.skip(
+        reason="requires both Shoal system and Pogosim submission opt-ins"
+    )
     for item in items:
-        if "shoal_lifecycle" in item.keywords and not (run_system and run_lifecycle):
+        if "shoal_pogosim" in item.keywords and not (run_system and run_pogosim):
+            item.add_marker(skip_pogosim)
+        elif "shoal_lifecycle" in item.keywords and not (run_system and run_lifecycle):
             item.add_marker(skip_lifecycle)
         elif "shoal_array" in item.keywords and not (run_system and run_array):
             item.add_marker(skip_array)

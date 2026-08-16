@@ -45,10 +45,18 @@ files. The target name defaults to `shoal` and can be overridden when needed:
 | controlled failure scenarios | `--run-shoal-failure-tests` | one experiment-failure case |
 | three-element CPU array | `--run-shoal-array-test` | yes |
 | disconnected lifecycle and cancellation | `--run-shoal-lifecycle-test` | three bounded CPU jobs |
+| three-seed Pogosim array | `--run-shoal-pogosim-test` | yes |
 
 Passing only a resource-specific switch is insufficient; the general switch is
 always required. Run one bounded module at a time and inspect its plan/preflight
 output before allowing submission.
+
+The complete Pogosim preparation, three-seed smoke, 100-seed showcase, and
+dedicated live-test procedure is documented in
+[`examples/pogosim-shoal/README.md`](../examples/pogosim-shoal/README.md). The
+Pogosim test additionally requires a pinned external source checkout and its
+matching shared Apptainer image; ordinary test runs never build the image or
+submit this workload.
 
 ```bash
 RUNDRA_SHOAL_TARGETS_FILE=/tmp/rundra-shoal-targets.yaml \

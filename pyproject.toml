@@ -30,6 +30,7 @@ dev = [
 addopts = ["--strict-markers", "-ra"]
 testpaths = ["tests"]
 markers = [
+  "shoal_pogosim: opt-in live Pogosim array tests on the Shoal cluster",
   "shoal_system: opt-in tests that may access the real Shoal cluster",
   "shoal_cpu: resource-consuming Shoal tests requiring a separate CPU opt-in",
   "shoal_gpu: resource-consuming Shoal tests requiring a separate GPU opt-in",
