@@ -2,6 +2,7 @@ from collections import deque
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 
+from rundra.adapters import RemotePreflight
 from rundra.domain.models import (
     BackendConfig,
     Command,
@@ -10,7 +11,7 @@ from rundra.domain.models import (
     ResourceRequest,
     Target,
 )
-from rundra.orchestration.preflight import PreflightStatus, RemotePreflight
+from rundra.orchestration.preflight import PreflightStatus
 from rundra.ports import CapabilityCheck, CommandResult
 from tests.fakes import FakeTransport, RecordingContainerRuntime
 

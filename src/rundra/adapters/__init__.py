@@ -17,6 +17,7 @@ from rundra.adapters.local import (
     WorkspaceCollisionError,
 )
 from rundra.adapters.native import NativeRuntime, NativeRuntimeError
+from rundra.adapters.preflight import RemotePreflight
 from rundra.adapters.remote import (
     RemoteWorkspaceAllocator,
     RemoteWorkspaceCollisionError,
@@ -66,6 +67,7 @@ __all__ = [
     "RemoteApptainerRuntime",
     "RemoteWorkspaceCollisionError",
     "RemoteWorkspaceError",
+    "RemotePreflight",
     "RsyncStager",
     "RsyncStagerError",
     "RsyncRetrievalError",

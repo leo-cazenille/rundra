@@ -2,10 +2,15 @@ from pathlib import Path
 
 import pytest
 
-from rundra.adapters import RemoteApptainerRuntime, RsyncStager, SSHTransport
+from rundra.adapters import (
+    RemoteApptainerRuntime,
+    RemotePreflight,
+    RsyncStager,
+    SSHTransport,
+)
 from rundra.cli.operations import plan_operation
 from rundra.domain.models import ExperimentSpec, ResourceRequest, Target
-from rundra.orchestration.preflight import PreflightStatus, RemotePreflight
+from rundra.orchestration.preflight import PreflightStatus
 
 pytestmark = pytest.mark.shoal_system
 

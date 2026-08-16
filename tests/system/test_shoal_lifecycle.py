@@ -10,12 +10,17 @@ from pathlib import Path, PurePosixPath
 import pytest
 import yaml
 
-from rundra.adapters import RemoteApptainerRuntime, RsyncStager, SSHTransport
+from rundra.adapters import (
+    RemoteApptainerRuntime,
+    RemotePreflight,
+    RsyncStager,
+    SSHTransport,
+)
 from rundra.cli.operations import plan_operation
 from rundra.config.experiments import load_experiment
 from rundra.domain.models import RunId, Target
 from rundra.domain.states import ExecutionState, RetrievalState
-from rundra.orchestration.preflight import PreflightStatus, RemotePreflight
+from rundra.orchestration.preflight import PreflightStatus
 from rundra.persistence import JsonRunStore
 
 pytestmark = [pytest.mark.shoal_system, pytest.mark.shoal_lifecycle]
