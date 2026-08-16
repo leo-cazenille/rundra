@@ -3163,6 +3163,11 @@ documented Python API is introduced above orchestration. Human-readable
 formatting and physical local/remote storage layouts are also not stable APIs.
 The complete compatibility policy is in `docs/stability.md`.
 
+The v0.1 user-visible change inventory is maintained in `CHANGELOG.md`. The
+final version, build, authorization, publication, and post-release procedure is
+the checked `docs/release-checklist.md`; completing M6.7 does not itself publish
+artifacts, push a tag, or claim unreserved domains.
+
 ---
 
 ## 50. Documentation policy

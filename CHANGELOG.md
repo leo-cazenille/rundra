@@ -1,0 +1,53 @@
+# Changelog
+
+All notable user-visible changes are recorded here. Rundra has not yet made a
+public release; the current source version is `0.1.0.dev0`.
+
+## [Unreleased]
+
+### Added
+
+- Portable version-1 experiment, target, project-launch, and user-launch YAML.
+- Human and deterministic JSON forms of `validate`, `plan`, `targets`, `run`,
+  `submit`, `status`, `list`, `logs`, `fetch`, `inspect`, and `cancel`.
+- Explicit or generated seeds, inclusive multi-seed ranges, durable effective
+  configuration, deterministic Task identities, and replayable launch
+  resolution.
+- Synchronous local execution using the native or Apptainer runtime.
+- SSH/Slurm/rsync/Apptainer execution with isolated source snapshots,
+  asynchronous submission, Slurm arrays, status reconciliation with or without
+  usable `sacct`, per-Task logs, cancellation, and idempotent retrieval.
+- Versioned RunRecords with independent computation/retrieval state, artifacts,
+  scheduler identities, bounded Git provenance, and concurrency-safe updates.
+- Checked version-1 CLI, JSON, and RunRecord contract fixtures plus explicitly
+  gated Shoal CPU, GPU, failure, array, preflight, and disconnected-lifecycle
+  tests.
+
+### Security
+
+- Local subprocesses use argument vectors without a shell; the SSH and sbatch
+  shell boundaries use centralized serialization and constrained native values.
+- OpenSSH configuration and host verification remain under normal user/site
+  policy; Rundra stores no authentication credentials.
+- Configuration and RunRecord credential fields, unsafe SSH destinations,
+  symlinked retrieval paths, and unsafe workspace/native-option values are
+  rejected. Infrastructure errors omit external stderr and command values.
+
+### Compatibility
+
+- The documented CLI, YAML, JSON, state, identifier, and RunRecord surfaces are
+  frozen for v0.1. Human formatting and physical storage layouts are not.
+- Rundra v0.1 exposes no supported Python API; all `rundra.*` imports remain
+  internal and unstable.
+
+### Known limitations
+
+- Only Python 3.12 is supported.
+- Local execution is synchronous; local `submit` returns `ASYNC_UNAVAILABLE`.
+- The only remote stack is SSH/Slurm/rsync/Apptainer. Rundra requires no daemon
+  and does not implement PBS, LSF, Kubernetes, Globus, REST, or MCP.
+- Container digest/runtime-version provenance is not yet captured. Scientific
+  reproducibility still depends on preserving external source, image, and
+  environment inputs.
+- The `rundra` distribution is not yet published to PyPI, and `rundra.ai` and
+  `rundr.ai` are not reserved.
