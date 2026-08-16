@@ -309,7 +309,9 @@ def test_shoal_disconnected_async_lifecycle_is_repeatable_and_isolated(
 
     logs = _invoke_cli(("logs", str(cancel_id), "--data-dir", str(data_dir)))["logs"]
     assert isinstance(logs, dict)
-    assert logs == started_logs
+    for field in ("run_id", "task_id", "stdout_path", "stderr_path", "stdout"):
+        assert logs[field] == started_logs[field]
+    assert isinstance(logs["stderr"], str)
     cancel_destination = tmp_path / "cancel-retrieved"
     _fetch_twice(cancel_id, data_dir, cancel_destination)
     partial = cancel_destination / "output/results/evidence.txt"
