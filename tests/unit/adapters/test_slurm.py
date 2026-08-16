@@ -511,7 +511,7 @@ def test_slurm_array_submission_requires_durable_log_paths() -> None:
 @pytest.mark.parametrize(
     ("exit_code", "stdout", "stderr", "message"),
     [
-        (73, "", "manifest exists", "exit code 73: manifest exists"),
+        (73, "", "manifest exists", "exit code 73"),
         (0, "Submitted batch job 123", "", "invalid parsable"),
     ],
 )
@@ -679,6 +679,10 @@ def test_sbatch_log_paths_must_be_complete_absolute_and_directive_safe(
         ({"output": "stolen"}, "Unsupported"),
         ({"reservation": "special"}, "Unsupported"),
         ({"partition": "gpu\n#SBATCH --nodes=99"}, "unsafe"),
+        ({"partition": "gpu --nodes=99"}, "unsafe"),
+        ({"partition": "gpu;danger"}, "unsafe"),
+        ({"partition": "$(danger)"}, "unsafe"),
+        ({"partition": "#comment"}, "unsafe"),
         ({"qos": True}, "string or integer"),
         ({"exclusive": "yes"}, "boolean"),
     ],
@@ -766,7 +770,7 @@ def test_slurm_submission_creates_and_uses_configured_log_directory() -> None:
 @pytest.mark.parametrize(
     ("exit_code", "stdout", "stderr", "message"),
     [
-        (1, "", "invalid account", "exit code 1: invalid account"),
+        (1, "", "invalid account", "exit code 1"),
         (0, "Submitted batch job 123", "", "invalid parsable"),
         (0, "123\nextra", "", "invalid parsable"),
         (0, "123;cluster;extra", "", "invalid parsable"),
@@ -1155,5 +1159,21 @@ def test_slurm_cancel_reports_nonzero_when_job_remains_active() -> None:
         )
     )
 
-    with pytest.raises(SlurmCancellationError, match="permission denied"):
+    with pytest.raises(SlurmCancellationError) as caught:
         SlurmScheduler(transport).cancel((reference,))
+    assert "permission denied" not in str(caught.value)
+    assert "diagnostic redacted" in str(caught.value)
+
+
+def test_slurm_errors_do_not_expose_scheduler_stderr() -> None:
+    secret = "API_TOKEN=must-not-leak"
+    transport = ScriptedTransport(
+        deque([_command_result(Command(("unused",)), 1, "", secret)])
+    )
+
+    with pytest.raises(SlurmSubmissionError) as caught:
+        SlurmScheduler(transport).submit(_group())
+
+    assert secret not in str(caught.value)
+    assert "exit code 1" in str(caught.value)
+    assert "diagnostic redacted" in str(caught.value)

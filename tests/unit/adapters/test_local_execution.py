@@ -58,8 +58,37 @@ def test_local_transport_runs_argv_with_explicit_cwd_environment_and_output(
 
 
 def test_local_transport_reports_process_start_failures() -> None:
-    with pytest.raises(LocalTransportError, match="Could not execute local command"):
+    with pytest.raises(LocalTransportError, match="Could not start local command"):
         LocalTransport().run(Command(("/definitely/missing/rundra-command",)))
+
+
+def test_local_transport_redacts_every_command_literal_on_start_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import rundra.adapters.local as local_adapter
+
+    def fail(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise OSError(
+            "secret-program secret-argument API_TOKEN=secret-value /secret/work"
+        )
+
+    monkeypatch.setattr(local_adapter.subprocess, "run", fail)
+    command = Command(
+        ("secret-program", "secret-argument"),
+        environment={"API_TOKEN": "secret-value"},
+        working_directory=Path("/secret/work"),
+    )
+
+    with pytest.raises(LocalTransportError) as caught:
+        LocalTransport().run(command)
+
+    assert str(caught.value) == (
+        "Could not start local command (argv=<redacted:2>, "
+        "environment=<redacted:1>, working_directory=<redacted>): OSError"
+    )
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 @pytest.mark.parametrize("value", ["not-a-command", object()])

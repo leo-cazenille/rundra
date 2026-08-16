@@ -25,6 +25,7 @@ _MIB = 1024**2
 _VALUE_OPTIONS = ("account", "constraint", "partition", "qos")
 _FLAG_OPTIONS = ("exclusive",)
 _ALLOWED_OPTIONS = frozenset((*_VALUE_OPTIONS, *_FLAG_OPTIONS))
+_SAFE_NATIVE_VALUE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.@,+:/=\[\]&|*~-]*\Z")
 _PARSABLE_SUBMISSION = re.compile(r"(?P<job_id>[0-9]+)(?:;(?P<cluster>[^;\r\n]+))?\Z")
 _SLURM_REFERENCE = re.compile(r"[0-9]+(?:_[0-9]+)?\Z")
 _MAX_ARRAY_SIZE = re.compile(r"(?:^|\n)\s*MaxArraySize\s*=\s*([0-9]+)\s*(?:\n|$)")
@@ -215,9 +216,9 @@ class SlurmScheduler:
         except Exception as error:
             raise SlurmSubmissionError("Could not start sbatch submission") from error
         if result.exit_code != 0:
-            detail = result.stderr.strip() or "no scheduler diagnostic"
             raise SlurmSubmissionError(
-                f"sbatch failed with exit code {result.exit_code}: {detail}"
+                f"sbatch failed with exit code {result.exit_code}; "
+                "scheduler diagnostic redacted"
             )
         output = result.stdout.strip()
         match = _PARSABLE_SUBMISSION.fullmatch(output)
@@ -280,10 +281,9 @@ class SlurmScheduler:
                 "Could not persist the array manifest and start sbatch submission"
             ) from error
         if result.exit_code != 0:
-            detail = result.stderr.strip() or "no scheduler diagnostic"
             raise SlurmSubmissionError(
                 "Array manifest persistence or sbatch submission failed with "
-                f"exit code {result.exit_code}: {detail}"
+                f"exit code {result.exit_code}; scheduler diagnostic redacted"
             )
         output = result.stdout.strip()
         match = _PARSABLE_SUBMISSION.fullmatch(output)
@@ -401,9 +401,9 @@ class SlurmScheduler:
         if result.exit_code != 0 and any(
             observation.state not in terminal for observation in observations
         ):
-            detail = result.stderr.strip() or "no scheduler diagnostic"
             raise SlurmCancellationError(
-                f"scancel failed with exit code {result.exit_code}: {detail}"
+                f"scancel failed with exit code {result.exit_code}; "
+                "scheduler diagnostic redacted"
             )
         return observations
 
@@ -413,9 +413,9 @@ class SlurmScheduler:
         except Exception as error:
             raise SlurmQueryError(f"Could not start {source} query") from error
         if result.exit_code != 0:
-            detail = result.stderr.strip() or "no scheduler diagnostic"
             raise SlurmQueryError(
-                f"{source} failed with exit code {result.exit_code}: {detail}"
+                f"{source} failed with exit code {result.exit_code}; "
+                "scheduler diagnostic redacted"
             )
         return result
 
@@ -656,12 +656,7 @@ def _native_value(name: str, value: NativeValue) -> str:
             f"resources.native.slurm.{name} must be a string or integer"
         )
     rendered = str(value)
-    if (
-        not rendered.strip()
-        or "\n" in rendered
-        or "\r" in rendered
-        or "\x00" in rendered
-    ):
+    if _SAFE_NATIVE_VALUE.fullmatch(rendered) is None:
         raise SlurmScriptError(
             f"resources.native.slurm.{name} contains an unsafe directive value"
         )

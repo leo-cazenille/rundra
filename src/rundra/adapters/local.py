@@ -75,6 +75,8 @@ class LocalTransport:
         environment = os.environ.copy()
         environment.update(command.environment)
         started_at = datetime.now(UTC)
+        completed: subprocess.CompletedProcess[str] | None = None
+        failure_detail: str | None = None
         try:
             completed = subprocess.run(
                 command.argv,
@@ -91,9 +93,20 @@ class LocalTransport:
                 shell=False,
             )
         except (OSError, ValueError) as error:
+            failure_detail = type(error).__name__
+            if isinstance(error, OSError) and error.errno is not None:
+                failure_detail = f"{failure_detail} (errno {error.errno})"
+        if failure_detail is not None:
             raise LocalTransportError(
-                f"Could not execute local command {command.argv[0]!r}: {error}"
-            ) from error
+                "Could not start local command "
+                f"(argv=<redacted:{len(command.argv)}>, "
+                f"environment=<redacted:{len(command.environment)}>, "
+                "working_directory="
+                f"{'<redacted>' if command.working_directory is not None else 'unset'}"
+                f"): {failure_detail}"
+            ) from None
+        if completed is None:  # pragma: no cover - defensive subprocess boundary
+            raise LocalTransportError("Local subprocess returned no result")
         finished_at = datetime.now(UTC)
         return CommandResult(
             command=command,
