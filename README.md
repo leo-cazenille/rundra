@@ -79,10 +79,18 @@ the `apptainer` runtime.
 Implementation progress is tracked in
 [`.agent/plans/v0.1.md`](.agent/plans/v0.1.md).
 
+User documentation:
+
+- [installation, configuration, and target setup](docs/getting-started.md);
+- [versioned JSON contracts for agents](docs/schemas/README.md);
+- [Shoal setup and explicitly opted-in system tests](docs/shoal.md).
+
 ## Development setup
 
-The project requires Python 3.12 and uses
+The project is not yet published on PyPI. It requires Python 3.12 and uses
 [`uv`](https://docs.astral.sh/uv/) for environment and dependency management.
+See the [installation and target setup guide](docs/getting-started.md) for a
+source tool installation and backend requirements.
 
 ```bash
 uv sync
