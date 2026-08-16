@@ -185,8 +185,12 @@ def _wait_for_started_logs(
         ):
             return logs
         error = document.get("error")
-        if not isinstance(error, dict) or error.get("code") != "LOG_READ_FAILED":
+        if logs is not None and not isinstance(logs, dict):
             pytest.fail(f"Unexpected pre-cancellation logs result for {run_id}")
+        if error is not None and (
+            not isinstance(error, dict) or error.get("code") != "LOG_READ_FAILED"
+        ):
+            pytest.fail(f"Unexpected pre-cancellation logs error for {run_id}")
         time.sleep(1)
     pytest.fail(f"Run {run_id} did not expose its started log before cancellation")
 
