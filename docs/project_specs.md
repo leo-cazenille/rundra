@@ -87,7 +87,7 @@ one experimental task
 Examples include:
 
 ```bash
-python main.py --config configs/test.yaml --seed 17
+python3 main.py --config configs/test.yaml --seed 17
 ```
 
 or:
@@ -459,7 +459,7 @@ experiment:
 
 command:
   argv:
-    - python
+    - python3
     - main.py
     - --config
     - "{config}"
@@ -494,7 +494,9 @@ sync:
     - shoal-results/
 ```
 
-The exact schema may evolve during M0/M1, but the separation of concerns must remain.
+The implemented version-1 schema is strict: unknown fields and incompatible
+versions fail explicitly. Its portable/backend separation is stable through
+v0.1; incompatible changes require a new schema version.
 
 ---
 
@@ -506,7 +508,7 @@ Preferred representation:
 
 ```python
 [
-    "python",
+    "python3",
     "main.py",
     "--config",
     "/path/to/config.yaml",
@@ -877,7 +879,7 @@ Example conceptual output:
 
 ```bash
 apptainer exec --nv IMAGE \
-    python main.py --config CONFIG --seed SEED
+    python3 main.py --config CONFIG --seed SEED
 ```
 
 Apptainer-specific command construction must belong to the container backend, not the Slurm backend.
@@ -1053,6 +1055,11 @@ Example:
 
 If calculating an image digest is prohibitively expensive for every run, the implementation may use an explicit caching or optional strategy. It must not fabricate a digest.
 
+The v0.1 CLI records the declared image reference and GPU intent in the
+normalized experiment and the selected runtime in the target. It does not
+calculate an image digest or persist a runtime version, so `container_digest`
+remains `null` for ordinary Runs. This absence is explicit rather than inferred.
+
 ---
 
 ## 15. Run identity
@@ -1185,6 +1192,13 @@ A `RunRecord` should preserve, when available:
 
 Missing optional data must be represented as unavailable, not fabricated.
 
+The version-1 persisted fields and their availability rules are documented in
+[`docs/artifacts-and-provenance.md`](artifacts-and-provenance.md) and checked by
+[`docs/schemas/run-record-v1.json`](schemas/run-record-v1.json). CLI-created
+Runs currently leave `initiator` and `container_digest` unavailable. Git fields
+are best-effort; exact effective config, seeds, normalized experiment/target,
+portable resources/states, and stable identities are mandatory.
+
 ---
 
 ## 20. Artifacts and results
@@ -1209,6 +1223,14 @@ derived analysis
 The framework primarily manages raw execution artifacts.
 
 Projects may choose to include analysis artifacts in their requested outputs, but the framework should not impose an analysis model in v0.1.
+
+RunRecord version 1 classifies `source_snapshot`, `effective_config`, `stdout`,
+`stderr`, `raw_result`, `scheduler_metadata`, and `provenance_metadata`.
+The current Git provider stores provenance directly in RunRecord fields and
+does not emit a separate `provenance_metadata` file. Artifact paths are
+locators, optional sizes are measurements, and v0.1 does not claim artifact
+checksums or a content-addressed store. Computation and retrieval states remain
+independent so transfer failure never rewrites scientific execution state.
 
 ---
 
@@ -1501,8 +1523,10 @@ Human and JSON output must be generated from the same internal result object, no
 
 The v0.1 CLI envelope has `format_version: 1`, `operation`, and `ok` at its
 root. Successful results carry an operation-specific value; failures carry an
-`error` object with `code`, `message`, and structured `details`. Normative M0
-examples are checked in under `docs/schemas/`. Backward-incompatible changes to
+`error` object with `code`, `message`, and structured `details`. Normative v0.1
+examples for every operation are checked in under `docs/schemas/`; `inspect`
+composition is contract-tested against the durable RunRecord example.
+Backward-incompatible changes to
 those documented fields require a new format version.
 
 ---
@@ -2473,13 +2497,9 @@ remove temporary files.
 
 ## 40. Versioned schemas
 
-Public structured representations should include schema or format versioning where appropriate.
-
-At minimum, consider versioning for:
-
-- `ExperimentSpec`;
-- persisted `RunRecord`;
-- possibly target configuration.
+Public structured representations use explicit versioning. Experiment, target,
+project-launch, and user-launch YAML documents require `version: 1`. Persisted
+RunRecords and public CLI JSON require `format_version: 1`.
 
 Example:
 
