@@ -58,8 +58,13 @@ class ExecutionUnit:
             raise TypeError("ExecutionUnit command must be a Command")
         if type(self.resources) is not ResourceRequest:
             raise TypeError("ExecutionUnit resources must be a ResourceRequest")
-        if self.parameter_set is not None and type(self.parameter_set) is not ParameterSet:
-            raise TypeError("ExecutionUnit parameter_set must be a ParameterSet or None")
+        if (
+            self.parameter_set is not None
+            and type(self.parameter_set) is not ParameterSet
+        ):
+            raise TypeError(
+                "ExecutionUnit parameter_set must be a ParameterSet or None"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,7 +128,9 @@ class ExecutionPlan:
         if self.version < 3 and len({unit.seed for unit in units}) != len(units):
             raise ValueError("ExecutionPlan unit seeds must be unique")
         effective_config = units[0].config
-        if self.version < 3 and any(unit.config != effective_config for unit in units[1:]):
+        if self.version < 3 and any(
+            unit.config != effective_config for unit in units[1:]
+        ):
             raise ValueError("ExecutionPlan units must share one effective config")
         groups = tuple(self.groups)
         if any(type(group) is not ExecutionGroup for group in groups):

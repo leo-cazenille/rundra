@@ -155,7 +155,9 @@ class SchedulerArrayRequest:
             )
         if type(self.allow_duplicate_seeds) is not bool:
             raise TypeError("SchedulerArrayRequest allow_duplicate_seeds must be bool")
-        if not self.allow_duplicate_seeds and len({item.seed for item in mapping}) != len(mapping):
+        if not self.allow_duplicate_seeds and len(
+            {item.seed for item in mapping}
+        ) != len(mapping):
             raise ValueError("SchedulerArrayRequest mapping seeds must be unique")
         if not isinstance(self.manifest_path, PurePath):
             raise TypeError("SchedulerArrayRequest manifest_path must be a path")

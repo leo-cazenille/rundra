@@ -27,9 +27,10 @@ def linear_slope(xs: list[float], ys: list[float]) -> float:
     x_mean = statistics.fmean(xs)
     y_mean = statistics.fmean(ys)
     denominator = sum((value - x_mean) ** 2 for value in xs)
-    return sum(
-        (x - x_mean) * (y - y_mean) for x, y in zip(xs, ys, strict=True)
-    ) / denominator
+    return (
+        sum((x - x_mean) * (y - y_mean) for x, y in zip(xs, ys, strict=True))
+        / denominator
+    )
 
 
 def coordinate_columns(names: set[str]) -> tuple[str, str]:
@@ -136,7 +137,11 @@ def analyze(root: Path, destination: Path) -> dict[str, Any]:
                 "mean_msd": mean,
                 "ci95": curve[time][1],
             }
-        early = [(time, mean) for time, (mean, _) in curve.items() if 1 <= time <= 10 and mean > 0]
+        early = [
+            (time, mean)
+            for time, (mean, _) in curve.items()
+            if 1 <= time <= 10 and mean > 0
+        ]
         slopes[condition] = linear_slope(
             [math.log(time) for time, _ in early],
             [math.log(mean) for _, mean in early],
@@ -145,7 +150,9 @@ def analyze(root: Path, destination: Path) -> dict[str, Any]:
     paired_ratios: dict[str, dict[str, float]] = {}
     for target in (5.0, 10.0, 30.0, 60.0, 120.0):
         ratios = []
-        for ballistic, tumble in zip(runs["ballistic"], runs["long_tumble"], strict=True):
+        for ballistic, tumble in zip(
+            runs["ballistic"], runs["long_tumble"], strict=True
+        ):
             _, ballistic_msd = nearest(ballistic, target)
             _, tumble_msd = nearest(tumble, target)
             ratios.append(ballistic_msd / tumble_msd if tumble_msd > 0 else math.inf)
@@ -180,7 +187,9 @@ def main() -> None:
     parser.add_argument("--input", type=Path, default=Path("retrieved/msd-120s"))
     parser.add_argument("--output", type=Path, default=Path("derived/msd-120s"))
     arguments = parser.parse_args()
-    print(json.dumps(analyze(arguments.input, arguments.output), indent=2, sort_keys=True))
+    print(
+        json.dumps(analyze(arguments.input, arguments.output), indent=2, sort_keys=True)
+    )
 
 
 if __name__ == "__main__":

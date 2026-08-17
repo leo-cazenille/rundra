@@ -191,8 +191,13 @@ class TaskStatusValue:
                 raise ValueError(f"TaskStatusValue {name} must be safe or None")
         if self.exit_code is not None and type(self.exit_code) is not int:
             raise TypeError("TaskStatusValue exit_code must be an integer or None")
-        if self.parameter_set is not None and type(self.parameter_set) is not ParameterSet:
-            raise TypeError("TaskStatusValue parameter_set must be a ParameterSet or None")
+        if (
+            self.parameter_set is not None
+            and type(self.parameter_set) is not ParameterSet
+        ):
+            raise TypeError(
+                "TaskStatusValue parameter_set must be a ParameterSet or None"
+            )
 
 
 @dataclass(frozen=True, slots=True)

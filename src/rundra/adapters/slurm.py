@@ -146,7 +146,9 @@ class SlurmArrayRequest:
             )
         if type(self.allow_duplicate_seeds) is not bool:
             raise TypeError("SlurmArrayRequest allow_duplicate_seeds must be bool")
-        if not self.allow_duplicate_seeds and len({item.seed for item in mapping}) != len(mapping):
+        if not self.allow_duplicate_seeds and len(
+            {item.seed for item in mapping}
+        ) != len(mapping):
             raise SlurmScriptError("Slurm array mapping seeds must be unique")
         resources = self.group.units[0].resources
         if any(unit.resources != resources for unit in self.group.units[1:]):

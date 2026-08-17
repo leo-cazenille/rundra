@@ -645,7 +645,7 @@ def _parse_task(value: object, *, path: str, version: int) -> Task:
                 "seed",
                 "resources",
                 "state",
-                *(('parameter_set',) if version == 3 else ()),
+                *(("parameter_set",) if version == 3 else ()),
             }
         ),
         path=path,

@@ -112,7 +112,9 @@ def _ssh_static_checks(host: str) -> list[DoctorCheck]:
             DoctorCheck(
                 f"executable_{executable}",
                 "pass" if available else "fail",
-                f"{executable} is available" if available else f"{executable} is missing",
+                f"{executable} is available"
+                if available
+                else f"{executable} is missing",
             )
         )
     socket_value = os.environ.get("SSH_AUTH_SOCK")
@@ -187,9 +189,7 @@ def _ssh_configuration_checks(host: str) -> list[DoctorCheck]:
 
 def _ssh_connect_check(host: str) -> DoctorCheck:
     tools = ("rsync", "sbatch", "squeue", "scancel", "scontrol", "apptainer")
-    script = (
-        "for tool in \"$@\"; do command -v \"$tool\" >/dev/null || exit 20; done"
-    )
+    script = 'for tool in "$@"; do command -v "$tool" >/dev/null || exit 20; done'
     command = Command(("sh", "-c", script, "rundr-doctor", *tools))
     try:
         completed = subprocess.run(

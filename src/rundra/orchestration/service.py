@@ -892,9 +892,7 @@ class OrchestrationService:
             first_parameter = parameter_configs[0].parameter_set
             assert first_parameter is not None
             seed_values = tuple(
-                unit.seed
-                for unit in units
-                if unit.parameter_set == first_parameter
+                unit.seed for unit in units if unit.parameter_set == first_parameter
             )
             expected_plan = create_sweep_plan(
                 request.experiment,
@@ -1234,6 +1232,8 @@ def _task_manifest(units: tuple[ExecutionUnit, ...]) -> str:
         separators=(",", ":"),
         sort_keys=True,
     )
+
+
 def _single_observation(
     observations: tuple[SchedulerObservation, ...],
     expected_reference: object,

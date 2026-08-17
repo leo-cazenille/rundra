@@ -301,7 +301,10 @@ class Task:
             raise TypeError("Task config must be a ConfigSnapshot")
         if type(self.resources) is not ResourceRequest:
             raise TypeError("Task resources must be a ResourceRequest")
-        if self.parameter_set is not None and type(self.parameter_set) is not ParameterSet:
+        if (
+            self.parameter_set is not None
+            and type(self.parameter_set) is not ParameterSet
+        ):
             raise TypeError("Task parameter_set must be a ParameterSet or None")
         if type(self.state) is not ExecutionState:
             raise TypeError("Task state must be an ExecutionState")

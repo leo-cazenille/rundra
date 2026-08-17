@@ -241,9 +241,7 @@ class LocalStager:
                 task_config_paths[task_id] = task_path
             manifest_path = metadata / "tasks.json"
             if request.task_manifest is not None:
-                manifest_path.write_text(
-                    request.task_manifest + "\n", encoding="utf-8"
-                )
+                manifest_path.write_text(request.task_manifest + "\n", encoding="utf-8")
             _seal(source_snapshot)
             _seal(inputs)
         except Exception as error:

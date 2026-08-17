@@ -48,9 +48,7 @@ def load_sweep_config(source: Path) -> SweepExpansion:
     factors.sort(key=lambda factor: factor.hierarchical)
     if not factors:
         content = yaml.safe_dump(materialized, sort_keys=False)
-        return SweepExpansion(
-            (ExpandedConfig(ConfigSnapshot(source, content)),), seeds
-        )
+        return SweepExpansion((ExpandedConfig(ConfigSnapshot(source, content)),), seeds)
     names = [factor.name for factor in factors]
     if len(set(names)) != len(names):
         _fail(
@@ -66,7 +64,9 @@ def load_sweep_config(source: Path) -> SweepExpansion:
         effective = copy.deepcopy(materialized)
         choices: dict[str, object] = {}
         for factor, (label, value) in zip(factors, selections, strict=True):
-            choices[factor.name] = copy.deepcopy(label if factor.hierarchical else value)
+            choices[factor.name] = copy.deepcopy(
+                label if factor.hierarchical else value
+            )
             if factor.hierarchical:
                 target = _get(effective, factor.path)
                 if not isinstance(target, dict) or not isinstance(value, dict):
@@ -104,7 +104,12 @@ def _parse_metadata(value: object, source: Path) -> tuple[int, ...] | None:
     raw = value["seeds"]
     if type(raw) is int:
         if raw < 0:
-            _fail(source, ("_rundr", "seeds"), "INVALID_SEEDS", "Seed must be non-negative")
+            _fail(
+                source,
+                ("_rundr", "seeds"),
+                "INVALID_SEEDS",
+                "Seed must be non-negative",
+            )
         return (raw,)
     if type(raw) is not str or (match := _SEEDS.fullmatch(raw)) is None:
         _fail(
@@ -128,33 +133,75 @@ def _collect_factors(
     if isinstance(node, dict):
         present = _MARKERS.intersection(node)
         if len(present) > 1:
-            _fail(source, path, "CONFLICTING_SWEEP_MARKERS", "Only one sweep marker is allowed per value")
+            _fail(
+                source,
+                path,
+                "CONFLICTING_SWEEP_MARKERS",
+                "Only one sweep marker is allowed per value",
+            )
         if "batch_options" in node:
             values = node["batch_options"]
             if not isinstance(values, list) or not values:
-                _fail(source, (*path, "batch_options"), "INVALID_SWEEP_OPTIONS", "batch_options must be a nonempty list")
+                _fail(
+                    source,
+                    (*path, "batch_options"),
+                    "INVALID_SWEEP_OPTIONS",
+                    "batch_options must be a nonempty list",
+                )
             name = _path_name(path)
-            factors.append(_Factor(path, name, tuple((str(index), value) for index, value in enumerate(values))))
+            factors.append(
+                _Factor(
+                    path,
+                    name,
+                    tuple((str(index), value) for index, value in enumerate(values)),
+                )
+            )
             return
         if "batch_options_range" in node:
             values = _expand_range(node["batch_options_range"], source, path)
             name = _path_name(path)
-            factors.append(_Factor(path, name, tuple((str(index), value) for index, value in enumerate(values))))
+            factors.append(
+                _Factor(
+                    path,
+                    name,
+                    tuple((str(index), value) for index, value in enumerate(values)),
+                )
+            )
             return
         if "batch_hierarchical_options" in node:
             raw = node["batch_hierarchical_options"]
             if not isinstance(raw, dict):
-                _fail(source, (*path, "batch_hierarchical_options"), "INVALID_TYPE", "batch_hierarchical_options must be a mapping")
+                _fail(
+                    source,
+                    (*path, "batch_hierarchical_options"),
+                    "INVALID_TYPE",
+                    "batch_hierarchical_options must be a mapping",
+                )
             name_value = raw.get("name")
-            if name_value is not None and (type(name_value) is not str or not name_value.strip()):
-                _fail(source, (*path, "batch_hierarchical_options", "name"), "INVALID_VALUE", "hierarchical name must be nonblank")
+            if name_value is not None and (
+                type(name_value) is not str or not name_value.strip()
+            ):
+                _fail(
+                    source,
+                    (*path, "batch_hierarchical_options", "name"),
+                    "INVALID_VALUE",
+                    "hierarchical name must be nonblank",
+                )
             options = tuple(
                 (name, value)
                 for name, value in raw.items()
                 if name not in {"name", "default"}
             )
-            if not options or any(type(name) is not str or not isinstance(value, dict) for name, value in options):
-                _fail(source, (*path, "batch_hierarchical_options"), "INVALID_SWEEP_OPTIONS", "hierarchical choices must be named mappings")
+            if not options or any(
+                type(name) is not str or not isinstance(value, dict)
+                for name, value in options
+            ):
+                _fail(
+                    source,
+                    (*path, "batch_hierarchical_options"),
+                    "INVALID_SWEEP_OPTIONS",
+                    "hierarchical choices must be named mappings",
+                )
             factors.append(_Factor(path, name_value or _path_name(path), options, True))
             for key, child in node.items():
                 if key != "batch_hierarchical_options":
@@ -167,25 +214,69 @@ def _collect_factors(
             _collect_factors(value, (*path, index), factors, source)
 
 
-def _expand_range(value: object, source: Path, path: tuple[PathPart, ...]) -> tuple[int | float, ...]:
+def _expand_range(
+    value: object, source: Path, path: tuple[PathPart, ...]
+) -> tuple[int | float, ...]:
     marker_path = (*path, "batch_options_range")
-    if not isinstance(value, dict) or set(value) - {"start", "stop", "step", "inclusive", "type"}:
-        _fail(source, marker_path, "INVALID_SWEEP_RANGE", "Invalid batch_options_range fields")
+    if not isinstance(value, dict) or set(value) - {
+        "start",
+        "stop",
+        "step",
+        "inclusive",
+        "type",
+    }:
+        _fail(
+            source,
+            marker_path,
+            "INVALID_SWEEP_RANGE",
+            "Invalid batch_options_range fields",
+        )
     if not {"start", "stop", "step"}.issubset(value):
-        _fail(source, marker_path, "INVALID_SWEEP_RANGE", "Range requires start, stop, and step")
+        _fail(
+            source,
+            marker_path,
+            "INVALID_SWEEP_RANGE",
+            "Range requires start, stop, and step",
+        )
     start, stop, step = value["start"], value["stop"], value["step"]
     if any(type(item) not in {int, float} for item in (start, stop, step)) or step == 0:
-        _fail(source, marker_path, "INVALID_SWEEP_RANGE", "Range values must be numeric with a nonzero step")
+        _fail(
+            source,
+            marker_path,
+            "INVALID_SWEEP_RANGE",
+            "Range values must be numeric with a nonzero step",
+        )
     kind = value.get("type")
     if kind is None:
-        kind = "int" if all(float(item).is_integer() for item in (start, stop, step)) else "float"
+        kind = (
+            "int"
+            if all(float(item).is_integer() for item in (start, stop, step))
+            else "float"
+        )
     if kind not in {"int", "float"} or type(value.get("inclusive", False)) is not bool:
-        _fail(source, marker_path, "INVALID_SWEEP_RANGE", "Range type or inclusive flag is invalid")
+        _fail(
+            source,
+            marker_path,
+            "INVALID_SWEEP_RANGE",
+            "Range type or inclusive flag is invalid",
+        )
     inclusive = value.get("inclusive", False)
     result: list[int | float] = []
     current = float(start)
     epsilon = 1e-12
-    while (current <= float(stop) + epsilon if step > 0 and inclusive else current < float(stop) - epsilon) if step > 0 else (current >= float(stop) - epsilon if inclusive else current > float(stop) + epsilon):
+    while (
+        (
+            current <= float(stop) + epsilon
+            if step > 0 and inclusive
+            else current < float(stop) - epsilon
+        )
+        if step > 0
+        else (
+            current >= float(stop) - epsilon
+            if inclusive
+            else current > float(stop) + epsilon
+        )
+    ):
         result.append(int(round(current)) if kind == "int" else round(current, 12))
         current += float(step)
     if not result:
