@@ -3350,9 +3350,14 @@ unsealable lease, and atomically publishes read-only uncompressed tar shards
 with indexed member hashes. Shard verification and selected extraction reject
 links and traversal and explicitly refuse computation on `fishvision`.
 
-Worker-pool submission, remote journal ingestion, and launch-time retrieval
-policy are not yet connected to `run` or `submit`. Until that orchestration path
-is implemented and system-tested, worker-pool CLI support is planning-only.
+Materialized `run` and `submit` operations now enforce `max_concurrent_jobs`
+(default 256 for target-v3 policy) by mapping excess logical Tasks onto a
+bounded Slurm worker array. Workers execute deterministic assignments
+sequentially, preserve per-Task timeouts and output directories, and atomically
+publish exit journals used by lifecycle reconciliation. Compact TaskSpace
+worker submission, requeue recovery, remote shard ingestion, and launch-time
+retrieval policy remain unconnected; worker-pool support beyond materialized
+Runs is still planning-only.
 
 ---
 

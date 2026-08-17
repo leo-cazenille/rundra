@@ -1424,6 +1424,11 @@ def run_operation(
                 preparation=preparation_record,
                 remote_preparation=remote_preparation,
                 remote_source_root=remote_source_root,
+                max_concurrent_jobs=(
+                    targets_config.execution[target_name].max_concurrent_jobs
+                    if target_name in targets_config.execution
+                    else None
+                ),
             )
         )
         record = result.record
@@ -1656,6 +1661,11 @@ def submit_operation(
                 preparation=preparation_record,
                 remote_preparation=remote_preparation,
                 remote_source_root=remote_source_root,
+                max_concurrent_jobs=(
+                    targets_config.execution[target_name].max_concurrent_jobs
+                    if target_name in targets_config.execution
+                    else None
+                ),
             )
         )
         _report_progress(
@@ -1713,7 +1723,9 @@ def status_operation(
         try:
             active_scheduler = scheduler or _record_slurm_scheduler(record)
             record = SchedulerLifecycleService(
-                store=store, scheduler=active_scheduler
+                store=store,
+                scheduler=active_scheduler,
+                transport=transport or _record_ssh_transport(record),
             ).refresh(record)
         except RunStoreError as store_error:
             return OperationResult.failure(
@@ -1778,7 +1790,9 @@ def cancel_operation(
     try:
         active_scheduler = scheduler or _record_slurm_scheduler(record)
         record = SchedulerLifecycleService(
-            store=store, scheduler=active_scheduler
+            store=store,
+            scheduler=active_scheduler,
+            transport=_record_ssh_transport(record),
         ).cancel(record)
     except OrchestrationError as orchestration_error:
         return OperationResult.failure(
@@ -1907,7 +1921,9 @@ def logs_operation(
         try:
             active_scheduler = scheduler or _record_slurm_scheduler(record)
             record = SchedulerLifecycleService(
-                store=store, scheduler=active_scheduler
+                store=store,
+                scheduler=active_scheduler,
+                transport=transport or _record_ssh_transport(record),
             ).refresh(record)
         except RunStoreError as store_error:
             return OperationResult.failure(

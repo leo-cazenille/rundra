@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import gzip
 from collections import deque
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
@@ -147,6 +148,68 @@ def _terminal_rows(state: str, exit_code: int) -> tuple[tuple[int, str, str], ..
         f"42|{state}|{exit_code}:0|2026-08-15T10:00:00|2026-08-15T10:00:00|node01|\n"
     )
     return ((0, "", ""), (0, accounting, ""))
+
+
+def test_bundled_array_reconciles_atomic_task_journals(tmp_path: Path) -> None:
+    service, transport, store = _service(
+        tmp_path,
+        deque(
+            [
+                (0, "MaxArraySize = 1001\n", ""),
+                (0, "42\n", ""),
+            ]
+        ),
+    )
+    request = replace(
+        _request(tmp_path, seeds=(10, 11, 12, 13, 14)),
+        max_concurrent_jobs=2,
+    )
+
+    submitted = service.submit_one(request).record
+
+    assert submitted.scheduler_job_ids == ("42",)
+    assert tuple(submitted.task_scheduler_ids.values()) == (
+        "42_0",
+        "42_1",
+        "42_0",
+        "42_1",
+        "42_0",
+    )
+    accounting = (
+        "42_0|COMPLETED|0:0|2026-08-15T10:00:00|"
+        "2026-08-15T10:01:00|node01|\n"
+        "42_1|COMPLETED|0:0|2026-08-15T10:00:00|"
+        "2026-08-15T10:01:00|node02|\n"
+    )
+    journals = "\n".join(
+        (
+            "task_000000\t0",
+            "task_000002\t9",
+            "task_000004\t0",
+            "task_000001\t0",
+            "task_000003\t0",
+        )
+    )
+    transport.outcomes.extend(
+        ((0, "", ""), (0, accounting, ""), (0, journals, ""))
+    )
+
+    refreshed = SchedulerLifecycleService(
+        store=store,
+        scheduler=service._scheduler,
+        transport=transport,
+        clock=lambda: _NOW,
+    ).refresh(submitted)
+
+    assert [task.state for task in refreshed.run.tasks] == [
+        ExecutionState.SUCCEEDED,
+        ExecutionState.SUCCEEDED,
+        ExecutionState.FAILED,
+        ExecutionState.SUCCEEDED,
+        ExecutionState.SUCCEEDED,
+    ]
+    assert refreshed.task_exit_codes[refreshed.run.tasks[2].id] == 9
+    assert refreshed.run.state is ExecutionState.FAILED
 
 
 @pytest.mark.parametrize(

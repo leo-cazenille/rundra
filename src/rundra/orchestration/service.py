@@ -101,6 +101,7 @@ class SchedulerLifecycleService:
         *,
         store: RunStore,
         scheduler: Scheduler,
+        transport: Transport | None = None,
         clock: Callable[[], datetime] | None = None,
         sleeper: Callable[[float], None] = sleep,
         monotonic_clock: Callable[[], float] = monotonic,
@@ -118,12 +119,15 @@ class SchedulerLifecycleService:
             raise TypeError("SchedulerLifecycleService timing hooks must be callable")
         if progress is not None and not callable(progress):
             raise TypeError("SchedulerLifecycleService progress must be callable")
+        if transport is not None and not isinstance(transport, Transport):
+            raise TypeError("SchedulerLifecycleService transport must implement Transport")
         self._store = store
         self._scheduler = scheduler
         self._clock = clock or (lambda: datetime.now(UTC))
         self._sleeper = sleeper
         self._monotonic = monotonic_clock
         self._progress = progress
+        self._transport = transport
 
     def refresh(self, record: RunRecord) -> RunRecord:
         """Query and durably apply every Task scheduler observation."""
@@ -133,17 +137,25 @@ class SchedulerLifecycleService:
             return current
         task_references = _record_task_references(current)
         references = tuple(reference for _, reference in task_references)
-        observations = self._scheduler.query(references)
-        _validate_observations(observations, references)
+        unique_references = tuple(dict.fromkeys(references))
+        observations = self._scheduler.query(unique_references)
+        _validate_observations(observations, unique_references)
+        by_reference = {
+            observation.reference: observation for observation in observations
+        }
+        task_observations = tuple(
+            (task_id, by_reference[reference])
+            for task_id, reference in task_references
+        )
         updated = _observed_records(
             current,
-            tuple(
-                (task_id, observation)
-                for (task_id, _), observation in zip(
-                    task_references, observations, strict=True
-                )
-            ),
+            task_observations,
             self._clock(),
+        )
+        updated = _apply_bundle_journals(
+            updated,
+            task_observations,
+            self._transport,
         )
         self._store.update(updated, expected=current)
         return updated
@@ -369,6 +381,7 @@ class RunExecutionRequest:
     preparation: PreparationRecord | None = None
     remote_preparation: RemotePreparationSpec | None = None
     remote_source_root: PurePath | None = None
+    max_concurrent_jobs: int | None = None
 
     def __post_init__(self) -> None:
         if type(self.plan) is not ExecutionPlan:
@@ -408,6 +421,11 @@ class RunExecutionRequest:
             or not self.remote_source_root.is_absolute()
         ):
             raise ValueError("Remote source root must be an absolute path or None")
+        if self.max_concurrent_jobs is not None and (
+            type(self.max_concurrent_jobs) is not int
+            or self.max_concurrent_jobs < 1
+        ):
+            raise ValueError("max_concurrent_jobs must be positive or None")
 
 
 @dataclass(frozen=True, slots=True)
@@ -676,6 +694,7 @@ class OrchestrationService:
                     request.plan.array_mapping,
                     workspace.metadata / "slurm-array-tasks.sh",
                     allow_duplicate_seeds=request.plan.version == 3,
+                    max_concurrent_jobs=request.max_concurrent_jobs,
                 )
                 submission = (
                     cast(DependencyScheduler, self._scheduler).submit_array_afterok(
@@ -706,6 +725,9 @@ class OrchestrationService:
                 run_id=run_id,
             ) from error
 
+        bundled = len(set(submission.task_native_ids.values())) < len(
+            submission.task_native_ids
+        )
         updated = replace(
             _with_execution_state(record, ExecutionState.SUBMITTED),
             scheduler_job_ids=tuple(
@@ -713,6 +735,19 @@ class OrchestrationService:
             ),
             task_scheduler_ids=submission.task_native_ids,
             submitted_at=submission_started_at,
+            scheduler_metadata={
+                **record.scheduler_metadata,
+                **(
+                    {
+                        "bundle_status_root": str(
+                            workspace.metadata / "bundle-status"
+                        ),
+                        "max_concurrent_jobs": request.max_concurrent_jobs or 0,
+                    }
+                    if bundled
+                    else {}
+                ),
+            },
         )
         self.store.update(updated, expected=record)
         record = updated
@@ -733,6 +768,7 @@ class OrchestrationService:
             lifecycle = SchedulerLifecycleService(
                 store=self.store,
                 scheduler=self._scheduler,
+                transport=self._transport,
                 clock=self._clock,
                 progress=self._progress,
             )
@@ -1151,6 +1187,91 @@ def _observed_records(
         task_native_states=native_states,
         task_exit_codes=exit_codes,
         artifacts=tuple(artifacts),
+    )
+
+
+def _apply_bundle_journals(
+    record: RunRecord,
+    task_observations: tuple[tuple[TaskId, SchedulerObservation], ...],
+    transport: Transport | None,
+) -> RunRecord:
+    status_value = record.scheduler_metadata.get("bundle_status_root")
+    if status_value is None:
+        return record
+    if type(status_value) is not str or not status_value.startswith("/"):
+        raise ValueError("Run bundle status root is invalid")
+    if transport is None:
+        raise ValueError("Bundled Run reconciliation requires its transport")
+    observations = dict(task_observations)
+    successful_references = tuple(
+        dict.fromkeys(
+            record.task_scheduler_ids[task_id]
+            for task_id, observation in task_observations
+            if observation.state is ExecutionState.SUCCEEDED
+        )
+    )
+    journal_codes: dict[TaskId, int] = {}
+    if successful_references:
+        paths = tuple(
+            f"{status_value}/{native_id}.tsv" for native_id in successful_references
+        )
+        result = transport.run(
+            Command(
+                (
+                    "/bin/sh",
+                    "-c",
+                    'for path do if [ -f "$path" ]; then cat -- "$path"; fi; done',
+                    "rundra-bundle-status",
+                    *paths,
+                )
+            )
+        )
+        if result.exit_code != 0:
+            raise ValueError("Could not read bundled Task status journals")
+        known = {task.id for task in record.run.tasks}
+        for line in result.stdout.splitlines():
+            fields = line.split("\t")
+            if len(fields) != 2:
+                raise ValueError("Bundled Task status journal is malformed")
+            task_id = TaskId(fields[0])
+            if task_id not in known or task_id in journal_codes:
+                raise ValueError("Bundled Task status journal has invalid identities")
+            try:
+                code = int(fields[1])
+            except ValueError as error:
+                raise ValueError("Bundled Task exit code is malformed") from error
+            if not 0 <= code <= 255:
+                raise ValueError("Bundled Task exit code is outside shell range")
+            journal_codes[task_id] = code
+    tasks = []
+    exit_codes = dict(record.task_exit_codes)
+    native_states = dict(record.task_native_states)
+    for task in record.run.tasks:
+        observation = observations[task.id]
+        if observation.state is not ExecutionState.SUCCEEDED:
+            tasks.append(task)
+            continue
+        code = journal_codes.get(task.id, 125)
+        state = ExecutionState.SUCCEEDED if code == 0 else ExecutionState.FAILED
+        tasks.append(replace(task, state=state))
+        exit_codes[task.id] = code
+        native_states[task.id] = (
+            "BUNDLED_TASK_SUCCEEDED"
+            if code == 0
+            else "BUNDLE_JOURNAL_MISSING"
+            if task.id not in journal_codes
+            else "BUNDLED_TASK_FAILED"
+        )
+    task_tuple = tuple(tasks)
+    return replace(
+        record,
+        run=replace(
+            record.run,
+            tasks=task_tuple,
+            state=aggregate_execution_state(tuple(task.state for task in task_tuple)),
+        ),
+        task_exit_codes=exit_codes,
+        task_native_states=native_states,
     )
 
 

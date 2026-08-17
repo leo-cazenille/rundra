@@ -239,7 +239,10 @@ class RunRecord:
                     raise ValueError(
                         "RunRecord task_scheduler_ids must identify every Task"
                     )
-                if len(set(mapping.values())) != len(mapping):
+                if (
+                    len(set(mapping.values())) != len(mapping)
+                    and "bundle_status_root" not in self.scheduler_metadata
+                ):
                     raise ValueError(
                         "RunRecord task_scheduler_ids must contain unique identities"
                     )
