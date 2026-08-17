@@ -381,6 +381,7 @@ class RunExecutionRequest:
     initiator: str | None = None
     preparation: PreparationRecord | None = None
     remote_preparation: RemotePreparationSpec | None = None
+    remote_source_root: PurePath | None = None
 
     def __post_init__(self) -> None:
         if type(self.plan) is not ExecutionPlan:
@@ -415,6 +416,11 @@ class RunExecutionRequest:
             )
         if self.remote_preparation is not None and self.preparation is None:
             raise ValueError("Remote preparation requires preparation provenance")
+        if self.remote_source_root is not None and (
+            not isinstance(self.remote_source_root, PurePath)
+            or not self.remote_source_root.is_absolute()
+        ):
+            raise ValueError("Remote source root must be an absolute path or None")
 
 
 @dataclass(frozen=True, slots=True)
@@ -499,7 +505,7 @@ class OrchestrationService:
         if type(run_id) is not RunId:
             raise TypeError("Run ID factory must return a RunId")
         provenance = GitProvenance()
-        if self._provenance is not None:
+        if self._provenance is not None and request.remote_source_root is None:
             try:
                 captured = self._provenance.capture(request.source_root)
                 if type(captured) is GitProvenance:
@@ -555,6 +561,7 @@ class OrchestrationService:
                     task_manifest=(
                         _task_manifest(units) if request.plan.version == 3 else None
                     ),
+                    remote_source_root=request.remote_source_root,
                 )
             )
         except Exception as error:

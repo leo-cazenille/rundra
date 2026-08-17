@@ -32,7 +32,9 @@ from rundra.orchestration.preparation import (
     create_remote_preparation_spec,
     prepare_local,
     prepare_source_snapshot,
+    probe_remote_preparation_cache,
     read_remote_preparation_result,
+    remote_platform_fingerprint,
 )
 from rundra.ports import StagedWorkspace
 
@@ -307,8 +309,8 @@ def test_remote_preparation_script_builds_and_reuses_target_cache(
     recipe = _recipe(image_candidate, build=True)
     plan = PreparationPlan(
         recipe,
-        source_mode="working_tree",
-        source_root=tmp_path,
+        source_mode="git",
+        source_root=None,
         offline=True,
     )
     target = _target(tmp_path)
@@ -329,7 +331,7 @@ def test_remote_preparation_script_builds_and_reuses_target_cache(
         plan,
         prepared_source,
         target,
-        "56" * 32,
+        remote_platform_fingerprint(LocalTransport()),
         cache_root=target_cache,
         image_search_paths=(image_search,),
     )
@@ -375,6 +377,20 @@ def test_remote_preparation_script_builds_and_reuses_target_cache(
     assert (entry / ".complete").is_file()
     assert (entry / "source/bin/model").is_file()
     assert stat_mode(entry) & 0o222 == 0
+
+    cached = probe_remote_preparation_cache(
+        plan,
+        _experiment(recipe),
+        target,
+        LocalTransport(),
+        cache_root=target_cache,
+    )
+    assert cached is not None
+    assert cached.source_root == entry / "source"
+    assert cached.experiment_image == (
+        target_cache / "images" / f"{recipe.image.sha256}.sif"
+    )
+    assert cached.record.source_action == "reuse_target_source_cache"
 
 
 def test_remote_preparation_pull_uses_a_nonexistent_destination(

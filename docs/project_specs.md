@@ -1365,6 +1365,13 @@ state and scheduler identity remain separate from scientific Task identities.
 After a synchronous prepared run, the version-2 record finalizes whether the
 target image was pulled, copied from a verified candidate, or reused and
 whether compiled outputs were built or reused.
+For pinned Git sources, successful target preparation also publishes an
+immutable recipe index. A later warm `run` or `submit` validates the index,
+platform fingerprint, image digest, build marker, and every declared output on
+the target before copying the prepared source directly into the new Run
+workspace. This path does not require a controller-side checkout or source
+upload. Working-tree preparation never uses this recipe index because its
+identity is local mutable content.
 For asynchronous `submit`, the same finalization occurs during a later
 successful `status` reconciliation; `inspect` remains network-free.
 The implementation status and remaining adapter work are tracked in

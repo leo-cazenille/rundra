@@ -3,6 +3,7 @@ from __future__ import annotations
 import fcntl
 import fnmatch
 import hashlib
+import json
 import os
 import platform
 import shlex
@@ -62,6 +63,7 @@ class RemotePreparationSpec:
     source_identity: str
     platform_fingerprint: str
     build_key: str | None
+    index_key: str | None = None
     target_cache_root: PurePath | None = None
     image_search_paths: tuple[PurePath, ...] = ()
 
@@ -71,6 +73,13 @@ class RemotePreparationResult:
     outputs: tuple[PreparedOutput, ...]
     image_action: str
     build_action: str
+
+
+@dataclass(frozen=True, slots=True)
+class RemotePreparationCacheHit:
+    source_root: PurePath
+    experiment_image: PurePath
+    record: PreparationRecord
 
 
 def prepare_source_snapshot(
@@ -111,6 +120,156 @@ def remote_platform_fingerprint(transport: Transport) -> str:
     return hashlib.sha256(result.stdout.strip().encode("utf-8")).hexdigest()
 
 
+def remote_preparation_index_key(
+    plan: PreparationPlan, target: Target, platform_fingerprint: str
+) -> str:
+    build = plan.recipe.build
+    if build is None:
+        raise PreparationError("Remote preparation index requires a build recipe")
+    identity_digest = hashlib.sha256(
+        json.dumps(
+            {
+                "source": source_recipe_identity(plan.recipe.source),
+                "version": 1,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    scope = target.name if build.cache_scope == "target" else platform_fingerprint
+    return build_cache_key(
+        source_digest=identity_digest,
+        image_digest=plan.recipe.image.sha256,
+        build=build,
+        builder_scope=scope,
+        platform_fingerprint=platform_fingerprint,
+    )
+
+
+def probe_remote_preparation_cache(
+    plan: PreparationPlan,
+    experiment: ExperimentSpec,
+    target: Target,
+    transport: Transport,
+    *,
+    cache_root: PurePath | None = None,
+) -> RemotePreparationCacheHit | None:
+    """Validate one exact pinned-source target cache entry without local source."""
+    if plan.source_mode != "git" or plan.rebuild or plan.recipe.build is None:
+        return None
+    fingerprint = remote_platform_fingerprint(transport)
+    root = target.workspace / "cache" if cache_root is None else cache_root
+    index_key = remote_preparation_index_key(plan, target, fingerprint)
+    index = root / "indexes" / f"{index_key}.tsv"
+    result = transport.run(Command(("cat", "--", str(index))))
+    if result.exit_code != 0:
+        return None
+    fields: dict[str, str] = {}
+    outputs: list[PreparedOutput] = []
+    for line in result.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) == 2 and parts[0] not in fields:
+            fields[parts[0]] = parts[1]
+        elif len(parts) == 4 and parts[0] == "output" and parts[2] in {"0", "1"}:
+            outputs.append(
+                PreparedOutput(
+                    path=PurePath(parts[3]),
+                    sha256=parts[1],
+                    executable=parts[2] == "1",
+                )
+            )
+        else:
+            raise PreparationError("Target preparation index is invalid")
+    if set(fields) != {"version", "source_digest", "platform", "build_key"}:
+        raise PreparationError("Target preparation index is incomplete")
+    if fields["version"] != "1" or fields["platform"] != fingerprint:
+        raise PreparationError("Target preparation index identity mismatch")
+    source_digest = fields["source_digest"]
+    build_key = fields["build_key"]
+    if not _is_sha256(source_digest) or not _is_sha256(build_key):
+        raise PreparationError("Target preparation index digest is invalid")
+    build = plan.recipe.build
+    scope = target.name if build.cache_scope == "target" else fingerprint
+    expected_key = build_cache_key(
+        source_digest=source_digest,
+        image_digest=plan.recipe.image.sha256,
+        build=build,
+        builder_scope=scope,
+        platform_fingerprint=fingerprint,
+    )
+    if build_key != expected_key:
+        raise PreparationError("Target preparation index build key mismatch")
+    entry = root / "builds" / build_key
+    prepared_source = entry / "source"
+    image = root / "images" / f"{plan.recipe.image.sha256}.sif"
+    for command, message in (
+        (Command(("test", "-f", str(entry / ".complete"))), "build cache incomplete"),
+        (Command(("test", "-d", str(prepared_source))), "prepared source missing"),
+        (
+            Command(("test", "!", "-L", str(prepared_source))),
+            "prepared source is a symlink",
+        ),
+    ):
+        if transport.run(command).exit_code != 0:
+            raise PreparationError(f"Target {message}")
+    indexed_outputs = {output.path: output for output in outputs}
+    declared_outputs = {output.path: output for output in build.outputs}
+    if set(indexed_outputs) != set(declared_outputs):
+        raise PreparationError("Target preparation index outputs do not match recipe")
+    for path, declared in declared_outputs.items():
+        indexed = indexed_outputs[path]
+        if indexed.executable != declared.executable:
+            raise PreparationError(
+                "Target preparation output mode does not match recipe"
+            )
+        cached_output = prepared_source / path
+        digest_result = transport.run(Command(("sha256sum", "--", str(cached_output))))
+        digest_fields = digest_result.stdout.split(maxsplit=1)
+        if (
+            digest_result.exit_code != 0
+            or not digest_fields
+            or digest_fields[0] != indexed.sha256
+        ):
+            raise PreparationError(f"Target prepared output digest mismatch: {path}")
+        if (
+            declared.executable
+            and transport.run(Command(("test", "-x", str(cached_output)))).exit_code
+            != 0
+        ):
+            raise PreparationError(f"Target prepared output is not executable: {path}")
+    image_result = transport.run(Command(("sha256sum", "--", str(image))))
+    image_fields = image_result.stdout.split(maxsplit=1)
+    if (
+        image_result.exit_code != 0
+        or not image_fields
+        or image_fields[0] != plan.recipe.image.sha256
+    ):
+        raise PreparationError("Target cached image digest mismatch")
+    if experiment.container is None:
+        raise PreparationError("Prepared execution requires a container")
+    record = PreparationRecord(
+        source_identity=source_recipe_identity(plan.recipe.source),
+        source_digest=source_digest,
+        source_action="reuse_target_source_cache",
+        image_uri=plan.recipe.image.uri,
+        image_sha256=plan.recipe.image.sha256,
+        image_path=image,
+        image_action="reuse_image_cache",
+        resolution_location="target",
+        build_cache_key=build_key,
+        builder_location="target",
+        build_action="reuse_build_cache",
+        build_outputs=tuple(outputs),
+    )
+    return RemotePreparationCacheHit(prepared_source, image, record)
+
+
+def _is_sha256(value: str) -> bool:
+    return len(value) == 64 and all(
+        character in "0123456789abcdef" for character in value
+    )
+
+
 def create_remote_preparation_spec(
     plan: PreparationPlan,
     source: PreparedSource,
@@ -139,6 +298,11 @@ def create_remote_preparation_spec(
         source_identity=source.identity,
         platform_fingerprint=platform_fingerprint,
         build_key=key,
+        index_key=(
+            None
+            if build is None
+            else remote_preparation_index_key(plan, target, platform_fingerprint)
+        ),
         target_cache_root=(
             PurePath(str(target.workspace)) / "cache"
             if cache_root is None
@@ -190,7 +354,7 @@ def build_remote_preparation_command(
         f"image_lock={shlex.quote(str(image_lock))}",
         "image_action=reuse_image_cache",
         "build_action=not_requested",
-        'mkdir -p -- "$cache/images" "$cache/builds" "$cache/locks"',
+        'mkdir -p -- "$cache/images" "$cache/builds" "$cache/indexes" "$cache/locks"',
         "attempt=0",
         'while ! mkdir -- "$image_lock" 2>/dev/null; do',
         "  attempt=$((attempt + 1))",
@@ -341,6 +505,31 @@ def build_remote_preparation_command(
                 'mv -- "$manifest_tmp" "$manifest"',
             )
         )
+        if plan.source_mode == "git":
+            assert spec.index_key is not None
+            lines.extend(
+                (
+                    f"index={shlex.quote(str(target_cache / 'indexes' / f'{spec.index_key}.tsv'))}",
+                    'index_tmp=$(mktemp "$cache/indexes/.index.XXXXXX")',
+                    f"printf 'version\\t1\\nsource_digest\\t%s\\nplatform\\t%s\\nbuild_key\\t%s\\n' {shlex.quote(spec.source_digest)} {shlex.quote(spec.platform_fingerprint)} {shlex.quote(spec.build_key)} > \"$index_tmp\"",
+                )
+            )
+            for output in build.outputs:
+                rendered = shlex.quote(str(output.path))
+                executable = "1" if output.executable else "0"
+                lines.extend(
+                    (
+                        f"output={shlex.quote(str(workspace.source))}/{rendered}",
+                        "digest=$(sha256sum -- \"$output\" | cut -d' ' -f1)",
+                        f'printf \'output\\t%s\\t{executable}\\t%s\\n\' "$digest" {rendered} >> "$index_tmp"',
+                    )
+                )
+            lines.extend(
+                (
+                    'chmod a-w -- "$index_tmp"',
+                    'mv -f -- "$index_tmp" "$index"',
+                )
+            )
     lines.extend(
         (
             f"actions_tmp={shlex.quote(str(workspace.metadata / '.preparation-actions.tmp'))}",

@@ -273,6 +273,39 @@ def test_rsync_stager_reports_capability_and_upload_failures_without_data_leaks(
     assert "SECRET_VALUE_FROM_ARGV" not in str(captured.value)
 
 
+def test_rsync_stager_copies_an_existing_remote_source_without_uploading_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    remote_source = PurePosixPath("/remote/cache/builds/key/source")
+    request = replace(
+        _request(tmp_path / "missing-local-source"),
+        remote_source_root=remote_source,
+    )
+    transport = RecordingTransport(deque([0] * 10))
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(shutil, "which", lambda executable: "/usr/bin/rsync")
+
+    def run(
+        argv: tuple[str, ...], **options: object
+    ) -> subprocess.CompletedProcess[str]:
+        del options
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    workspace = RsyncStager(transport).stage(request)
+
+    assert len(calls) == 1
+    assert calls[0][-1] == f"cluster-alias:{workspace.root}/"
+    assert Command(("test", "-d", str(remote_source))) in transport.calls
+    assert Command(("test", "!", "-L", str(remote_source))) in transport.calls
+    assert (
+        Command(("cp", "-a", "--", f"{remote_source}/.", str(workspace.source)))
+        in transport.calls
+    )
+
+
 def test_verified_file_publication_is_atomic_and_reuses_target_digest(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -315,6 +315,7 @@ class StageRequest:
     task_ids: tuple[TaskId, ...] = ()
     task_configs: Mapping[TaskId, ConfigSnapshot] = field(default_factory=dict)
     task_manifest: str | None = None
+    remote_source_root: PurePath | None = None
 
     def __post_init__(self) -> None:
         if type(self.run_id) is not RunId:
@@ -346,6 +347,15 @@ class StageRequest:
             raise ValueError("StageRequest task_configs must match task_ids")
         if self.task_manifest is not None and type(self.task_manifest) is not str:
             raise TypeError("StageRequest task_manifest must be a string or None")
+        if self.remote_source_root is not None and (
+            not isinstance(self.remote_source_root, PurePath)
+            or not self.remote_source_root.is_absolute()
+            or self.remote_source_root == PurePath("/")
+            or "\x00" in str(self.remote_source_root)
+        ):
+            raise ValueError(
+                "StageRequest remote_source_root must be an absolute safe path or None"
+            )
         object.__setattr__(self, "task_ids", task_ids)
         object.__setattr__(self, "task_configs", MappingProxyType(task_configs))
 

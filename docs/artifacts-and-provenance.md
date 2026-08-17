@@ -54,6 +54,11 @@ Experiment `sync.exclude` entries extend this list. The same defaults apply to
 working-tree preparation hashing and staging, preventing excluded large files
 from being uploaded or invalidating prepared build caches.
 
+Pinned-Git target preparation may stage a validated warm build directly from
+the target's immutable prepared-source cache. Rundra validates the associated
+recipe index, image, platform, and declared output hashes first; no unrelated
+controller working-tree files are transferred on this path.
+
 The `source_snapshot` and `effective_config` artifacts identify these staged
 inputs. Their paths may be local or remote workspace paths and are not a promise
 that the workspace is retained forever.

@@ -190,6 +190,8 @@ class LocalStager:
             raise LocalStagerError(
                 f"Target {request.target.name!r} staging backend is not local"
             )
+        if request.remote_source_root is not None:
+            raise LocalStagerError("Local staging cannot use a remote source root")
         patterns = _validated_patterns(request.experiment.sync_excludes)
         source = _source_directory(request.source_root)
         workspace_root = Path(str(request.target.workspace)).expanduser().resolve()

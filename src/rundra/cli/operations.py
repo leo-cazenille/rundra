@@ -66,6 +66,7 @@ from rundra.orchestration.preparation import (
     create_remote_preparation_spec,
     prepare_local,
     prepare_source_snapshot,
+    probe_remote_preparation_cache,
     read_remote_preparation_result,
     remote_platform_fingerprint,
     remote_preparation_record,
@@ -1101,6 +1102,30 @@ def _remote_preparation_inputs(
     return source.root, effective_experiment, record, spec
 
 
+def _cached_remote_preparation_inputs(
+    plan: PreparationPlan,
+    experiment: ExperimentSpec,
+    target: Target,
+    transport: Transport,
+    target_storage: PreparationStorageConfig,
+) -> tuple[ExperimentSpec, PreparationRecord, PurePath] | None:
+    cached = probe_remote_preparation_cache(
+        plan,
+        experiment,
+        target,
+        transport,
+        cache_root=target_storage.cache_root,
+    )
+    if cached is None:
+        return None
+    assert experiment.container is not None
+    effective_experiment = replace(
+        experiment,
+        container=replace(experiment.container, image=cached.experiment_image),
+    )
+    return effective_experiment, cached.record, cached.source_root
+
+
 def _local_remote_preparation_inputs(
     plan: PreparationPlan,
     experiment: ExperimentSpec,
@@ -1224,6 +1249,7 @@ def run_operation(
         effective_source_root = source_root
         preparation_record = None
         remote_preparation = None
+        remote_source_root = None
         transport, stager, runtime, scheduler = _execution_adapters(target)
         if preparation is not None:
             if target.transport.kind == "local" and target.scheduler.kind == "local":
@@ -1268,20 +1294,34 @@ def run_operation(
                         target_storage,
                     )
                 else:
-                    (
-                        effective_source_root,
-                        effective_experiment,
-                        preparation_record,
-                        remote_preparation,
-                    ) = _remote_preparation_inputs(
+                    cached = _cached_remote_preparation_inputs(
                         preparation,
                         experiment,
                         target,
-                        source_root,
                         transport,
-                        preparation_storage,
                         target_storage,
                     )
+                    if cached is not None:
+                        (
+                            effective_experiment,
+                            preparation_record,
+                            remote_source_root,
+                        ) = cached
+                    else:
+                        (
+                            effective_source_root,
+                            effective_experiment,
+                            preparation_record,
+                            remote_preparation,
+                        ) = _remote_preparation_inputs(
+                            preparation,
+                            experiment,
+                            target,
+                            source_root,
+                            transport,
+                            preparation_storage,
+                            target_storage,
+                        )
             assert preparation_record is not None
             _report_progress(
                 progress,
@@ -1338,6 +1378,7 @@ def run_operation(
                 experiment_source=experiment_source,
                 preparation=preparation_record,
                 remote_preparation=remote_preparation,
+                remote_source_root=remote_source_root,
             )
         )
         record = result.record
@@ -1457,6 +1498,7 @@ def submit_operation(
         effective_source_root = source_root
         preparation_record = None
         remote_preparation = None
+        remote_source_root = None
         transport, stager, runtime, scheduler = _execution_adapters(target)
         if preparation is not None:
             if target.transport.kind != "ssh" or target.scheduler.kind != "slurm":
@@ -1484,20 +1526,34 @@ def submit_operation(
                     target_storage,
                 )
             else:
-                (
-                    effective_source_root,
-                    effective_experiment,
-                    preparation_record,
-                    remote_preparation,
-                ) = _remote_preparation_inputs(
+                cached = _cached_remote_preparation_inputs(
                     preparation,
                     experiment,
                     target,
-                    source_root,
                     transport,
-                    preparation_storage,
                     target_storage,
                 )
+                if cached is not None:
+                    (
+                        effective_experiment,
+                        preparation_record,
+                        remote_source_root,
+                    ) = cached
+                else:
+                    (
+                        effective_source_root,
+                        effective_experiment,
+                        preparation_record,
+                        remote_preparation,
+                    ) = _remote_preparation_inputs(
+                        preparation,
+                        experiment,
+                        target,
+                        source_root,
+                        transport,
+                        preparation_storage,
+                        target_storage,
+                    )
             assert preparation_record is not None
             _report_progress(
                 progress,
@@ -1554,6 +1610,7 @@ def submit_operation(
                 experiment_source=experiment_source,
                 preparation=preparation_record,
                 remote_preparation=remote_preparation,
+                remote_source_root=remote_source_root,
             )
         )
         _report_progress(

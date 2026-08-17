@@ -123,8 +123,12 @@ class RsyncStager:
             raise TypeError("RsyncStager.stage requires a StageRequest")
         _validate_remote_target(request)
         self.check()
-        source = _source_directory(request.source_root)
         exclusions = _validated_exclusions(request.experiment.sync_excludes)
+        source = (
+            _source_directory(request.source_root)
+            if request.remote_source_root is None
+            else None
+        )
         host = _target_host(request.target.transport.options)
         if self._host is not None and self._host != host:
             raise RsyncStagerError("Configured rsync host does not match target host")
@@ -134,23 +138,47 @@ class RsyncStager:
             task_ids=request.task_ids,
         )
 
-        source_argv: list[str] = [
-            *self._rsync_prefix,
-            "--archive",
-            "--copy-links",
-            "--delete",
-            "--protect-args",
-        ]
-        for pattern in exclusions:
-            source_argv.extend(("--exclude", pattern))
-        source_argv.extend(
-            (
-                "--",
-                f"{source}/",
-                _remote_destination(host, workspace.source, directory=True),
+        if request.remote_source_root is None:
+            assert source is not None
+            source_argv: list[str] = [
+                *self._rsync_prefix,
+                "--archive",
+                "--copy-links",
+                "--delete",
+                "--protect-args",
+            ]
+            for pattern in exclusions:
+                source_argv.extend(("--exclude", pattern))
+            source_argv.extend(
+                (
+                    "--",
+                    f"{source}/",
+                    _remote_destination(host, workspace.source, directory=True),
+                )
             )
-        )
-        self._upload(tuple(source_argv), kind="source", run_id=str(request.run_id))
+            self._upload(tuple(source_argv), kind="source", run_id=str(request.run_id))
+        else:
+            remote_source = request.remote_source_root
+            for command, action in (
+                (Command(("test", "-d", str(remote_source))), "validate remote source"),
+                (
+                    Command(("test", "!", "-L", str(remote_source))),
+                    "reject remote source symlink",
+                ),
+                (
+                    Command(
+                        (
+                            "cp",
+                            "-a",
+                            "--",
+                            f"{remote_source}/.",
+                            str(workspace.source),
+                        )
+                    ),
+                    "copy cached remote source",
+                ),
+            ):
+                _require_remote_success(self._transport, command, action)
 
         config_content = request.config.content.encode("utf-8")
         task_config_paths = {
