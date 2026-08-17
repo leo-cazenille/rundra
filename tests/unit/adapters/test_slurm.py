@@ -716,6 +716,8 @@ def test_slurm_scheduler_bundles_tasks_at_concurrent_job_limit() -> None:
     transport.results.extend(
         (
             _command_result(Command(("unused",)), 0, "MaxArraySize = 1001\n"),
+            _command_result(Command(("unused",)), 0, ""),
+            _command_result(Command(("unused",)), 0, ""),
             _command_result(Command(("unused",)), 0, "777\n"),
         )
     )
@@ -730,14 +732,14 @@ def test_slurm_scheduler_bundles_tasks_at_concurrent_job_limit() -> None:
         TaskId.from_ordinal(3): "777_1",
         TaskId.from_ordinal(4): "777_0",
     }
-    command = transport.run_calls[1]
-    encoded = "".join(command.argv[9:])
+    command = transport.run_calls[-1]
+    encoded = "".join(call.argv[4] for call in transport.run_calls[2:-1])
     manifest = gzip.decompress(base64.b64decode(encoded)).decode("utf-8")
     assert "bundle-status" in manifest
     assert "timeout --signal=TERM --kill-after=30s 120s" in manifest
     assert manifest.count("# task_id=") == 5
-    assert "#SBATCH --array=0-1" in command.argv[5]
-    assert "#SBATCH --time=00:06:00" in command.argv[5]
+    assert "#SBATCH --array=0-1" in command.argv[6]
+    assert "#SBATCH --time=00:06:00" in command.argv[6]
 
 
 def test_render_sbatch_script_translates_portable_and_allowed_native_resources() -> (

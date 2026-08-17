@@ -156,6 +156,8 @@ def test_bundled_array_reconciles_atomic_task_journals(tmp_path: Path) -> None:
         deque(
             [
                 (0, "MaxArraySize = 1001\n", ""),
+                (0, "", ""),
+                (0, "", ""),
                 (0, "42\n", ""),
             ]
         ),

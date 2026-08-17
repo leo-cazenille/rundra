@@ -102,22 +102,18 @@ printf '%s' "$3" > "$script"
 _SUBMIT_CHUNKED_ARRAY_SCRIPT = """\
 set -eu
 manifest=$1
+encoded=$2
 if [ -e "$manifest" ]; then
   printf '%s\n' 'Rundra array manifest already exists' >&2
   exit 73
 fi
-script_content=$2
-log_directory=$3
-sbatch=$4
-dependency=$5
-shift 5
+script_content=$3
+log_directory=$4
+sbatch=$5
+dependency=$6
 manifest_tmp=$(mktemp "${manifest}.XXXXXX")
-encoded=$(mktemp "${TMPDIR:-/tmp}/rundra-array.XXXXXX")
 script=$(mktemp "${TMPDIR:-/tmp}/rundra-sbatch.XXXXXX")
 trap 'rm -f "$manifest_tmp" "$encoded" "$script"' EXIT HUP INT TERM
-for chunk do
-  printf '%s' "$chunk"
-done > "$encoded"
 base64 -d < "$encoded" | gzip -d > "$manifest_tmp"
 chmod 500 "$manifest_tmp"
 mv -- "$manifest_tmp" "$manifest"
@@ -129,6 +125,20 @@ if [ "$dependency" != - ]; then
 else
   "$sbatch" --parsable "$script"
 fi
+"""
+_CREATE_ENCODED_MANIFEST_SCRIPT = """\
+set -eu
+encoded=$1
+manifest=$2
+if [ -e "$encoded" ] || [ -e "$manifest" ]; then
+  exit 73
+fi
+umask 077
+: > "$encoded"
+"""
+_APPEND_ENCODED_MANIFEST_SCRIPT = """\
+set -eu
+printf '%s' "$1" >> "$2"
 """
 
 
@@ -515,6 +525,46 @@ class SlurmScheduler:
             encoded[offset : offset + _COMPRESSED_ARGUMENT_CHUNK]
             for offset in range(0, len(encoded), _COMPRESSED_ARGUMENT_CHUNK)
         )
+        encoded_path = manifest_path.with_name(f".{manifest_path.name}.encoded")
+        commands = [
+            Command(
+                (
+                    "/bin/sh",
+                    "-c",
+                    _CREATE_ENCODED_MANIFEST_SCRIPT,
+                    "rundra-bundle-create",
+                    str(encoded_path),
+                    str(manifest_path),
+                )
+            ),
+            *(
+                Command(
+                    (
+                        "/bin/sh",
+                        "-c",
+                        _APPEND_ENCODED_MANIFEST_SCRIPT,
+                        "rundra-bundle-append",
+                        chunk,
+                        str(encoded_path),
+                    )
+                )
+                for chunk in chunks
+            ),
+        ]
+        try:
+            for command in commands:
+                result = self._transport.run(command)
+                if result.exit_code != 0:
+                    raise SlurmSubmissionError(
+                        "Bundle manifest chunk persistence failed with "
+                        f"exit code {result.exit_code}; diagnostic redacted"
+                    )
+        except SlurmSubmissionError:
+            raise
+        except Exception as error:
+            raise SlurmSubmissionError(
+                "Could not persist the bundle manifest chunks"
+            ) from error
         command = Command(
             (
                 "/bin/sh",
@@ -522,11 +572,11 @@ class SlurmScheduler:
                 _SUBMIT_CHUNKED_ARRAY_SCRIPT,
                 "rundra-slurm-bundle-submit",
                 str(manifest_path),
+                str(encoded_path),
                 script,
                 str(self._log_directory),
                 self._sbatch,
                 dependency or "-",
-                *chunks,
             )
         )
         try:
