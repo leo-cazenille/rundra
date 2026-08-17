@@ -853,7 +853,6 @@ def resolve_run_inputs_operation(
         user = discover_user_launch(user_config_source) if use_defaults else None
         builtins = LaunchValues(
             source_root=(project.project_root if project is not None else Path.cwd()),
-            destination=Path("rundra-results"),
             targets_file=Path("~/.config/rundra/targets.yaml").expanduser(),
             data_dir=Path("~/.local/share/rundra/runs").expanduser(),
         )
@@ -864,6 +863,18 @@ def resolve_run_inputs_operation(
             builtins=builtins,
             profile=profile,
         )
+        if resolved.values.destination is None and resolved.values.config is not None:
+            destination_root = (
+                project.project_root if project is not None else Path.cwd()
+            )
+            derived_destination = (
+                destination_root / "retrieved" / resolved.values.config.stem
+            ).resolve()
+            resolved = ResolvedLaunch(
+                replace(resolved.values, destination=derived_destination),
+                {**resolved.sources, "destination": "built_in"},
+                resolved.profile,
+            )
     except ConfigError as error:
         return OperationResult.failure(operation, _config_error(error))
     except PlanningError as error:

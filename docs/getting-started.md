@@ -169,6 +169,11 @@ and persisted; use `--seed N` to replay it or `--random-seed` to override a
 configured fixed seed. `plan --json` and `run --json` expose every resolved value
 and its source under `launch`.
 
+If no launch layer supplies `destination`, Rundra retrieves into
+`PROJECT_ROOT/retrieved/<config-stem>`. Without a discovered project file, the
+base is the current working directory. Configured destinations keep their exact
+existing meaning.
+
 ## Next steps
 
 - The root [README](../README.md) runs the checked minimal local example.

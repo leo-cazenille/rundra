@@ -229,6 +229,11 @@ precedence is CLI → selected project profile → project defaults → user def
 → built-ins. `plan --json` and `run --json` expose the effective values and the
 source selected for each field under `launch`.
 
+When no layer declares a destination, Rundra derives
+`retrieved/<config-stem>` below the project root, or below the current working
+directory when no project file is present. An explicit or configured
+destination remains an exact path.
+
 ## Inspecting without execution
 
 The checked example can be inspected without executing an experiment:

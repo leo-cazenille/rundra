@@ -672,6 +672,42 @@ def test_run_input_resolution_accepts_explicit_inclusive_seed_range(
     assert result.value.launch.sources["seeds"] == "cli"
 
 
+def test_run_input_resolution_derives_destination_from_config_name(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    experiment = project / "experiment.yaml"
+    experiment.touch()
+    (project / "rundra.yaml").write_text(
+        "version: 1\ndefaults: {config: conf/ballistic.yaml, target: local}\n",
+        encoding="utf-8",
+    )
+
+    result = resolve_run_inputs_operation(
+        experiment,
+        user_config_source=tmp_path / "absent.yaml",
+    )
+
+    assert result.ok and result.value is not None
+    assert result.value.destination == (project / "retrieved/ballistic").resolve()
+    assert result.value.resolution.sources["destination"] == "built_in"
+
+
+def test_explicit_destination_overrides_derived_destination(tmp_path: Path) -> None:
+    result = resolve_run_inputs_operation(
+        tmp_path / "experiment.yaml",
+        config=tmp_path / "conf/ballistic.yaml",
+        target="local",
+        destination=tmp_path / "custom",
+        user_config_source=tmp_path / "absent.yaml",
+    )
+
+    assert result.ok and result.value is not None
+    assert result.value.destination == tmp_path / "custom"
+    assert result.value.resolution.sources["destination"] == "cli"
+
+
 def test_run_input_resolution_rejects_seed_range_conflicts(tmp_path: Path) -> None:
     result = resolve_run_inputs_operation(
         tmp_path / "experiment.yaml",
