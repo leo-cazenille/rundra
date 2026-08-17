@@ -181,7 +181,7 @@ targets:
 @pytest.mark.parametrize(
     "content, code, path",
     [
-        ("version: 4\ntargets: {}\n", "UNSUPPORTED_VERSION", ("version",)),
+        ("version: 5\ntargets: {}\n", "UNSUPPORTED_VERSION", ("version",)),
         ("version: 1\n", "MISSING_FIELD", ("targets",)),
         (
             "version: 1\ntargets: []\n",
@@ -395,3 +395,45 @@ def test_ssh_target_requires_an_absolute_non_root_workspace(
 
     assert caught.value.code == "INVALID_REMOTE_WORKSPACE"
     assert caught.value.path == ("targets", "bad", "workspace")
+
+
+def test_targets_v4_requires_and_loads_worker_task_slots(tmp_path: Path) -> None:
+    from rundra.config.targets import load_targets_config
+
+    source = tmp_path / "targets.yaml"
+    source.write_text(
+        """\
+version: 4
+targets:
+  shoal:
+    transport: {type: ssh, host: cluster}
+    scheduler: {type: slurm}
+    staging: {type: rsync}
+    container: {type: apptainer}
+    workspace: /remote/work
+    execution:
+      hard_task_limit: 100000000
+      confirmation_threshold: 10000
+      max_active_tasks: 320
+      max_concurrent_jobs: 8
+      max_array_size: 1001
+      output_shard_tasks: 1000
+      automatic_retrieval_threshold: 20000
+      worker_pool:
+        activation_threshold: 10000
+        max_workers: 8
+        task_slots_per_worker: 40
+        tasks_per_lease: 100
+        infrastructure_retry_limit: 2
+        requeue_limit: 8
+""",
+        encoding="utf-8",
+    )
+
+    config = load_targets_config(source)
+
+    assert config.version == 4
+    policy = config.execution["shoal"]
+    assert policy.max_concurrent_jobs == 8
+    assert policy.worker_pool.max_workers == 8
+    assert policy.worker_pool.task_slots_per_worker == 40

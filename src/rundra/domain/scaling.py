@@ -127,6 +127,7 @@ class WorkerPoolPolicy:
     tasks_per_lease: int
     infrastructure_retry_limit: int
     requeue_limit: int
+    task_slots_per_worker: int = 1
 
     def __post_init__(self) -> None:
         _integer_at_least(self.activation_threshold, 2, "activation_threshold")
@@ -136,6 +137,7 @@ class WorkerPoolPolicy:
             self.infrastructure_retry_limit, 0, "infrastructure_retry_limit"
         )
         _integer_at_least(self.requeue_limit, 0, "requeue_limit")
+        _integer_at_least(self.task_slots_per_worker, 1, "task_slots_per_worker")
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,3 +171,7 @@ class ExecutionPolicy:
             raise ValueError("max_active_tasks must not exceed hard_task_limit")
         if self.worker_pool.activation_threshold > self.hard_task_limit:
             raise ValueError("worker_pool activation_threshold exceeds hard_task_limit")
+        if self.worker_pool.task_slots_per_worker > self.max_active_tasks:
+            raise ValueError(
+                "worker_pool task_slots_per_worker exceeds max_active_tasks"
+            )

@@ -29,6 +29,7 @@ _TARGET_V1_FIELDS = frozenset(
 )
 _TARGET_V2_FIELDS = _TARGET_V1_FIELDS | {"preparation"}
 _TARGET_V3_FIELDS = _TARGET_V2_FIELDS | {"execution"}
+_TARGET_V4_FIELDS = _TARGET_V3_FIELDS
 _BACKENDS_BY_ROLE = {
     "transport": frozenset({"local", "ssh"}),
     "scheduler": frozenset({"local", "slurm"}),
@@ -52,8 +53,8 @@ class TargetsConfig:
     execution: Mapping[str, ExecutionPolicy] = dataclass_field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.version not in {1, 2, 3}:
-            raise ValueError("TargetsConfig version must be 1, 2, or 3")
+        if self.version not in {1, 2, 3, 4}:
+            raise ValueError("TargetsConfig version must be 1, 2, 3, or 4")
         object.__setattr__(self, "targets", MappingProxyType(dict(self.targets)))
         object.__setattr__(
             self, "preparation", MappingProxyType(dict(self.preparation))
@@ -79,12 +80,14 @@ def load_targets_config(source: Path) -> TargetsConfig:
     version = expect_integer(
         document["version"], source=source, path=("version",), minimum=1
     )
-    if version not in {1, 2, 3}:
+    if version not in {1, 2, 3, 4}:
         fail(
             source=source,
             path=("version",),
             code="UNSUPPORTED_VERSION",
-            message="Unsupported targets version; supported versions are 1, 2, and 3",
+            message=(
+                "Unsupported targets version; supported versions are 1, 2, 3, and 4"
+            ),
         )
     raw_targets = expect_mapping(document["targets"], source=source, path=("targets",))
     targets: dict[str, Target] = {}
@@ -99,7 +102,11 @@ def load_targets_config(source: Path) -> TargetsConfig:
             allowed=(
                 _TARGET_V1_FIELDS
                 if version == 1
-                else (_TARGET_V2_FIELDS if version == 2 else _TARGET_V3_FIELDS)
+                else (
+                    _TARGET_V2_FIELDS
+                    if version == 2
+                    else (_TARGET_V3_FIELDS if version == 3 else _TARGET_V4_FIELDS)
+                )
             ),
             required=(
                 _TARGET_V1_FIELDS if version < 3 else _TARGET_V1_FIELDS | {"execution"}
@@ -155,7 +162,7 @@ def load_targets_config(source: Path) -> TargetsConfig:
             )
         if "execution" in section:
             execution[name] = _execution_policy(
-                section["execution"], source, (*path, "execution")
+                section["execution"], source, (*path, "execution"), version=version
             )
     return TargetsConfig(version, targets, preparation, execution)
 
@@ -164,6 +171,8 @@ def _execution_policy(
     value: object,
     source: Path,
     path: tuple[str, ...],
+    *,
+    version: int,
 ) -> ExecutionPolicy:
     section = expect_mapping(value, source=source, path=path)
     fields = frozenset(
@@ -196,6 +205,8 @@ def _execution_policy(
             "requeue_limit",
         }
     )
+    if version == 4:
+        worker_fields |= {"task_slots_per_worker"}
     check_fields(
         worker,
         allowed=worker_fields,
@@ -249,6 +260,16 @@ def _execution_policy(
                     source=source,
                     path=(*worker_path, "requeue_limit"),
                     minimum=0,
+                ),
+                task_slots_per_worker=(
+                    expect_integer(
+                        worker["task_slots_per_worker"],
+                        source=source,
+                        path=(*worker_path, "task_slots_per_worker"),
+                        minimum=1,
+                    )
+                    if version == 4
+                    else 1
                 ),
             ),
             max_concurrent_jobs=expect_integer(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import PurePosixPath
 
 import pytest
@@ -110,3 +111,48 @@ def test_target_limits_and_exact_confirmation_are_enforced() -> None:
             policy=policy,
         )
     assert caught.value.code == "TASK_LIMIT_EXCEEDED"
+
+
+def test_v5_worker_plan_exposes_bounded_intra_allocation_capacity() -> None:
+    policy = ExecutionPolicy(
+        100_000_000,
+        10_000,
+        320,
+        1001,
+        1000,
+        20_000,
+        WorkerPoolPolicy(10_000, 8, 100, 2, 8, 40),
+        max_concurrent_jobs=8,
+    )
+    spec = ExperimentSpec(
+        1,
+        "large",
+        Command(("simulate", "--config", "{config}", "--seed", "{seed}")),
+        ResourceRequest(
+            cpus_per_task=1,
+            memory_bytes=2 * 1024**3,
+            walltime=timedelta(minutes=2),
+        ),
+    )
+
+    plan = create_scalable_plan(
+        spec,
+        (ExpandedConfig(ConfigSnapshot(PurePosixPath("a.yaml"), "mode: a\n")),),
+        _target(),
+        seeds=SeedRange(0, 19_999),
+        policy=policy,
+        version=5,
+    )
+
+    assert plan.version == 5
+    assert plan.worker_count == 8
+    assert plan.task_slots_per_worker == 40
+    assert plan.concurrent_task_capacity == 320
+    assert plan.max_lane_depth == 63
+    assert plan.worker_resources == ResourceRequest(
+        nodes=1,
+        tasks=40,
+        cpus_per_task=1,
+        memory_bytes=80 * 1024**3,
+        walltime=timedelta(minutes=126),
+    )

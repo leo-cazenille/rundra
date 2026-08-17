@@ -11,6 +11,7 @@ from rundra.domain.models import (
     Command,
     ConfigSnapshot,
     ExperimentSpec,
+    ResourceRequest,
     RunId,
     Target,
     Task,
@@ -112,8 +113,9 @@ def create_scalable_plan(
     strategy: str = "auto",
     retrieval_policy: str = "manifest",
     preparation: PreparationPlan | None = None,
+    version: int = 4,
 ) -> ExecutionPlan:
-    """Create a bounded-preview v4 plan without materializing logical Tasks."""
+    """Create a bounded-preview scalable plan without materializing logical Tasks."""
 
     expanded = tuple(configs)
     if not expanded:
@@ -124,6 +126,8 @@ def create_scalable_plan(
         raise TypeError("create_scalable_plan seeds must be a SeedRange")
     if type(policy) is not ExecutionPolicy:
         raise TypeError("create_scalable_plan policy must be an ExecutionPolicy")
+    if version not in {4, 5}:
+        raise ValueError("create_scalable_plan version must be 4 or 5")
     if strategy not in _SCALABLE_STRATEGIES:
         raise PlanningError(
             code="INVALID_EXECUTION_STRATEGY",
@@ -190,17 +194,30 @@ def create_scalable_plan(
     if selected == MULTI_ARRAY:
         scheduler_batches = ceil(task_space.task_count / policy.max_array_size)
         worker_count = None
+        task_slots_per_worker = 1
     else:
         leases = ceil(task_space.task_count / policy.worker_pool.tasks_per_lease)
+        task_slots_per_worker = (
+            policy.worker_pool.task_slots_per_worker if version == 5 else 1
+        )
         worker_count = min(
             policy.worker_pool.max_workers,
-            policy.max_active_tasks,
+            policy.max_active_tasks // task_slots_per_worker,
             policy.max_concurrent_jobs,
+            policy.max_array_size,
+            ceil(task_space.task_count / task_slots_per_worker),
             leases,
         )
         scheduler_batches = 1
+    concurrent_task_capacity = (worker_count or 1) * task_slots_per_worker
+    max_lane_depth = ceil(task_space.task_count / concurrent_task_capacity)
+    worker_resources = _worker_resources(
+        spec.resources,
+        task_slots_per_worker,
+        max_lane_depth,
+    )
     return ExecutionPlan(
-        version=4,
+        version=version,
         experiment_name=spec.name,
         target=target,
         units=units,
@@ -213,6 +230,48 @@ def create_scalable_plan(
         retrieval_policy=retrieval_policy,
         scheduler_batches=scheduler_batches,
         worker_count=worker_count,
+        task_slots_per_worker=(task_slots_per_worker if version == 5 else None),
+        concurrent_task_capacity=(concurrent_task_capacity if version == 5 else None),
+        max_lane_depth=(max_lane_depth if version == 5 else None),
+        worker_resources=(worker_resources if version == 5 else None),
+    )
+
+
+def _worker_resources(
+    resources: ResourceRequest,
+    task_slots_per_worker: int,
+    max_lane_depth: int,
+) -> ResourceRequest:
+    if task_slots_per_worker > 1:
+        if resources.nodes != 1 or resources.tasks != 1:
+            raise PlanningError(
+                code="UNSUPPORTED_WORKER_RESOURCES",
+                message=(
+                    "intra-allocation concurrency requires one-node, one-task "
+                    "logical resources"
+                ),
+            )
+        if resources.gpus_per_task != 0:
+            raise PlanningError(
+                code="UNSUPPORTED_WORKER_RESOURCES",
+                message=("intra-allocation concurrency does not support per-task GPUs"),
+            )
+    return ResourceRequest(
+        nodes=1,
+        tasks=task_slots_per_worker,
+        cpus_per_task=resources.cpus_per_task,
+        gpus_per_task=0,
+        memory_bytes=(
+            resources.memory_bytes * task_slots_per_worker
+            if resources.memory_bytes is not None
+            else None
+        ),
+        walltime=(
+            resources.walltime * max_lane_depth
+            if resources.walltime is not None
+            else None
+        ),
+        native=resources.native,
     )
 
 

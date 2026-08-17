@@ -106,6 +106,10 @@ class ExecutionPlan:
     retrieval_policy: str | None = None
     scheduler_batches: int | None = None
     worker_count: int | None = None
+    task_slots_per_worker: int | None = None
+    concurrent_task_capacity: int | None = None
+    max_lane_depth: int | None = None
+    worker_resources: ResourceRequest | None = None
     staging_backend: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -117,17 +121,21 @@ class ExecutionPlan:
             raise ValueError("ExecutionPlan v2 requires preparation")
         if self.version == 3 and any(unit.parameter_set is None for unit in self.units):
             raise ValueError("ExecutionPlan v3 requires parameterized units")
-        if self.version == 4:
+        if self.version in {4, 5}:
             if type(self.task_space) is not TaskSpace:
-                raise ValueError("ExecutionPlan v4 requires a TaskSpace")
+                raise ValueError("Scalable ExecutionPlan requires a TaskSpace")
             if type(self.execution_policy) is not ExecutionPolicy:
-                raise ValueError("ExecutionPlan v4 requires an execution policy")
+                raise ValueError("Scalable ExecutionPlan requires an execution policy")
             if self.strategy not in {MULTI_ARRAY, WORKER_POOL}:
-                raise ValueError("ExecutionPlan v4 requires a scalable strategy")
+                raise ValueError("Scalable ExecutionPlan requires a scalable strategy")
             if self.retrieval_policy not in {"all", "manifest", "none"}:
-                raise ValueError("ExecutionPlan v4 retrieval policy is unsupported")
+                raise ValueError(
+                    "Scalable ExecutionPlan retrieval policy is unsupported"
+                )
             if type(self.scheduler_batches) is not int or self.scheduler_batches < 1:
-                raise ValueError("ExecutionPlan v4 scheduler_batches must be positive")
+                raise ValueError(
+                    "Scalable ExecutionPlan scheduler_batches must be positive"
+                )
             if self.strategy == WORKER_POOL:
                 if type(self.worker_count) is not int or self.worker_count < 1:
                     raise ValueError(
@@ -135,6 +143,35 @@ class ExecutionPlan:
                     )
             elif self.worker_count is not None:
                 raise ValueError("multi-array plans cannot define worker_count")
+            if self.version == 5:
+                if (
+                    type(self.task_slots_per_worker) is not int
+                    or self.task_slots_per_worker < 1
+                ):
+                    raise ValueError(
+                        "ExecutionPlan v5 task_slots_per_worker must be positive"
+                    )
+                if (
+                    type(self.concurrent_task_capacity) is not int
+                    or self.concurrent_task_capacity < 1
+                ):
+                    raise ValueError(
+                        "ExecutionPlan v5 concurrent_task_capacity must be positive"
+                    )
+                if type(self.max_lane_depth) is not int or self.max_lane_depth < 1:
+                    raise ValueError("ExecutionPlan v5 max_lane_depth must be positive")
+                if type(self.worker_resources) is not ResourceRequest:
+                    raise TypeError("ExecutionPlan v5 requires worker_resources")
+            elif any(
+                value is not None
+                for value in (
+                    self.task_slots_per_worker,
+                    self.concurrent_task_capacity,
+                    self.max_lane_depth,
+                    self.worker_resources,
+                )
+            ):
+                raise ValueError("ExecutionPlan v4 cannot contain v5 scaling fields")
         elif any(
             value is not None
             for value in (
@@ -143,10 +180,14 @@ class ExecutionPlan:
                 self.retrieval_policy,
                 self.scheduler_batches,
                 self.worker_count,
+                self.task_slots_per_worker,
+                self.concurrent_task_capacity,
+                self.max_lane_depth,
+                self.worker_resources,
             )
         ):
-            raise ValueError("ExecutionPlan v1-v3 cannot contain v4 scaling fields")
-        if self.version not in {1, 2, 3, 4}:
+            raise ValueError("ExecutionPlan v1-v3 cannot contain scaling fields")
+        if self.version not in {1, 2, 3, 4, 5}:
             raise ValueError("ExecutionPlan version is unsupported")
         if type(self.experiment_name) is not str or not self.experiment_name.strip():
             raise ValueError("ExecutionPlan experiment_name must be nonblank")
@@ -176,8 +217,10 @@ class ExecutionPlan:
             raise TypeError("ExecutionPlan groups must contain ExecutionGroups")
         grouped_ids = tuple(task_id for group in groups for task_id in group.task_ids)
         unit_ids = tuple(unit.task_id for unit in units)
-        if self.version == 4 and groups:
-            raise ValueError("ExecutionPlan v4 cannot materialize execution groups")
+        if self.version >= 4 and groups:
+            raise ValueError(
+                "Scalable ExecutionPlan cannot materialize execution groups"
+            )
         if self.version < 4 and grouped_ids != unit_ids:
             raise ValueError(
                 "ExecutionPlan groups must partition Task IDs in plan order"
@@ -204,8 +247,10 @@ class ExecutionPlan:
             raise TypeError(
                 "ExecutionPlan array_mapping must contain ArrayTaskMappings"
             )
-        if self.version == 4 and array_mapping:
-            raise ValueError("ExecutionPlan v4 cannot materialize an array mapping")
+        if self.version >= 4 and array_mapping:
+            raise ValueError(
+                "Scalable ExecutionPlan cannot materialize an array mapping"
+            )
         if self.strategy == ONE_UNIT_PER_TASK and array_mapping:
             raise ValueError(
                 "one_unit_per_task strategy cannot define an array mapping"
