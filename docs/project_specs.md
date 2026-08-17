@@ -718,6 +718,21 @@ non-root paths. This is static configuration validation; executable discovery,
 connectivity, authentication, and site availability remain execution preflight
 concerns and are never contacted by `plan`.
 
+Target configuration version 2 adds preparation cache roots and explicit image
+search paths. Version 3 adds a required per-target `execution` policy. Every
+limit is explicit and site-owned: `hard_task_limit`, `confirmation_threshold`,
+`max_active_tasks`, `max_array_size`, `output_shard_tasks`,
+`automatic_retrieval_threshold`, and a `worker_pool` mapping containing
+`activation_threshold`, `max_workers`, `tasks_per_lease`,
+`infrastructure_retry_limit`, and `requeue_limit`. Project configuration and
+launch options may select behavior within these limits but cannot raise them.
+
+Large parameter/seed products use an inclusive arithmetic seed range and a
+constant-size TaskSpace. Ordinals are parameter-major and seed-minor; the Task
+at ordinal `p * seed_count + s` has parameter-set ordinal `p`, seed ordinal `s`,
+and the existing deterministic `task_NNNNNN` identity. Implementations must not
+materialize the complete TaskSpace merely to plan or summarize a Run.
+
 ---
 
 ### 10.1 Configuration location

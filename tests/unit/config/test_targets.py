@@ -83,10 +83,104 @@ targets:
     )
 
 
+def test_version_three_target_requires_explicit_execution_policy(
+    tmp_path: Path,
+) -> None:
+    from rundra.config.targets import load_targets_config
+
+    source = tmp_path / "targets.yaml"
+    source.write_text(
+        """\
+version: 3
+targets:
+  shoal:
+    transport: {type: ssh, host: cluster}
+    scheduler: {type: slurm}
+    staging: {type: rsync}
+    container: {type: apptainer}
+    workspace: /remote/work
+    execution:
+      hard_task_limit: 100000000
+      confirmation_threshold: 10000
+      max_active_tasks: 800
+      max_array_size: 1001
+      output_shard_tasks: 1000
+      automatic_retrieval_threshold: 20000
+      worker_pool:
+        activation_threshold: 100000
+        max_workers: 64
+        tasks_per_lease: 100
+        infrastructure_retry_limit: 2
+        requeue_limit: 8
+""",
+        encoding="utf-8",
+    )
+
+    config = load_targets_config(source)
+
+    policy = config.execution["shoal"]
+    assert config.version == 3
+    assert policy.hard_task_limit == 100_000_000
+    assert policy.max_active_tasks == 800
+    assert policy.worker_pool.max_workers == 64
+    assert policy.worker_pool.tasks_per_lease == 100
+
+
+def test_version_three_target_rejects_missing_or_inconsistent_policy(
+    tmp_path: Path,
+) -> None:
+    from rundra.config.errors import ConfigError
+    from rundra.config.targets import load_targets_config
+
+    missing = tmp_path / "missing.yaml"
+    missing.write_text(
+        "version: 3\ntargets:\n  local:\n"
+        "    transport: {type: local}\n    scheduler: {type: local}\n"
+        "    staging: {type: local}\n    container: {type: native}\n"
+        "    workspace: /tmp/rundra\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError) as caught:
+        load_targets_config(missing)
+    assert caught.value.code == "MISSING_FIELD"
+    assert caught.value.path == ("targets", "local", "execution")
+
+    inconsistent = tmp_path / "inconsistent.yaml"
+    inconsistent.write_text(
+        """\
+version: 3
+targets:
+  local:
+    transport: {type: local}
+    scheduler: {type: local}
+    staging: {type: local}
+    container: {type: native}
+    workspace: /tmp/rundra
+    execution:
+      hard_task_limit: 10
+      confirmation_threshold: 11
+      max_active_tasks: 2
+      max_array_size: 2
+      output_shard_tasks: 2
+      automatic_retrieval_threshold: 2
+      worker_pool:
+        activation_threshold: 3
+        max_workers: 1
+        tasks_per_lease: 1
+        infrastructure_retry_limit: 0
+        requeue_limit: 0
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError) as caught:
+        load_targets_config(inconsistent)
+    assert caught.value.code == "INVALID_EXECUTION_POLICY"
+
+
 @pytest.mark.parametrize(
     "content, code, path",
     [
-        ("version: 3\ntargets: {}\n", "UNSUPPORTED_VERSION", ("version",)),
+        ("version: 4\ntargets: {}\n", "UNSUPPORTED_VERSION", ("version",)),
         ("version: 1\n", "MISSING_FIELD", ("targets",)),
         (
             "version: 1\ntargets: []\n",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from pathlib import Path, PurePath
 from types import MappingProxyType
 
@@ -16,12 +17,14 @@ from rundra.config._schema import (
 from rundra.config._yaml import read_yaml_document
 from rundra.domain.models import BackendConfig, NativeValue, Target
 from rundra.domain.preparation import PreparationStorageConfig
+from rundra.domain.scaling import ExecutionPolicy, WorkerPoolPolicy
 from rundra.security import is_credential_field, is_safe_ssh_destination
 
 _TARGET_V1_FIELDS = frozenset(
     {"transport", "scheduler", "staging", "container", "workspace"}
 )
 _TARGET_V2_FIELDS = _TARGET_V1_FIELDS | {"preparation"}
+_TARGET_V3_FIELDS = _TARGET_V2_FIELDS | {"execution"}
 _BACKENDS_BY_ROLE = {
     "transport": frozenset({"local", "ssh"}),
     "scheduler": frozenset({"local", "slurm"}),
@@ -42,14 +45,16 @@ class TargetsConfig:
     version: int
     targets: Mapping[str, Target]
     preparation: Mapping[str, PreparationStorageConfig]
+    execution: Mapping[str, ExecutionPolicy] = dataclass_field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.version not in {1, 2}:
-            raise ValueError("TargetsConfig version must be 1 or 2")
+        if self.version not in {1, 2, 3}:
+            raise ValueError("TargetsConfig version must be 1, 2, or 3")
         object.__setattr__(self, "targets", MappingProxyType(dict(self.targets)))
         object.__setattr__(
             self, "preparation", MappingProxyType(dict(self.preparation))
         )
+        object.__setattr__(self, "execution", MappingProxyType(dict(self.execution)))
 
 
 def load_targets(source: Path) -> Mapping[str, Target]:
@@ -70,24 +75,31 @@ def load_targets_config(source: Path) -> TargetsConfig:
     version = expect_integer(
         document["version"], source=source, path=("version",), minimum=1
     )
-    if version not in {1, 2}:
+    if version not in {1, 2, 3}:
         fail(
             source=source,
             path=("version",),
             code="UNSUPPORTED_VERSION",
-            message="Unsupported targets version; supported versions are 1 and 2",
+            message="Unsupported targets version; supported versions are 1, 2, and 3",
         )
     raw_targets = expect_mapping(document["targets"], source=source, path=("targets",))
     targets: dict[str, Target] = {}
     preparation: dict[str, PreparationStorageConfig] = {}
+    execution: dict[str, ExecutionPolicy] = {}
     for name, raw_target in raw_targets.items():
         path = ("targets", name)
         expect_string(name, source=source, path=path, nonblank=True)
         section = expect_mapping(raw_target, source=source, path=path)
         check_fields(
             section,
-            allowed=_TARGET_V1_FIELDS if version == 1 else _TARGET_V2_FIELDS,
-            required=_TARGET_V1_FIELDS,
+            allowed=(
+                _TARGET_V1_FIELDS
+                if version == 1
+                else (_TARGET_V2_FIELDS if version == 2 else _TARGET_V3_FIELDS)
+            ),
+            required=(
+                _TARGET_V1_FIELDS if version < 3 else _TARGET_V1_FIELDS | {"execution"}
+            ),
             source=source,
             path=path,
         )
@@ -137,7 +149,111 @@ def load_targets_config(source: Path) -> TargetsConfig:
             preparation[name] = _preparation_storage(
                 section["preparation"], source, (*path, "preparation")
             )
-    return TargetsConfig(version, targets, preparation)
+        if "execution" in section:
+            execution[name] = _execution_policy(
+                section["execution"], source, (*path, "execution")
+            )
+    return TargetsConfig(version, targets, preparation, execution)
+
+
+def _execution_policy(
+    value: object,
+    source: Path,
+    path: tuple[str, ...],
+) -> ExecutionPolicy:
+    section = expect_mapping(value, source=source, path=path)
+    fields = frozenset(
+        {
+            "hard_task_limit",
+            "confirmation_threshold",
+            "max_active_tasks",
+            "max_array_size",
+            "output_shard_tasks",
+            "automatic_retrieval_threshold",
+            "worker_pool",
+        }
+    )
+    check_fields(
+        section,
+        allowed=fields,
+        required=fields,
+        source=source,
+        path=path,
+    )
+    worker_path = (*path, "worker_pool")
+    worker = expect_mapping(section["worker_pool"], source=source, path=worker_path)
+    worker_fields = frozenset(
+        {
+            "activation_threshold",
+            "max_workers",
+            "tasks_per_lease",
+            "infrastructure_retry_limit",
+            "requeue_limit",
+        }
+    )
+    check_fields(
+        worker,
+        allowed=worker_fields,
+        required=worker_fields,
+        source=source,
+        path=worker_path,
+    )
+
+    def integer(section_value: Mapping[str, object], name: str, minimum: int) -> int:
+        return expect_integer(
+            section_value[name], source=source, path=(*path, name), minimum=minimum
+        )
+
+    try:
+        return ExecutionPolicy(
+            hard_task_limit=integer(section, "hard_task_limit", 1),
+            confirmation_threshold=integer(section, "confirmation_threshold", 1),
+            max_active_tasks=integer(section, "max_active_tasks", 1),
+            max_array_size=integer(section, "max_array_size", 2),
+            output_shard_tasks=integer(section, "output_shard_tasks", 1),
+            automatic_retrieval_threshold=integer(
+                section, "automatic_retrieval_threshold", 0
+            ),
+            worker_pool=WorkerPoolPolicy(
+                activation_threshold=expect_integer(
+                    worker["activation_threshold"],
+                    source=source,
+                    path=(*worker_path, "activation_threshold"),
+                    minimum=2,
+                ),
+                max_workers=expect_integer(
+                    worker["max_workers"],
+                    source=source,
+                    path=(*worker_path, "max_workers"),
+                    minimum=1,
+                ),
+                tasks_per_lease=expect_integer(
+                    worker["tasks_per_lease"],
+                    source=source,
+                    path=(*worker_path, "tasks_per_lease"),
+                    minimum=1,
+                ),
+                infrastructure_retry_limit=expect_integer(
+                    worker["infrastructure_retry_limit"],
+                    source=source,
+                    path=(*worker_path, "infrastructure_retry_limit"),
+                    minimum=0,
+                ),
+                requeue_limit=expect_integer(
+                    worker["requeue_limit"],
+                    source=source,
+                    path=(*worker_path, "requeue_limit"),
+                    minimum=0,
+                ),
+            ),
+        )
+    except (TypeError, ValueError) as error:
+        fail(
+            source=source,
+            path=path,
+            code="INVALID_EXECUTION_POLICY",
+            message=str(error),
+        )
 
 
 def _preparation_storage(
