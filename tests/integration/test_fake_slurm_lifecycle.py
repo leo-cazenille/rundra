@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import gzip
 from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -242,8 +244,11 @@ def test_scripted_slurm_array_reconciles_every_task_and_mixed_outcome(
     assert store.load(_RUN_ID) == result.record
     submission_command = transport.commands[1]
     assert "#SBATCH --array=0-1" in submission_command.argv[6]
-    assert "task_id=task_000000 seed=17" in submission_command.argv[5]
-    assert "task_id=task_000001 seed=23" in submission_command.argv[5]
+    manifest = gzip.decompress(base64.b64decode(submission_command.argv[5])).decode(
+        "utf-8"
+    )
+    assert "task_id=task_000000 seed=17" in manifest
+    assert "task_id=task_000001 seed=23" in manifest
 
 
 def test_scripted_slurm_array_is_reproducible_for_the_same_seed_set(
@@ -269,7 +274,10 @@ def test_scripted_slurm_array_is_reproducible_for_the_same_seed_set(
             ),
         )
         result = service.execute_one(_request(root, seeds=(17, 23)))
-        return result.record, transport.commands[1].argv[5]
+        manifest = gzip.decompress(
+            base64.b64decode(transport.commands[1].argv[5])
+        ).decode("utf-8")
+        return result.record, manifest
 
     first, first_manifest = execute(tmp_path / "first")
     second, second_manifest = execute(tmp_path / "second")

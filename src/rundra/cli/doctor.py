@@ -212,7 +212,16 @@ def _ssh_configuration_checks(
 def _ssh_connect_check(
     host: str, executable: str, config_file: Path | None
 ) -> DoctorCheck:
-    tools = ("rsync", "sbatch", "squeue", "scancel", "scontrol", "apptainer")
+    tools = (
+        "rsync",
+        "sbatch",
+        "squeue",
+        "scancel",
+        "scontrol",
+        "apptainer",
+        "base64",
+        "gzip",
+    )
     script = 'for tool in "$@"; do command -v "$tool" >/dev/null || exit 20; done'
     command = Command(("sh", "-c", script, "rundr-doctor", *tools))
     try:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import gzip
 import subprocess
 from collections import deque
 from datetime import UTC, datetime, timedelta
@@ -488,7 +490,11 @@ def test_slurm_scheduler_persists_manifest_and_submits_bounded_array() -> None:
     command = transport.run_calls[0]
     assert command.argv[0:2] == ("/bin/sh", "-c")
     assert command.argv[4] == str(request.manifest_path)
-    assert command.argv[5] == render_slurm_array_manifest(request)
+    encoded_manifest = command.argv[5]
+    assert gzip.decompress(base64.b64decode(encoded_manifest)).decode("utf-8") == (
+        render_slurm_array_manifest(request)
+    )
+    assert len(encoded_manifest) < len(render_slurm_array_manifest(request))
     assert command.argv[6] == render_sbatch_array_script(
         request,
         stdout_path=PurePosixPath("/remote/run/logs/%A_%a.stdout"),
@@ -496,7 +502,29 @@ def test_slurm_scheduler_persists_manifest_and_submits_bounded_array() -> None:
     )
     assert command.argv[7:] == ("/remote/run/logs", "/opt/slurm/bin/sbatch")
     assert "already exists" in command.argv[2]
+    assert "base64 -d | gzip -d" in command.argv[2]
     assert 'chmod 500 "$manifest_tmp"' in command.argv[2]
+
+
+def test_large_array_manifest_uses_a_bounded_compressed_argument() -> None:
+    transport = ScriptedTransport(
+        deque([_command_result(Command(("unused",)), 0, "126\n")])
+    )
+    scheduler = SlurmScheduler(
+        transport,
+        log_directory=PurePosixPath("/remote/run/logs"),
+    )
+    request = _array_request(count=200, max_array_size=200)
+
+    submission = scheduler.submit_bounded_array(request)
+
+    encoded_manifest = transport.run_calls[0].argv[5]
+    decoded_manifest = gzip.decompress(base64.b64decode(encoded_manifest)).decode(
+        "utf-8"
+    )
+    assert submission.reference == SchedulerReference("126")
+    assert decoded_manifest == render_slurm_array_manifest(request)
+    assert len(encoded_manifest) < 128 * 1024
 
 
 def test_slurm_single_submission_uses_framework_owned_afterok_dependency() -> None:

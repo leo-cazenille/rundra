@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import gzip
 import re
 import shlex
 from collections.abc import Sequence
@@ -69,7 +71,7 @@ fi
 manifest_tmp=$(mktemp "${manifest}.XXXXXX")
 script=$(mktemp "${TMPDIR:-/tmp}/rundra-sbatch.XXXXXX")
 trap 'rm -f "$manifest_tmp" "$script"' EXIT HUP INT TERM
-printf '%s' "$2" > "$manifest_tmp"
+printf '%s' "$2" | base64 -d | gzip -d > "$manifest_tmp"
 chmod 500 "$manifest_tmp"
 mv -- "$manifest_tmp" "$manifest"
 manifest_tmp=
@@ -87,7 +89,7 @@ fi
 manifest_tmp=$(mktemp "${manifest}.XXXXXX")
 script=$(mktemp "${TMPDIR:-/tmp}/rundra-sbatch.XXXXXX")
 trap 'rm -f "$manifest_tmp" "$script"' EXIT HUP INT TERM
-printf '%s' "$2" > "$manifest_tmp"
+printf '%s' "$2" | base64 -d | gzip -d > "$manifest_tmp"
 chmod 500 "$manifest_tmp"
 mv -- "$manifest_tmp" "$manifest"
 manifest_tmp=
@@ -169,6 +171,13 @@ class SlurmArrayRequest:
                 "Slurm array Task count exceeds configured MaxArraySize"
             )
         object.__setattr__(self, "mapping", mapping)
+
+
+def _compressed_text(value: str) -> str:
+    """Encode deterministic UTF-8 text for bounded remote command transport."""
+    return base64.b64encode(gzip.compress(value.encode("utf-8"), mtime=0)).decode(
+        "ascii"
+    )
 
 
 class SlurmScheduler:
@@ -359,7 +368,7 @@ class SlurmScheduler:
             _SUBMIT_ARRAY_SCRIPT,
             "rundra-slurm-array-submit",
             str(request.manifest_path),
-            manifest,
+            _compressed_text(manifest),
             script,
             str(self._log_directory),
             self._sbatch,
