@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rundra.cli.operations import tasks_operation
+from rundra.cli.operations import status_operation, tasks_operation
 from rundra.cli.render import render_human, result_document
 from rundra.domain.states import ExecutionState
 from rundra.persistence import JsonRunStore, SqliteTaskStore, TaskState
@@ -36,6 +36,14 @@ def test_tasks_operation_returns_a_bounded_v4_page(tmp_path: Path) -> None:
     assert document["tasks"]["items"][1]["task_id"] == "task_99999999"
     assert document["tasks"]["items"][1]["exit_code"] == 9
     assert "total=100000000" in render_human(result)
+
+    status = status_operation(
+        str(record.run.id),
+        JsonRunStore(tmp_path),
+        task_store=task_store,
+    )
+    assert status.value is not None
+    assert status.value.task_counts == {"CREATED": 99_999_999, "FAILED": 1}
 
 
 def test_tasks_operation_rejects_legacy_records(tmp_path: Path) -> None:

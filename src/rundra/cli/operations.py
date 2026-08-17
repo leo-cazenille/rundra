@@ -1694,16 +1694,22 @@ def status_operation(
     *,
     scheduler: Scheduler | None = None,
     transport: Transport | None = None,
+    task_store: SqliteTaskStore | None = None,
 ) -> OperationResult[StatusValue]:
     record, error = _load_record(run_id, store)
     if error is not None:
         return OperationResult.failure("status", error)
     assert record is not None
-    if record.run.target.scheduler.kind == "slurm" and record.run.state not in {
-        ExecutionState.SUCCEEDED,
-        ExecutionState.FAILED,
-        ExecutionState.CANCELLED,
-    }:
+    if (
+        record.format_version < 4
+        and record.run.target.scheduler.kind == "slurm"
+        and record.run.state
+        not in {
+            ExecutionState.SUCCEEDED,
+            ExecutionState.FAILED,
+            ExecutionState.CANCELLED,
+        }
+    ):
         try:
             active_scheduler = scheduler or _record_slurm_scheduler(record)
             record = SchedulerLifecycleService(
@@ -1737,7 +1743,17 @@ def status_operation(
                 {"run_id": str(record.run.id)},
             ),
         )
-    return OperationResult.success("status", _status_value(record))
+    try:
+        counts = (
+            task_store.counts(record.run.id).execution
+            if record.format_version == 4 and task_store is not None
+            else None
+        )
+    except RunStoreError as store_error:
+        return OperationResult.failure(
+            "status", _run_store_operation_error(store_error, record.run.id)
+        )
+    return OperationResult.success("status", _status_value(record, counts))
 
 
 def cancel_operation(
@@ -1780,11 +1796,25 @@ def cancel_operation(
     return OperationResult.success("cancel", CancelValue(_status_value(record)))
 
 
-def list_runs_operation(store: RunStore) -> OperationResult[ListRunsValue]:
+def list_runs_operation(
+    store: RunStore, *, task_store: SqliteTaskStore | None = None
+) -> OperationResult[ListRunsValue]:
     try:
         return OperationResult.success(
             "list",
-            ListRunsValue(tuple(_status_value(record) for record in store.list())),
+            ListRunsValue(
+                tuple(
+                    _status_value(
+                        record,
+                        (
+                            task_store.counts(record.run.id).execution
+                            if record.format_version == 4 and task_store is not None
+                            else None
+                        ),
+                    )
+                    for record in store.list()
+                )
+            ),
         )
     except RunStoreError as error:
         return OperationResult.failure(
@@ -2138,10 +2168,18 @@ def _run_store_operation_error(error: RunStoreError, run_id: RunId) -> Operation
     return OperationError("RUN_STORE_ERROR", str(error), {"run_id": str(run_id)})
 
 
-def _status_value(record: RunRecord) -> StatusValue:
-    counts: dict[str, int] = {}
-    for task in record.run.tasks:
-        counts[task.state.value] = counts.get(task.state.value, 0) + 1
+def _status_value(
+    record: RunRecord,
+    compact_counts: Mapping[ExecutionState, int] | None = None,
+) -> StatusValue:
+    counts = (
+        {state.value: count for state, count in compact_counts.items() if count}
+        if compact_counts is not None
+        else {}
+    )
+    if compact_counts is None:
+        for task in record.run.tasks:
+            counts[task.state.value] = counts.get(task.state.value, 0) + 1
     return StatusValue(
         run_id=record.run.id,
         experiment=record.run.experiment_name,

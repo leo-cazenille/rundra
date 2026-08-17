@@ -478,7 +478,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 sweep=submit_inputs.sweep,
             )
     elif arguments.command == "status":
-        result = status_operation(arguments.run_id, JsonRunStore(arguments.data_dir))
+        result = status_operation(
+            arguments.run_id,
+            JsonRunStore(arguments.data_dir),
+            task_store=SqliteTaskStore(arguments.data_dir),
+        )
     elif arguments.command == "tasks":
         result = tasks_operation(
             arguments.run_id,
@@ -488,7 +492,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             limit=arguments.limit,
         )
     elif arguments.command == "list":
-        result = list_runs_operation(JsonRunStore(arguments.data_dir))
+        result = list_runs_operation(
+            JsonRunStore(arguments.data_dir),
+            task_store=SqliteTaskStore(arguments.data_dir),
+        )
     elif arguments.command == "logs":
         result = logs_operation(
             arguments.run_id,
