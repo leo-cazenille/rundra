@@ -14,7 +14,7 @@ test-suite action.
 Use the tested Pogosim 0.10.10 commit rather than a moving branch:
 
 ```bash
-export POGOSIM_COMMIT=1a58c632f243af8f5471bcee9ddf5e56caabf259
+export POGOSIM_COMMIT=fe012bb58ef17eae2155b9904bc3eedb650a86bc
 export POGOSIM_CHECKOUT=/shoalhome/$USER/src/pogosim-$POGOSIM_COMMIT
 
 git clone https://github.com/Adacoma/pogosim.git "$POGOSIM_CHECKOUT"
@@ -25,32 +25,34 @@ git -C "$POGOSIM_CHECKOUT" status --short
 Keep this checkout unchanged after compiling it. Rundra records its revision
 and dirty diff as source provenance.
 
-## 2. Build and identify the upstream image
+## 2. Pull and identify the stable upstream image
 
-Build from the unmodified definition in that checkout. Do this once on a host
-where Apptainer builds are permitted; the resulting SIF must live on storage
-visible from Shoal compute nodes.
+Pull Pogosim's published v0.10.10 image instead of rebuilding its Apptainer
+definition. The resulting SIF must live on storage visible from Shoal compute
+nodes.
 
 ```bash
-export POGOSIM_IMAGE=/shoalhome/$USER/images/pogosim-$POGOSIM_COMMIT.sif
+export POGOSIM_IMAGE=/shoalhome/$USER/images/pogosim-full-v0.10.10.sif
 
 mkdir -p "$(dirname "$POGOSIM_IMAGE")"
-cd "$POGOSIM_CHECKOUT"
-apptainer build "$POGOSIM_IMAGE" pogosim-apptainer.def
+apptainer pull "$POGOSIM_IMAGE" \
+    library://leo.cazenille/pogosim/pogosim-full:v0.10.10
 sha256sum "$POGOSIM_IMAGE" | tee "$POGOSIM_IMAGE.sha256"
 ```
 
-The baseline definition copies Pogosim's libraries, arenas, and build support
-to `/opt/pogosim`, but not its `examples/` tree. For that reason the pinned
-external checkout—not the Rundra repository—is the launch `source_root`.
+The prebuilt image provides Pogosim's libraries, arenas, and build support. The
+pinned external checkout—not the Rundra repository—is still the launch
+`source_root`, because it supplies the selected `run_and_tumble` source and
+executable and lets Rundra preserve its exact Git provenance.
 
 Edit `experiment.yaml` and replace its example image path with the absolute
 value of `POGOSIM_IMAGE`.
 
 ## 3. Compile the example with that image
 
-Compile once in the pinned checkout. The image supplies the same headers and
-libraries that will be present during each scheduled run:
+Compile the selected example once in the pinned checkout. The prebuilt image
+supplies the same headers and libraries that will be present during each
+scheduled run; this compiles the experiment executable, not the SIF:
 
 ```bash
 apptainer exec "$POGOSIM_IMAGE" \
@@ -63,7 +65,34 @@ Do not rebuild or edit the checkout between planning and submitting a run.
 
 ## 4. Configure reusable Rundra defaults
 
-The example expects the existing `shoal` target in your Rundra targets file.
+The example requires a target named `shoal`. First list the targets in Rundra's
+default file:
+
+```bash
+uv run rundr targets --json | python3 -m json.tool
+```
+
+If that output does not contain `shoal`, make a non-secret, untracked target
+file from the checked template without replacing your existing user config:
+
+```bash
+cp examples/shoal/targets.yaml /tmp/rundra-shoal-targets.yaml
+sed -i "s/YOUR_USERNAME/$USER/" /tmp/rundra-shoal-targets.yaml
+export RUNDRA_SHOAL_TARGETS_FILE=/tmp/rundra-shoal-targets.yaml
+uv run rundr targets --targets-file "$RUNDRA_SHOAL_TARGETS_FILE" --json \
+    | python3 -m json.tool
+```
+
+Otherwise, select the default file explicitly for the remaining commands:
+
+```bash
+export RUNDRA_SHOAL_TARGETS_FILE="$HOME/.config/rundra/targets.yaml"
+```
+
+`$HOME/.config/rundra/targets.yaml` is Rundra's default targets-file path. The
+commands below keep it explicit so each one shows exactly which cluster
+configuration it will use.
+
 That target should name fishvision as its SSH host and use an explicit shared
 workspace accessible to compute nodes. Scheduler account, partition, and QOS
 choices belong in the target configuration and are never bypassed here.
@@ -78,7 +107,9 @@ sed -i "s|/ABSOLUTE/PATH/TO/PINNED/POGOSIM|$POGOSIM_CHECKOUT|" rundra.yaml
 
 If this project already has a `rundra.yaml`, merge the `shoal` profile instead
 of replacing it. You can also omit the project file and pass its values as CLI
-options.
+options. The commands below pass `--project-file rundra.yaml` explicitly:
+automatic project-file discovery looks next to the experiment definition, not
+in the shell's current working directory.
 
 ## 5. Validate and inspect a three-seed plan
 
@@ -89,6 +120,8 @@ uv run rundr validate examples/pogosim-shoal/experiment.yaml --json \
     | python3 -m json.tool
 
 uv run rundr plan examples/pogosim-shoal/experiment.yaml \
+    --project-file rundra.yaml \
+    --targets-file "$RUNDRA_SHOAL_TARGETS_FILE" \
     --seeds 0:2 \
     --json | python3 -m json.tool
 ```
@@ -100,6 +133,8 @@ mapping, requested resources, target, and remote workspace before submitting.
 
 ```bash
 uv run rundr submit examples/pogosim-shoal/experiment.yaml \
+    --project-file rundra.yaml \
+    --targets-file "$RUNDRA_SHOAL_TARGETS_FILE" \
     --seeds 0:2 \
     --json | tee /tmp/rundra-pogosim-submit.json | python3 -m json.tool
 
@@ -144,10 +179,14 @@ resource request:
 
 ```bash
 uv run rundr plan examples/pogosim-shoal/experiment.yaml \
+    --project-file rundra.yaml \
+    --targets-file "$RUNDRA_SHOAL_TARGETS_FILE" \
     --seeds 0:99 \
     --json | python3 -m json.tool
 
 uv run rundr submit examples/pogosim-shoal/experiment.yaml \
+    --project-file rundra.yaml \
+    --targets-file "$RUNDRA_SHOAL_TARGETS_FILE" \
     --seeds 0:99 \
     --json | tee /tmp/rundra-pogosim-100-submit.json | python3 -m json.tool
 ```

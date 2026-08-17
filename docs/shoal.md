@@ -54,9 +54,9 @@ output before allowing submission.
 The complete Pogosim preparation, three-seed smoke, 100-seed showcase, and
 dedicated live-test procedure is documented in
 [`examples/pogosim-shoal/README.md`](../examples/pogosim-shoal/README.md). The
-Pogosim test additionally requires a pinned external source checkout and its
-matching shared Apptainer image; ordinary test runs never build the image or
-submit this workload.
+Pogosim test additionally requires a pinned external source checkout and the
+published shared `pogosim-full:v0.10.10` Apptainer image; ordinary test runs
+never pull the image or submit this workload.
 
 ```bash
 RUNDRA_SHOAL_TARGETS_FILE=/tmp/rundra-shoal-targets.yaml \

@@ -143,3 +143,18 @@ def test_pogosim_profile_keeps_site_policy_out_of_the_example() -> None:
     assert "account" not in profile
     assert "partition" not in profile
     assert "qos" not in profile
+
+
+def test_pogosim_guide_pins_source_and_uses_the_stable_prebuilt_image() -> None:
+    guide = (EXAMPLE_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "fe012bb58ef17eae2155b9904bc3eedb650a86bc" in guide
+    assert "library://leo.cazenille/pogosim/pogosim-full:v0.10.10" in guide
+    assert "apptainer build" not in guide
+
+
+def test_pogosim_guide_explicitly_selects_its_root_project_file() -> None:
+    guide = (EXAMPLE_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert guide.count("    --project-file rundra.yaml") == 4
+    assert guide.count('    --targets-file "$RUNDRA_SHOAL_TARGETS_FILE"') == 4

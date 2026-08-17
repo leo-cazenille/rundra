@@ -15,7 +15,7 @@ The example must work as a small three-seed system smoke test and as a manual
 ## Fixed design decisions
 
 - Workload: upstream Pogosim `examples/run_and_tumble`.
-- Container: build Pogosim's existing `pogosim-apptainer.def` unmodified.
+- Container: pull Pogosim's stable prebuilt `pogosim-full:v0.10.10` image.
 - Source: a separate checkout of Pogosim pinned to an exact commit.
 - Build: compile `run_and_tumble` once in that checkout with the same image
   used for execution.
@@ -78,7 +78,8 @@ this integrity check.
 
 Document:
 
-- exact upstream commit pinning and image SHA-256 recording;
+- exact upstream commit pinning, stable library image retrieval, and image
+  SHA-256 recording;
 - why the external checkout is the `source_root` (the baseline definition does
   not copy upstream examples into the image);
 - three-seed validation and 100-seed launch commands;

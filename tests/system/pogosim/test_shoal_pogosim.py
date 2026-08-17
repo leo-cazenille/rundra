@@ -220,7 +220,7 @@ def test_three_seed_pogosim_run_on_shoal(
 
     status = _wait_for_terminal(run_id, data_dir)
     assert status["state"] == "SUCCEEDED"
-    assert status["tasks"] == {"total": 3, "failed": 0, "succeeded": 3}
+    assert status["tasks"] == {"total": 3, "succeeded": 3}
 
     record = JsonRunStore(data_dir).load(run_id)
     assert len(record.scheduler_job_ids) == 1
