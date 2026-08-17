@@ -14,10 +14,15 @@ from rundra.domain.models import (
 )
 from rundra.domain.parameters import ParameterSet
 from rundra.domain.preparation import PreparationPlan
+from rundra.domain.scaling import ExecutionPolicy, TaskSpace
 
 ONE_UNIT_PER_TASK = "one_unit_per_task"
 SLURM_ARRAY = "slurm_array"
-_EXECUTION_STRATEGIES = frozenset({ONE_UNIT_PER_TASK, SLURM_ARRAY})
+MULTI_ARRAY = "multi-array"
+WORKER_POOL = "worker-pool"
+_EXECUTION_STRATEGIES = frozenset(
+    {ONE_UNIT_PER_TASK, SLURM_ARRAY, MULTI_ARRAY, WORKER_POOL}
+)
 
 
 class PlanningError(Exception):
@@ -96,6 +101,11 @@ class ExecutionPlan:
     array_mapping: tuple[ArrayTaskMapping, ...]
     strategy: str = ONE_UNIT_PER_TASK
     preparation: PreparationPlan | None = None
+    task_space: TaskSpace | None = None
+    execution_policy: ExecutionPolicy | None = None
+    retrieval_policy: str | None = None
+    scheduler_batches: int | None = None
+    worker_count: int | None = None
     staging_backend: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -107,7 +117,36 @@ class ExecutionPlan:
             raise ValueError("ExecutionPlan v2 requires preparation")
         if self.version == 3 and any(unit.parameter_set is None for unit in self.units):
             raise ValueError("ExecutionPlan v3 requires parameterized units")
-        if self.version not in {1, 2, 3}:
+        if self.version == 4:
+            if type(self.task_space) is not TaskSpace:
+                raise ValueError("ExecutionPlan v4 requires a TaskSpace")
+            if type(self.execution_policy) is not ExecutionPolicy:
+                raise ValueError("ExecutionPlan v4 requires an execution policy")
+            if self.strategy not in {MULTI_ARRAY, WORKER_POOL}:
+                raise ValueError("ExecutionPlan v4 requires a scalable strategy")
+            if self.retrieval_policy not in {"all", "manifest", "none"}:
+                raise ValueError("ExecutionPlan v4 retrieval policy is unsupported")
+            if type(self.scheduler_batches) is not int or self.scheduler_batches < 1:
+                raise ValueError("ExecutionPlan v4 scheduler_batches must be positive")
+            if self.strategy == WORKER_POOL:
+                if type(self.worker_count) is not int or self.worker_count < 1:
+                    raise ValueError(
+                        "worker-pool plans require a positive worker_count"
+                    )
+            elif self.worker_count is not None:
+                raise ValueError("multi-array plans cannot define worker_count")
+        elif any(
+            value is not None
+            for value in (
+                self.task_space,
+                self.execution_policy,
+                self.retrieval_policy,
+                self.scheduler_batches,
+                self.worker_count,
+            )
+        ):
+            raise ValueError("ExecutionPlan v1-v3 cannot contain v4 scaling fields")
+        if self.version not in {1, 2, 3, 4}:
             raise ValueError("ExecutionPlan version is unsupported")
         if type(self.experiment_name) is not str or not self.experiment_name.strip():
             raise ValueError("ExecutionPlan experiment_name must be nonblank")
@@ -137,17 +176,21 @@ class ExecutionPlan:
             raise TypeError("ExecutionPlan groups must contain ExecutionGroups")
         grouped_ids = tuple(task_id for group in groups for task_id in group.task_ids)
         unit_ids = tuple(unit.task_id for unit in units)
-        if grouped_ids != unit_ids:
+        if self.version == 4 and groups:
+            raise ValueError("ExecutionPlan v4 cannot materialize execution groups")
+        if self.version < 4 and grouped_ids != unit_ids:
             raise ValueError(
                 "ExecutionPlan groups must partition Task IDs in plan order"
             )
-        if self.strategy == ONE_UNIT_PER_TASK and any(
-            len(group.task_ids) != 1 for group in groups
+        if (
+            self.version < 4
+            and self.strategy == ONE_UNIT_PER_TASK
+            and any(len(group.task_ids) != 1 for group in groups)
         ):
             raise ValueError(
                 "one_unit_per_task strategy requires singleton execution groups"
             )
-        if self.strategy == SLURM_ARRAY:
+        if self.version < 4 and self.strategy == SLURM_ARRAY:
             if self.target.scheduler.kind != "slurm":
                 raise ValueError("slurm_array strategy requires a Slurm target")
             if len(units) < 2 or len(groups) != 1:
@@ -161,6 +204,8 @@ class ExecutionPlan:
             raise TypeError(
                 "ExecutionPlan array_mapping must contain ArrayTaskMappings"
             )
+        if self.version == 4 and array_mapping:
+            raise ValueError("ExecutionPlan v4 cannot materialize an array mapping")
         if self.strategy == ONE_UNIT_PER_TASK and array_mapping:
             raise ValueError(
                 "one_unit_per_task strategy cannot define an array mapping"
