@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import timedelta
 from hashlib import sha256
 from typing import Any
@@ -19,11 +19,12 @@ from rundra.cli.operations import (
     RunValue,
     StatusValue,
     TargetsValue,
+    TaskStatusValue,
     ValidationValue,
 )
-from rundra.domain.models import Artifact, Command, ResourceRequest, Target
+from rundra.domain.models import Artifact, Command, ResourceRequest, Target, Task
 from rundra.domain.preparation import PreparationPlan, source_recipe_identity
-from rundra.orchestration.models import ExecutionPlan
+from rundra.orchestration.models import ExecutionPlan, ExecutionUnit
 from rundra.persistence import record_to_dict
 from rundra.results import OperationResult
 
@@ -154,7 +155,8 @@ def render_human(result: OperationResult[Any]) -> str:
         resources = plan.units[0].resources
         rendered = (
             f"Plan for {plan.experiment_name} on {plan.target.name}: "
-            f"{len(plan.units)} task(s)\nSeeds: {seeds}\n"
+            f"{len(plan.units)} task(s)\n"
+            f"{_human_task_dimensions(plan.units, seeds)}\n"
             f"Strategy: {plan.strategy}\n"
             f"Resources: {_human_resources(resources)}\n"
             f"Native options: {_human_native_options(resources)}\n"
@@ -195,11 +197,7 @@ def render_human(result: OperationResult[Any]) -> str:
         lines.append(f"Ready: {'yes' if value.ready else 'no'}")
         return "\n".join(lines)
     if isinstance(value, RunValue):
-        seed_line = (
-            f"Seed: {value.seed}"
-            if len(value.seeds) == 1
-            else f"Seeds: {', '.join(str(seed) for seed in value.seeds)}"
-        )
+        seed_line = _human_run_dimensions(value)
         rendered = (
             f"Run: {value.run_id}\n{seed_line}\n"
             f"State: {value.record.run.state.value}\n"
@@ -230,6 +228,7 @@ def render_human(result: OperationResult[Any]) -> str:
         details = "\n".join(
             "  "
             f"{task.task_id} seed={task.seed} state={task.state.value} "
+            f"{_human_status_parameter(task)}"
             f"retrieval={task.retrieval_state.value} "
             f"native={task.native_state or '-'} exit="
             f"{task.exit_code if task.exit_code is not None else '-'}"
@@ -433,6 +432,56 @@ def _staging_document(plan: ExecutionPlan) -> dict[str, Any]:
         "inputs_sealed": True,
         "results": "local_copy" if local else "rsync_download",
     }
+
+
+def _human_task_dimensions(
+    units: tuple[ExecutionUnit, ...], fallback_seeds: str
+) -> str:
+    lines = _human_parameter_lines(units)
+    return f"Parameter sets:\n{lines}" if lines is not None else f"Seeds: {fallback_seeds}"
+
+
+def _human_run_dimensions(value: RunValue) -> str:
+    lines = _human_parameter_lines(value.record.run.tasks)
+    if lines is not None:
+        return f"Parameter sets:\n{lines}"
+    return (
+        f"Seed: {value.seed}"
+        if len(value.seeds) == 1
+        else f"Seeds: {', '.join(str(seed) for seed in value.seeds)}"
+    )
+
+
+def _human_parameter_lines(
+    items: Sequence[ExecutionUnit | Task],
+) -> str | None:
+    if not items or any(item.parameter_set is None for item in items):
+        return None
+    grouped: dict[str, tuple[Mapping[str, object], list[int]]] = {}
+    for item in items:
+        assert item.parameter_set is not None
+        entry = grouped.setdefault(
+            item.parameter_set.id, (item.parameter_set.choices, [])
+        )
+        entry[1].append(item.seed)
+    return "\n".join(
+        f"  {identifier} ({_human_choices(choices)}): seeds="
+        f"{','.join(str(seed) for seed in seeds)}"
+        for identifier, (choices, seeds) in grouped.items()
+    )
+
+
+def _human_choices(choices: Mapping[str, object]) -> str:
+    return ", ".join(f"{name}={value}" for name, value in sorted(choices.items()))
+
+
+def _human_status_parameter(task: TaskStatusValue) -> str:
+    if task.parameter_set is None:
+        return ""
+    return (
+        f"parameter_set={task.parameter_set.id} "
+        f"choices={_human_choices(task.parameter_set.choices)} "
+    )
 
 
 def _human_resources(resources: ResourceRequest) -> str:

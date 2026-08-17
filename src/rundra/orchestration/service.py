@@ -1167,9 +1167,10 @@ def _container_request(
     task_workspace = workspace.for_task(unit.task_id)
     outputs = task_workspace.outputs if isolate_task else workspace.outputs
     runtime = task_workspace.runtime if isolate_task else workspace.runtime
+    container_config = _CONTAINER_INPUTS / task_workspace.config.name
     command = Command(
         tuple(
-            argument.replace("{config}", str(_CONTAINER_CONFIG)).replace(
+            argument.replace("{config}", str(container_config)).replace(
                 "{seed}", str(unit.seed)
             )
             for argument in experiment.command.argv
