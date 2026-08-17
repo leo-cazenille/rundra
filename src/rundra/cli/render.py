@@ -438,7 +438,9 @@ def _human_task_dimensions(
     units: tuple[ExecutionUnit, ...], fallback_seeds: str
 ) -> str:
     lines = _human_parameter_lines(units)
-    return f"Parameter sets:\n{lines}" if lines is not None else f"Seeds: {fallback_seeds}"
+    return (
+        f"Parameter sets:\n{lines}" if lines is not None else f"Seeds: {fallback_seeds}"
+    )
 
 
 def _human_run_dimensions(value: RunValue) -> str:
