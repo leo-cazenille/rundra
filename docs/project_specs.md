@@ -1370,6 +1370,12 @@ machine-readable result document. Scheduler polling emits feedback only when
 the preparation or scientific execution state changes. Neither option changes
 the persisted RunRecord or the execution plan.
 
+For synchronous arrays, progress contains six lifecycle units plus one unit per
+planned Task. Terminal Task observations advance the bar and its detail reports
+terminal/total, running, queued, failed, and distinct allocated-node counts.
+The resulting rate and ETA therefore adapt to array size and observed scheduler
+throughput rather than treating a two-Task and thousand-Task Run identically.
+
 ---
 
 ### 21.3 `run`

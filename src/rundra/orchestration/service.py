@@ -229,9 +229,21 @@ class SchedulerLifecycleService:
         if self._progress is None:
             return
         preparation = record.preparation
+        states = tuple(task.state for task in record.run.tasks)
+        terminal_count = sum(state in _TERMINAL_STATES for state in states)
+        running_count = states.count(ExecutionState.RUNNING)
+        queued_count = states.count(ExecutionState.QUEUED) + states.count(
+            ExecutionState.SUBMITTED
+        )
+        failed_count = states.count(ExecutionState.FAILED)
         details = [
             f"run={record.run.state.value}",
             f"native={record.native_state or '-'}",
+            f"tasks={terminal_count}/{len(states)}",
+            f"running={running_count}",
+            f"queued={queued_count}",
+            f"failed={failed_count}",
+            f"nodes={len(record.allocated_nodes)}",
         ]
         if preparation is not None and preparation.builder_scheduler_id is not None:
             details.extend(
@@ -244,8 +256,8 @@ class SchedulerLifecycleService:
         self._progress(
             ProgressEvent(
                 ProgressPhase.WAIT,
-                5 if terminal else 4,
-                6,
+                (5 if terminal else 4) + terminal_count,
+                6 + len(states),
                 " ".join(details),
                 record.run.id,
             )
@@ -498,6 +510,7 @@ class OrchestrationService:
             2,
             f"run={run_id} target={request.plan.target.name} tasks={len(units)} checking capabilities",
             run_id,
+            len(units),
         )
 
         try:
@@ -516,6 +529,7 @@ class OrchestrationService:
             2,
             "capabilities verified; staging immutable inputs",
             run_id,
+            len(units),
         )
 
         updated = _with_execution_state(record, ExecutionState.STAGING)
@@ -547,6 +561,7 @@ class OrchestrationService:
             3,
             f"workspace={workspace.root}",
             run_id,
+            len(units),
         )
 
         preparation_reference = None
@@ -606,6 +621,7 @@ class OrchestrationService:
                 3,
                 f"preparation_job={preparation_reference.native_id} dependency=afterok",
                 run_id,
+                len(units),
             )
 
         try:
@@ -697,6 +713,7 @@ class OrchestrationService:
             4,
             f"scheduler_job={submission.reference.native_id} tasks={len(units)}",
             run_id,
+            len(units),
         )
 
         if not wait:
@@ -768,9 +785,10 @@ class OrchestrationService:
         record = updated
         self._report(
             ProgressPhase.RETRIEVE,
-            5,
+            5 + len(units),
             f"destination={request.fetch_destination}",
             run_id,
+            len(units),
         )
         try:
             fetched = self._stager.fetch(
@@ -807,9 +825,10 @@ class OrchestrationService:
         self.store.update(updated, expected=record)
         self._report(
             ProgressPhase.RETRIEVE,
-            6,
+            6 + len(units),
             f"artifacts={len(fetched_artifacts)} state={updated.run.retrieval_state.value}",
             run_id,
+            len(units),
         )
         return RunExecutionResult(updated, workspace)
 
@@ -819,9 +838,12 @@ class OrchestrationService:
         completed: int,
         message: str,
         run_id: RunId,
+        task_total: int,
     ) -> None:
         if self._progress is not None:
-            self._progress(ProgressEvent(phase, completed, 6, message, run_id))
+            self._progress(
+                ProgressEvent(phase, completed, 6 + task_total, message, run_id)
+            )
 
     @staticmethod
     def _validate_request(request: RunExecutionRequest) -> None:

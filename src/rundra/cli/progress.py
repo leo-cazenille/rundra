@@ -13,6 +13,7 @@ class ProgressUnavailableError(RuntimeError):
 
 class _ProgressBar(Protocol):
     n: float
+    total: float | None
 
     def update(self, n: float = 1) -> object: ...
 
@@ -67,9 +68,10 @@ class CLIProgressReporter:
             else:
                 bar.write(line, file=self._stream)
         if bar is not None:
+            bar.total = float(event.total)
             bar.set_description_str(f"rundr {event.phase.value}", refresh=False)
-            bar.set_postfix_str(event.message, refresh=False)
             bar.update(max(0.0, float(event.completed) - bar.n))
+            bar.set_postfix_str(event.message, refresh=True)
 
     def close(self) -> None:
         if self._closed:

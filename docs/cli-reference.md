@@ -16,6 +16,9 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 `--verbose` prints lifecycle details and `--progress` displays a TQDM phase
 bar. They may be combined. Both write only to stderr, preserving the final
 human or JSON result on stdout.
+For synchronous arrays the bar total is six lifecycle units plus the number of
+Tasks; scheduler updates show terminal/total, running, queued, failed, and
+allocated-node counts.
 | `status` | `RUN_ID` | `--data-dir`, `--json` | Reconcile scheduler state and return portable Run/Task status. |
 | `list` | none | `--data-dir`, `--json` | List persisted Runs in deterministic order. |
 | `logs` | `RUN_ID` | `--task`, `--data-dir`, `--json` | Read one Task's framework-managed stdout/stderr. |

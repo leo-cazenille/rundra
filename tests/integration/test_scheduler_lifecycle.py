@@ -364,7 +364,9 @@ def test_new_process_can_wait_from_durable_reference_to_terminal(tmp_path) -> No
         "run=RUNNING",
         "run=SUCCEEDED",
     ]
-    assert progress[-1].completed == 5
+    assert progress[-1].completed == 6
+    assert progress[-1].total == 7
+    assert "tasks=1/1" in progress[-1].message
 
 
 def test_wait_timeout_preserves_last_nonterminal_scheduler_state(tmp_path) -> None:

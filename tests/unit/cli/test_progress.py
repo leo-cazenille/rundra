@@ -12,6 +12,7 @@ class FakeBar:
     def __init__(self, **options: object) -> None:
         self.options = options
         self.n = 0.0
+        self.total = float(options["total"])
         self.descriptions: list[str] = []
         self.postfixes: list[str] = []
         self.lines: list[str] = []
@@ -58,21 +59,24 @@ def test_combined_verbose_progress_reports_details_without_overcounting() -> Non
     )
     run_id = RunId("run_0123456789abcdef0123456789abcdef")
     reporter(ProgressEvent(ProgressPhase.RESOLVE, 1, 6, "target=shoal"))
-    reporter(ProgressEvent(ProgressPhase.WAIT, 4, 6, "run=RUNNING", run_id))
-    reporter(ProgressEvent(ProgressPhase.WAIT, 4, 6, "run=RUNNING", run_id))
-    reporter(ProgressEvent(ProgressPhase.COMPLETE, 6, 6, "state=SUCCEEDED", run_id))
+    reporter(ProgressEvent(ProgressPhase.WAIT, 104, 1006, "tasks=100/1000", run_id))
+    reporter(ProgressEvent(ProgressPhase.WAIT, 504, 1006, "tasks=500/1000", run_id))
+    reporter(
+        ProgressEvent(ProgressPhase.COMPLETE, 1006, 1006, "state=SUCCEEDED", run_id)
+    )
     reporter.close()
 
     assert len(bars) == 1
-    assert bars[0].n == 6
+    assert bars[0].n == 1006
+    assert bars[0].total == 1006
     assert bars[0].closed is True
     assert bars[0].options["total"] == 6
     assert bars[0].descriptions[-1] == "rundr complete"
     assert bars[0].postfixes[-1] == "state=SUCCEEDED"
     assert bars[0].lines == [
         "[rundr] resolve: target=shoal",
-        "[rundr] wait: run=RUNNING",
-        "[rundr] wait: run=RUNNING",
+        "[rundr] wait: tasks=100/1000",
+        "[rundr] wait: tasks=500/1000",
         "[rundr] complete: state=SUCCEEDED",
     ]
 

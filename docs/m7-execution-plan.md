@@ -62,3 +62,6 @@ increments so version-1 projects remain unchanged throughout.
   stdout remains one stable document.
 - Report scheduler polling only when portable or native state changes and keep
   the default command output unchanged when neither option is requested.
+- Scale synchronous progress by planned Task count and report aggregate Task
+  states and observed allocated-node count so large arrays expose useful
+  completion rate and ETA information.

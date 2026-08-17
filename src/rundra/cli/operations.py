@@ -100,9 +100,10 @@ def _report_progress(
     completed: int,
     message: str,
     run_id: RunId | None = None,
+    task_total: int = 0,
 ) -> None:
     if observer is not None:
-        observer(ProgressEvent(phase, completed, 6, message, run_id))
+        observer(ProgressEvent(phase, completed, 6 + task_total, message, run_id))
 
 
 def _target_progress_message(target: Target) -> str:
@@ -1071,6 +1072,7 @@ def run_operation(
         )
         experiment = load_experiment(experiment_source)
         config = load_config_snapshot(config_source)
+        seed_values = _execution_seed_values(seed=seed, seeds=seeds)
         targets_config = load_targets_config(targets_source)
         targets = targets_config.targets
         if target_name not in targets:
@@ -1088,6 +1090,7 @@ def run_operation(
             ProgressPhase.RESOLVE,
             1,
             _target_progress_message(target),
+            task_total=len(seed_values),
         )
         target_storage = targets_config.preparation.get(
             target_name, PreparationStorageConfig()
@@ -1098,6 +1101,7 @@ def run_operation(
                 ProgressPhase.PREPARE,
                 1,
                 f"location={preparation.requested_location} source={preparation.source_mode} rebuild={preparation.rebuild} offline={preparation.offline}",
+                task_total=len(seed_values),
             )
             _validate_preparation_compatibility(experiment, preparation.recipe)
         unsupported = _unsupported_execution_target(target, experiment)
@@ -1175,6 +1179,7 @@ def run_operation(
                     preparation_record.image_action,
                     preparation_record.builder_location or "not_requested",
                 ),
+                task_total=len(seed_values),
             )
         else:
             _report_progress(
@@ -1182,12 +1187,13 @@ def run_operation(
                 ProgressPhase.PREPARE,
                 2,
                 "not configured",
+                task_total=len(seed_values),
             )
         plan = create_plan(
             effective_experiment,
             config,
             target,
-            seeds=_execution_seed_values(seed=seed, seeds=seeds),
+            seeds=seed_values,
             preparation=preparation,
         )
         service = OrchestrationService(
@@ -1235,6 +1241,7 @@ def run_operation(
             6,
             f"run={record.run.id} state={record.run.state.value} retrieval={record.run.retrieval_state.value}",
             record.run.id,
+            task_total=len(seed_values),
         )
         return OperationResult.success("run", RunValue(record, launch))
     except ConfigError as error:
@@ -1283,6 +1290,7 @@ def submit_operation(
         )
         experiment = load_experiment(experiment_source)
         config = load_config_snapshot(config_source)
+        seed_values = _execution_seed_values(seed=seed, seeds=seeds)
         targets_config = load_targets_config(targets_source)
         targets = targets_config.targets
         if target_name not in targets:
@@ -1300,6 +1308,7 @@ def submit_operation(
             ProgressPhase.RESOLVE,
             1,
             _target_progress_message(target),
+            task_total=len(seed_values),
         )
         target_storage = targets_config.preparation.get(
             target_name, PreparationStorageConfig()
@@ -1310,6 +1319,7 @@ def submit_operation(
                 ProgressPhase.PREPARE,
                 1,
                 f"location={preparation.requested_location} source={preparation.source_mode} rebuild={preparation.rebuild} offline={preparation.offline}",
+                task_total=len(seed_values),
             )
             _validate_preparation_compatibility(experiment, preparation.recipe)
         unsupported = _unsupported_execution_target(
@@ -1372,6 +1382,7 @@ def submit_operation(
                     preparation_record.image_action,
                     preparation_record.builder_location or "not_requested",
                 ),
+                task_total=len(seed_values),
             )
         else:
             _report_progress(
@@ -1379,12 +1390,13 @@ def submit_operation(
                 ProgressPhase.PREPARE,
                 2,
                 "not configured",
+                task_total=len(seed_values),
             )
         plan = create_plan(
             effective_experiment,
             config,
             target,
-            seeds=_execution_seed_values(seed=seed, seeds=seeds),
+            seeds=seed_values,
             preparation=preparation,
         )
         service = OrchestrationService(
@@ -1414,6 +1426,7 @@ def submit_operation(
             6,
             f"run={result.record.run.id} state={result.record.run.state.value} submission durable",
             result.record.run.id,
+            task_total=len(seed_values),
         )
         return OperationResult.success("submit", RunValue(result.record, launch))
     except ConfigError as error:
