@@ -46,6 +46,8 @@ increments so version-1 projects remain unchanged throughout.
 ## 5. Migration and validation
 
 - Migrate Pogosim to an adjacent checked project-v2 recipe.
+- The checked Pogosim recipe pins the upstream commit and SIF digest and makes
+  `rundr run examples/pogosim-shoal/experiment.yaml --seeds 0:2` the happy path.
 - Add unit, fake-adapter, local integration, JSON contract, and gated Shoal
   coverage for cold and warm preparation.
 - Run pytest, Ruff lint/format checks, mypy, JSON contracts, and the minimal

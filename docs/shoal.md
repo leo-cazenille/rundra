@@ -54,8 +54,10 @@ output before allowing submission.
 The complete Pogosim preparation, three-seed smoke, 100-seed showcase, and
 dedicated live-test procedure is documented in
 [`examples/pogosim-shoal/README.md`](../examples/pogosim-shoal/README.md). The
-Pogosim test additionally requires a pinned external source checkout and the
-published shared `pogosim-full:v0.10.10` Apptainer image; ordinary test runs
+Pogosim uses its checked adjacent project-v2 recipe to acquire the pinned source,
+verify the published `pogosim-full:v0.10.10` SIF, and compile in a scheduled
+preparation job. The gated test requires an intentionally empty target cache,
+then verifies a cold run followed by a warm cache-only run. Ordinary test runs
 never pull the image or submit this workload.
 
 ```bash

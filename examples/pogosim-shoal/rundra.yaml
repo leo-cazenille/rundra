@@ -1,0 +1,38 @@
+version: 2
+default_profile: shoal
+
+defaults:
+  config: config.yaml
+  target: shoal
+  destination: retrieved
+
+profiles:
+  shoal:
+    target: shoal
+
+preparation:
+  source:
+    git:
+      url: https://github.com/Adacoma/pogosim.git
+      revision: fe012bb58ef17eae2155b9904bc3eedb650a86bc
+
+  image:
+    name: pogosim-full-v0.10.10.sif
+    uri: library://leo.cazenille/pogosim/pogosim-full:v0.10.10
+    sha256: 4005aa26696ca542f1bb462d46085b13ab56f2b51eb4c27f3483c6761995dfd8
+
+  build:
+    argv:
+      - make
+      - -C
+      - examples/run_and_tumble
+      - clean
+      - sim
+    outputs:
+      - path: examples/run_and_tumble/run_and_tumble
+        executable: true
+    cache_scope: target
+    resources:
+      cpus_per_task: 1
+      memory: 2GiB
+      walltime: "00:15:00"

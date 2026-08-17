@@ -12,7 +12,7 @@ command:
     - --seed
     - "{seed}"
 container:
-  image: /shoalhome/shoal/images/pogosim-full-v0.10.10.sif
+  image: pogosim-full-v0.10.10.sif
   gpu: false
 resources:
   nodes: 1

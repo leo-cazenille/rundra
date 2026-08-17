@@ -131,14 +131,16 @@ def test_pogosim_config_has_no_seed_and_writes_raw_outputs_only() -> None:
 
 
 def test_pogosim_profile_keeps_site_policy_out_of_the_example() -> None:
-    project_config = _load_yaml("rundra.yaml.example")
-    loaded = load_project_launch(EXAMPLE_ROOT / "rundra.yaml.example")
+    project_config = _load_yaml("rundra.yaml")
+    loaded = load_project_launch(EXAMPLE_ROOT / "rundra.yaml")
     profile = project_config["profiles"]["shoal"]
 
     assert project_config["default_profile"] == "shoal"
+    assert project_config["version"] == 2
+    assert loaded.preparation is not None
     assert loaded.default_profile == "shoal"
     assert profile["target"] == "shoal"
-    assert profile["config"] == "examples/pogosim-shoal/config.yaml"
+    assert project_config["defaults"]["config"] == "config.yaml"
     assert "targets_file" not in profile
     assert "account" not in profile
     assert "partition" not in profile
@@ -151,10 +153,38 @@ def test_pogosim_guide_pins_source_and_uses_the_stable_prebuilt_image() -> None:
     assert "fe012bb58ef17eae2155b9904bc3eedb650a86bc" in guide
     assert "library://leo.cazenille/pogosim/pogosim-full:v0.10.10" in guide
     assert "apptainer build" not in guide
+    assert "4005aa26696ca542f1bb462d46085b13ab56f2b51eb4c27f3483c6761995dfd8" in guide
 
 
-def test_pogosim_guide_explicitly_selects_its_root_project_file() -> None:
+def test_pogosim_guide_uses_adjacent_project_discovery_for_one_command_run() -> None:
     guide = (EXAMPLE_ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert guide.count("    --project-file rundra.yaml") == 4
-    assert guide.count('    --targets-file "$RUNDRA_SHOAL_TARGETS_FILE"') == 4
+    assert (
+        "uv run rundr run examples/pogosim-shoal/experiment.yaml --seeds 0:2" in guide
+    )
+    assert "--project-file" not in guide
+
+
+def test_pogosim_recipe_pins_build_inputs_and_declared_output() -> None:
+    project = _load_yaml("rundra.yaml")
+    preparation = project["preparation"]
+
+    assert preparation["source"]["git"]["revision"] == (
+        "fe012bb58ef17eae2155b9904bc3eedb650a86bc"
+    )
+    assert preparation["image"]["sha256"] == (
+        "4005aa26696ca542f1bb462d46085b13ab56f2b51eb4c27f3483c6761995dfd8"
+    )
+    assert preparation["build"]["argv"] == [
+        "make",
+        "-C",
+        "examples/run_and_tumble",
+        "clean",
+        "sim",
+    ]
+    assert preparation["build"]["outputs"] == [
+        {
+            "path": "examples/run_and_tumble/run_and_tumble",
+            "executable": True,
+        }
+    ]

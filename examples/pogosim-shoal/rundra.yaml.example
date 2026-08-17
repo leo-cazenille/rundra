@@ -1,8 +1,0 @@
-version: 1
-default_profile: shoal
-profiles:
-  shoal:
-    config: examples/pogosim-shoal/config.yaml
-    target: shoal
-    source_root: /ABSOLUTE/PATH/TO/PINNED/POGOSIM
-    destination: examples/pogosim-shoal/retrieved
