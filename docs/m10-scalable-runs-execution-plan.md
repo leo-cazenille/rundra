@@ -17,6 +17,10 @@ interrupted infrastructure attempts are retried.
 - Add target configuration version 3 with strict execution policy: hard Task
   and confirmation limits, active-task and array bounds, worker-pool settings,
   retry/requeue bounds, output-shard size, and automatic retrieval threshold.
+- Add an optional `max_concurrent_jobs` execution-policy limit, defaulting to
+  256. This is a hard ceiling on simultaneously submitted Slurm jobs or array
+  elements, not merely a `%N` running-task throttle. Plans must select bounded
+  worker execution when one scheduler element per logical Task would exceed it.
 - Add `--execution-strategy auto|multi-array|worker-pool`,
   `--retrieval all|manifest|none`, and exact `--confirm-tasks N` launch controls.
 - Add Plan and RunRecord version 4. Preserve strict v1-v3 readers and output
@@ -47,6 +51,30 @@ interrupted infrastructure attempts are retried.
    fishvision.
 6. Extend status, inspect, logs, fetch, cancel, progress, JSON contracts, doctor,
    documentation, and examples for multi-root and worker Runs.
+
+## M10.1 real-cluster correction
+
+The first 20,000-Task Shoal test demonstrated that splitting only at
+`MaxArraySize` can still exceed a site's per-user submitted-job limit. Rundra
+must therefore bundle logical Tasks into a bounded worker array whenever the
+logical Task count exceeds `max_concurrent_jobs`:
+
+- submit no more than the configured number of worker elements;
+- execute each worker's deterministic assignments sequentially with the
+  original per-Task timeout;
+- isolate every Task's output directory and append its exit status to a
+  framework-owned journal, then atomically publish the completed journal;
+- continue after scientific nonzero exits, while treating a missing journal or
+  nonzero worker allocation as an infrastructure failure for unfinished Tasks;
+- map every logical Task to its worker scheduler identity so status and cancel
+  remain portable and bounded;
+- keep the bundle allocation's CPU and memory equal to one logical Task and
+  scale its requested walltime by its maximum sequential assignment count.
+
+For target-v3 files, omitting `max_concurrent_jobs` selects the conservative
+default of 256. Existing target-v1/v2 behavior remains unchanged. Explicit
+multi-array planning above the ceiling is rejected rather than producing a plan
+that the launch path cannot safely submit.
 
 ## Failure and safety semantics
 
