@@ -156,6 +156,7 @@ def _ssh_configuration_checks(host: str) -> list[DoctorCheck]:
             capture_output=True,
             text=True,
             timeout=10,
+            shell=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return [
@@ -207,6 +208,7 @@ def _ssh_connect_check(host: str) -> DoctorCheck:
             capture_output=True,
             text=True,
             timeout=20,
+            shell=False,
         )
     except subprocess.TimeoutExpired:
         return DoctorCheck("connect", "fail", "SSH connection timed out")

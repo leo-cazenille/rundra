@@ -285,8 +285,8 @@ class Task:
     config: ConfigSnapshot
     seed: int
     resources: ResourceRequest
-    parameter_set: ParameterSet | None = None
     state: ExecutionState = ExecutionState.CREATED
+    parameter_set: ParameterSet | None = None
 
     def __post_init__(self) -> None:
         if type(self.id) is not TaskId:
