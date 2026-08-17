@@ -44,6 +44,22 @@ def _run(*arguments: str) -> subprocess.CompletedProcess[str]:
         ),
         (
             (
+                "plan",
+                "examples/shoal/cpu/experiment.yaml",
+                "--config",
+                "examples/minimal/sweep.yaml",
+                "--seeds",
+                "0:1",
+                "--target",
+                "shoal",
+                "--targets-file",
+                "examples/shoal/targets.yaml",
+                "--json",
+            ),
+            "plan-success-v3.json",
+        ),
+        (
+            (
                 "targets",
                 "--targets-file",
                 "examples/minimal/targets.yaml",

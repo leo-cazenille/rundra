@@ -43,6 +43,7 @@ from rundra.domain.models import (
     Target,
     TaskId,
 )
+from rundra.domain.parameters import ParameterSet
 from rundra.domain.preparation import (
     PREPARE_LOCATIONS,
     PreparationConfig,
@@ -171,6 +172,7 @@ class TaskStatusValue:
     native_id: str | None = None
     native_state: str | None = None
     exit_code: int | None = None
+    parameter_set: ParameterSet | None = None
 
     def __post_init__(self) -> None:
         if type(self.task_id) is not TaskId:
@@ -189,6 +191,8 @@ class TaskStatusValue:
                 raise ValueError(f"TaskStatusValue {name} must be safe or None")
         if self.exit_code is not None and type(self.exit_code) is not int:
             raise TypeError("TaskStatusValue exit_code must be an integer or None")
+        if self.parameter_set is not None and type(self.parameter_set) is not ParameterSet:
+            raise TypeError("TaskStatusValue parameter_set must be a ParameterSet or None")
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,6 +225,7 @@ class StatusValue:
     scheduler_job_ids: tuple[str, ...] = ()
     task_details: tuple[TaskStatusValue, ...] = ()
     preparation: PreparationStatusValue | None = None
+    format_version: int = 1
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -257,6 +262,8 @@ class StatusValue:
             raise TypeError(
                 "StatusValue preparation must be PreparationStatusValue or None"
             )
+        if self.format_version not in {1, 2, 3}:
+            raise ValueError("StatusValue format_version is unsupported")
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,6 +293,7 @@ class LogsValue:
     stderr: str
     stdout_path: PurePath
     stderr_path: PurePath
+    format_version: int = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,6 +304,7 @@ class PreparationLogsValue:
     stderr: str
     stdout_path: PurePath
     stderr_path: PurePath
+    format_version: int = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,6 +314,7 @@ class FetchValue:
     retrieval_state: RetrievalState
     artifacts: tuple[Artifact, ...]
     task_ids: tuple[TaskId, ...] = ()
+    format_version: int = 1
 
 
 type LaunchOutputValue = str | int | None
@@ -1760,6 +1770,7 @@ def logs_operation(
                 stderr_text,
                 stdout_path,
                 stderr_path,
+                format_version=record.format_version,
             ),
         )
     task_id = _selected_task_id(record, task)
@@ -1802,6 +1813,7 @@ def logs_operation(
             stderr_text,
             stdout.path,
             stderr.path,
+            format_version=record.format_version,
         ),
     )
 
@@ -1929,7 +1941,14 @@ def fetch_operation(
         )
     return OperationResult.success(
         "fetch",
-        FetchValue(record.run.id, destination, retrieval_state, artifacts, selected),
+        FetchValue(
+            record.run.id,
+            destination,
+            retrieval_state,
+            artifacts,
+            selected,
+            format_version=record.format_version,
+        ),
     )
 
 
@@ -1981,6 +2000,7 @@ def _status_value(record: RunRecord) -> StatusValue:
                 native_id=record.task_scheduler_ids.get(task.id),
                 native_state=record.task_native_states.get(task.id),
                 exit_code=record.task_exit_codes.get(task.id),
+                parameter_set=task.parameter_set,
             )
             for task in record.run.tasks
         ),
@@ -1995,6 +2015,7 @@ def _status_value(record: RunRecord) -> StatusValue:
                 or record.preparation.resolution_location,
             )
         ),
+        format_version=record.format_version,
     )
 
 

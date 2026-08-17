@@ -23,6 +23,7 @@ from rundra.domain.models import (
     Task,
     TaskId,
 )
+from rundra.domain.parameters import ParameterSet
 from rundra.domain.records import RunRecord
 from rundra.domain.states import ExecutionState, RetrievalState
 from rundra.persistence import (
@@ -217,6 +218,36 @@ def test_run_record_round_trips_ordered_multi_task_identity_and_artifacts() -> N
         "task_000001",
     ]
     assert record_from_dict(document) == multi
+
+
+def test_version_three_record_round_trips_parameterized_repeated_seeds() -> None:
+    record = _record()
+    first = replace(
+        record.run.tasks[0],
+        parameter_set=ParameterSet("parameter_set_000000", {"regime": "ballistic"}),
+    )
+    second = replace(
+        first,
+        id=TaskId.from_ordinal(1),
+        config=ConfigSnapshot(PurePosixPath("configs/tumble.yaml"), "regime: tumble\n"),
+        parameter_set=ParameterSet("parameter_set_000001", {"regime": "long_tumble"}),
+    )
+    parameterized = replace(
+        record,
+        format_version=3,
+        run=replace(record.run, tasks=(first, second)),
+        task_exit_codes={},
+    )
+
+    document = record_to_dict(parameterized)
+
+    assert document["format_version"] == 3
+    assert [task["seed"] for task in document["run"]["tasks"]] == [17, 17]
+    assert [task["parameter_set"]["id"] for task in document["run"]["tasks"]] == [
+        "parameter_set_000000",
+        "parameter_set_000001",
+    ]
+    assert record_from_dict(document) == parameterized
 
 
 def test_run_record_round_trips_explicit_array_mapping() -> None:

@@ -1770,6 +1770,12 @@ planner; the Task and RunRecord contain that concrete value. A non-submitting
 plan may generate and display a preview seed, but an independent later run will
 generate another seed unless the preview is passed explicitly.
 
+When no launch layer supplies a retrieval destination, Rundra derives
+`<project-root>/retrieved/<config-stem>`, or
+`<current-working-directory>/retrieved/<config-stem>` without a discovered
+project file. Explicit CLI, profile, project, and user destinations retain
+their exact meaning.
+
 Successful plan/run JSON includes a sibling `launch` value containing the
 selected profile, consumed effective values, and a source for each field. The
 stable source forms are `cli`, `project_profile:NAME`, `project`, `user`,
@@ -1882,43 +1888,45 @@ However, v0.1 architecture must not make such a layer difficult to add.
 
 ---
 
-## 25. Parameter sweeps — future design constraint
+## 25. Parameter sweeps
 
-The logical task model should later generalize from:
+An application YAML passed through `--config` opts into deterministic expansion
+with a strict top-level `_rundr` block:
 
-```text
-config × seed
+```yaml
+_rundr:
+  version: 1
+  seeds: "0:19"
+parameters:
+  density:
+    batch_options: [0.1, 0.2, 0.3, 0.4]
+  noise:
+    batch_options_range: {start: 0.0, stop: 0.1, step: 0.05}
 ```
 
-to:
+The supported marker subset is `batch_options`, `batch_options_range`, and
+`batch_hierarchical_options`. Dimensions expand as a Cartesian product in YAML
+traversal and value order. Hierarchical choices merge into their containing
+mapping; `default` is excluded from choices and `name` labels provenance.
+Rundra strips `_rundr` and expansion markers from every effective application
+config.
 
-```text
-config × parameter set × seed
-```
+Seed precedence is CLI `--seed`/`--seeds`/`--random-seed`, `_rundr.seeds`,
+configured launch defaults, then generation. One Run contains parameter sets x
+seeds. Repeated seeds are valid across parameter sets, while Task IDs remain
+globally unique. Slurm represents the complete set as one array and maps each
+array index to a Task ID, seed, and immutable Task-specific config.
 
-Example future CLI:
+Parameterized plans and RunRecords use format version 3. Each Task records a
+deterministic parameter-set ID and chosen values; plans additionally expose the
+effective-config SHA-256. Retrieval includes `metadata/tasks.json` with the
+Task, seed, choices, config digest, and output mapping. Unswept v1/v2 documents
+remain unchanged and readers support all three versions.
 
-```bash
-rundr sweep configs/base.yaml \
-    --param density=0.1,0.2,0.3,0.4 \
-    --param noise=0.0,0.05,0.1 \
-    --replicates 20
-```
-
-The result would be:
-
-```text
-4 densities × 3 noise values × 20 seeds = 240 logical tasks
-```
-
-The backend decides whether to use:
-
-- scheduler arrays;
-- multiple jobs;
-- packed tasks;
-- another execution strategy.
-
-Version 0.1 does not require generic parameter sweeps.
+Rundra does not interpret application parameters beyond materializing YAML and
+does not merge scientific results. Pogosim-specific conventions and richer
+campaign behavior may live in a separate `pogorundr` layer built on these
+portable Run semantics.
 
 ---
 

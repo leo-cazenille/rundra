@@ -1,0 +1,4 @@
+_rundr:
+  version: 1
+value:
+  batch_options: [alpha, beta]

@@ -34,6 +34,12 @@ default exists. `--task` accepts a stable `task_NNNNNN` ID or zero-based
 ordinal. Without a selector, `fetch` addresses all Tasks and `logs` requires a
 single-Task Run.
 
+A config with `_rundr: {version: 1}` may define deterministic YAML dimensions
+using `batch_options`, `batch_options_range`, and
+`batch_hierarchical_options`. `plan`, `run`, and `submit` expand parameter sets
+automatically. `_rundr.seeds` supplies an integer or inclusive range unless a
+CLI seed selector overrides it. Sweep plans and Runs use format version 3.
+
 Prepared project-v2 operations accept `--prepare-location auto|local|target`,
 `--rebuild`, and `--offline`. `plan` additionally accepts `--source-root` to
 describe mutable-working-tree mode; it snapshots nothing and does not probe
@@ -47,6 +53,8 @@ project defaults, user defaults, then built-ins. Automatic locations are:
 - user launch defaults: `~/.config/rundra/config.yaml`;
 - adjacent project launch defaults: `rundra.yaml`;
 - client RunRecords: `~/.local/share/rundra/runs`.
+- omitted destination: `<project-root>/retrieved/<config-stem>`, or the same
+  path below the current working directory without project discovery.
 
 See [agent target setup](agent-setup.md) for safe sandbox access to user
 configuration, host trust, and SSH-agent authentication.
@@ -60,7 +68,8 @@ returning so later processes can operate by Run ID.
 
 All programmatically useful commands support the checked versioned
 [JSON contracts](schemas/README.md). Unprepared projects continue emitting
-`format_version: 1`; prepared plans and RunRecords emit `format_version: 2`.
+`format_version: 1`; prepared plans and RunRecords emit `format_version: 2`;
+parameterized plans and Runs emit `format_version: 3`.
 JSON goes to stdout with an empty stderr. Human errors go to stderr. Both
 renderers consume the same operation result.
 

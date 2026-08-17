@@ -12,7 +12,7 @@ positional, and option names; their semantics are in the
 
 Every CLI document has a `format_version`, an `operation` name, and an `ok`
 flag. Unprepared operations retain version 1; prepared plans and Runs use
-version 2. A successful document contains an operation-specific value. A
+version 2; parameterized plans and Runs use version 3. A successful document contains an operation-specific value. A
 failed document contains `error.code`, `error.message`, and `error.details`
 instead. Use the fields, not object-key order or human output, as the interface.
 
@@ -23,6 +23,7 @@ instead. Use the fields, not object-key order or human output, as the interface.
 | CLI surface | [`cli-surface-v1.json`](cli-surface-v1.json) | program, commands, positionals, options |
 | `validate` | [`validate-success-v1.json`](validate-success-v1.json) | `experiment` |
 | `plan` | [`plan-success-v1.json`](plan-success-v1.json) | `plan`, plus launch resolution |
+| parameterized `plan` | [`plan-success-v3.json`](plan-success-v3.json) | Task parameter sets and effective-config hashes |
 | `targets` | [`targets-success-v1.json`](targets-success-v1.json) | `targets` |
 | `run` | [`run-success-v1.json`](run-success-v1.json) | terminal `run`, plus launch resolution |
 | `submit` | [`submit-success-v1.json`](submit-success-v1.json) | submitted `run` |
@@ -45,6 +46,12 @@ the historical contract.
 
 The version-3 CLI surface adds the non-mutating `doctor` diagnostic. Its JSON
 payload reports typed checks without exposing credential material.
+
+Version-3 parameterized documents add a `parameter_set` object to each Task,
+permit a seed to recur in different parameter sets, and stage a distinct
+effective config per Task. Lifecycle envelopes retain version 3 when operating
+on such a Run. Version-1 and version-2 documents do not silently gain these
+fields.
 
 `inspect` deliberately embeds `run-record-v1.json` unchanged beneath `record`.
 Keeping one RunRecord fixture avoids two copies of the durable schema drifting.

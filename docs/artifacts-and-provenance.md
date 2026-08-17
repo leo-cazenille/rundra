@@ -32,10 +32,11 @@ scheduler, retrieval, and artifact observations become available.
 
 ## Effective configuration and source snapshot
 
-Scientific configuration is opaque to Rundra. The YAML is syntax-checked, but
-its exact UTF-8 text, newline style, and source path are preserved in each Task
-and copied to the staged `input/config.yaml`. Rundra substitutes that staged path
-and the concrete integer seed into the experiment argv; the application owns the
+Scientific configuration is opaque to Rundra. Ordinary YAML preserves its
+exact UTF-8 text, newline style, and source path and is copied to staged
+`input/config.yaml`. Sweep YAML is deterministically materialized into one
+marker-free `input/task_NNNNNN.yaml` per Task. Rundra substitutes the relevant
+staged path and concrete integer seed into argv; the application owns the
 configuration's scientific meaning.
 
 Staging snapshots the current filesystem tree, including uncommitted and
@@ -102,7 +103,7 @@ Each manifest entry has `kind`, `path`, optional `task_id`, and optional
 | `stderr` | one Task's framework-managed standard error |
 | `raw_result` | regular file matching an experiment `outputs.include` pattern |
 | `scheduler_metadata` | retrieved scheduler-owned metadata file, when present |
-| `provenance_metadata` | reserved version-1 category; no separate file is emitted by the current Git provider |
+| `provenance_metadata` | sweep `metadata/tasks.json`, mapping Task IDs to seeds, parameter choices, config hashes, and output paths |
 
 Run-level inputs have `task_id: null`; Task-specific logs and results carry a
 stable `task_NNNNNN` ID. `size_bytes` is recorded when Rundra measures a regular

@@ -261,6 +261,12 @@ Lifecycle commands use `~/.local/share/rundra/runs` by default; pass
 seed or an inclusive seed range, while `source_root` and `destination` may come
 from the same launch-resolution layers.
 
+Configs can opt into generic deterministic parameter sweeps with a strict
+`_rundr` block and `batch_options`, `batch_options_range`, or
+`batch_hierarchical_options` markers. Rundra expands parameter sets x seeds
+into one Run, one Slurm array, and one immutable effective config per Task.
+See the [Pogosim sweep example](examples/pogosim-shoal/README.md).
+
 Add `--json` to obtain the version-1 machine-readable contracts documented in
 [`docs/schemas/`](docs/schemas/). Authentication comes only from external
 transport mechanisms: credentials must never be placed in experiment files,

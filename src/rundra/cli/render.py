@@ -397,15 +397,23 @@ def _result_format_version(value: object) -> int:
     if isinstance(value, InspectValue):
         return value.record.format_version
     if isinstance(value, StatusValue) and value.preparation is not None:
-        return 2
+        return value.format_version
+    if isinstance(value, StatusValue):
+        return value.format_version
     if isinstance(value, CancelValue) and value.status.preparation is not None:
-        return 2
+        return value.status.format_version
+    if isinstance(value, CancelValue):
+        return value.status.format_version
     if isinstance(value, ListRunsValue) and any(
         run.preparation is not None for run in value.runs
     ):
-        return 2
+        return max(run.format_version for run in value.runs)
+    if isinstance(value, ListRunsValue) and value.runs:
+        return max(run.format_version for run in value.runs)
     if isinstance(value, PreparationLogsValue):
-        return 2
+        return value.format_version
+    if isinstance(value, (LogsValue, FetchValue)):
+        return value.format_version
     if (
         isinstance(value, ValidationValue)
         and value.project is not None
@@ -567,6 +575,16 @@ def _status_document(value: StatusValue) -> dict[str, Any]:
                 "native_id": task.native_id,
                 "native_state": task.native_state,
                 "exit_code": task.exit_code,
+                **(
+                    {
+                        "parameter_set": {
+                            "id": task.parameter_set.id,
+                            "choices": dict(task.parameter_set.choices),
+                        }
+                    }
+                    if task.parameter_set is not None
+                    else {}
+                ),
             }
             for task in value.task_details
         ],
