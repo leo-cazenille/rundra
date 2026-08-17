@@ -212,6 +212,50 @@ def test_bundled_array_reconciles_atomic_task_journals(tmp_path: Path) -> None:
     assert refreshed.run.state is ExecutionState.FAILED
 
 
+def test_large_bundled_cancel_reaches_scancel_before_task_reconciliation(
+    tmp_path: Path,
+) -> None:
+    service, transport, store = _service(
+        tmp_path,
+        deque(
+            [
+                (0, "MaxArraySize = 1001\n", ""),
+                (0, "", ""),
+                (0, "", ""),
+                (0, "42\n", ""),
+            ]
+        ),
+    )
+    request = replace(
+        _request(tmp_path, seeds=tuple(range(1_000))),
+        max_concurrent_jobs=2,
+    )
+    submitted = service.submit_one(request).record
+    command_count = len(transport.commands)
+    cancelled_workers = "42_0|CANCELLED|N/A|(null)\n42_1|CANCELLED|N/A|(null)\n"
+    transport.outcomes.extend(
+        (
+            (0, "", ""),
+            (0, "42|CANCELLED|N/A|(null)\n", ""),
+            (0, cancelled_workers, ""),
+        )
+    )
+
+    cancelled = SchedulerLifecycleService(
+        store=store,
+        scheduler=service._scheduler,
+        transport=transport,
+        clock=lambda: _NOW,
+    ).cancel(submitted)
+
+    cancellation_commands = transport.commands[command_count:]
+    assert cancellation_commands[0] == Command(("scancel", "--", "42"))
+    assert len(cancellation_commands) == 3
+    assert cancelled.run.state is ExecutionState.CANCELLED
+    assert {task.state for task in cancelled.run.tasks} == {ExecutionState.CANCELLED}
+    assert len(cancelled.artifacts) >= 2_000
+
+
 @pytest.mark.parametrize(
     ("native_state", "exit_code", "expected"),
     [

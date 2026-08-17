@@ -296,11 +296,8 @@ class SchedulerLifecycleService:
                 record, timeout=timeout, poll_interval=poll_interval
             )
         try:
-            current = self.refresh(record)
-            if current.run.state in _TERMINAL_STATES:
-                return current
             references = tuple(
-                SchedulerReference(native_id) for native_id in current.scheduler_job_ids
+                SchedulerReference(native_id) for native_id in record.scheduler_job_ids
             )
             if not references:
                 raise ValueError("Run has no scheduler root job IDs")
@@ -313,7 +310,7 @@ class SchedulerLifecycleService:
                 message=f"Run {record.run.id} cancellation failed: {error}",
                 run_id=record.run.id,
             ) from error
-        return self.wait(current, timeout=timeout, poll_interval=poll_interval)
+        return self.wait(record, timeout=timeout, poll_interval=poll_interval)
 
     def _cancel_preparation(self, record: RunRecord) -> RunRecord:
         preparation = record.preparation
@@ -1144,17 +1141,17 @@ def _observed_records(
         else:
             scheduler_metadata.pop("accounting_pending_tasks", None)
     artifacts = list(record.artifacts)
+    artifact_keys = {(artifact.kind, artifact.task_id) for artifact in record.artifacts}
     for task_id, observation in task_observations:
         for metadata_name, kind in (
             ("stdout_path", ArtifactKind.STDOUT),
             ("stderr_path", ArtifactKind.STDERR),
         ):
             path = observation.metadata.get(metadata_name)
-            if type(path) is str and not any(
-                artifact.kind is kind and artifact.task_id == task_id
-                for artifact in artifacts
-            ):
+            key = (kind, task_id)
+            if type(path) is str and key not in artifact_keys:
                 artifacts.append(Artifact(kind, PurePosixPath(path), task_id=task_id))
+                artifact_keys.add(key)
     started_values = tuple(
         observation.started_at
         for _, observation in task_observations
