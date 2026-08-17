@@ -908,10 +908,7 @@ def render_slurm_bundle_manifest(
                 if timeout is None
                 else command.replace(
                     "exec env --",
-                    (
-                        "timeout --signal=TERM --kill-after=30s "
-                        f"{timeout}s env --"
-                    ),
+                    (f"timeout --signal=TERM --kill-after=30s {timeout}s env --"),
                     1,
                 )
             )
