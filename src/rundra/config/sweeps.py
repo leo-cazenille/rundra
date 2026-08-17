@@ -39,7 +39,7 @@ def load_sweep_config(source: Path) -> SweepExpansion:
     metadata = document.get("_rundr")
     if metadata is None:
         content = normalized.read_text(encoding="utf-8")
-        return SweepExpansion((ExpandedConfig(ConfigSnapshot(normalized, content)),))
+        return SweepExpansion((ExpandedConfig(ConfigSnapshot(source, content)),))
     seeds = _parse_metadata(metadata, normalized)
     materialized = copy.deepcopy(document)
     materialized.pop("_rundr")
@@ -49,7 +49,7 @@ def load_sweep_config(source: Path) -> SweepExpansion:
     if not factors:
         content = yaml.safe_dump(materialized, sort_keys=False)
         return SweepExpansion(
-            (ExpandedConfig(ConfigSnapshot(normalized, content)),), seeds
+            (ExpandedConfig(ConfigSnapshot(source, content)),), seeds
         )
     names = [factor.name for factor in factors]
     if len(set(names)) != len(names):
@@ -78,7 +78,7 @@ def load_sweep_config(source: Path) -> SweepExpansion:
         content = yaml.safe_dump(effective, sort_keys=False)
         configs.append(
             ExpandedConfig(
-                ConfigSnapshot(normalized, content),
+                ConfigSnapshot(source, content),
                 ParameterSet(f"parameter_set_{ordinal:06d}", choices),
             )
         )

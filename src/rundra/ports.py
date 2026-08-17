@@ -312,6 +312,7 @@ class StageRequest:
     source_root: PurePath
     task_ids: tuple[TaskId, ...] = ()
     task_configs: Mapping[TaskId, ConfigSnapshot] = field(default_factory=dict)
+    task_manifest: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.run_id) is not RunId:
@@ -341,6 +342,8 @@ class StageRequest:
             raise TypeError("StageRequest task_configs must map TaskIds to configs")
         if task_configs and set(task_configs) != set(task_ids):
             raise ValueError("StageRequest task_configs must match task_ids")
+        if self.task_manifest is not None and type(self.task_manifest) is not str:
+            raise TypeError("StageRequest task_manifest must be a string or None")
         object.__setattr__(self, "task_ids", task_ids)
         object.__setattr__(self, "task_configs", MappingProxyType(task_configs))
 

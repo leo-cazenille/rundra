@@ -184,6 +184,34 @@ class RsyncStager:
                 ) from error
             task_config_paths[task_id] = task_path
 
+        manifest_path = workspace.metadata / "tasks.json"
+        if request.task_manifest is not None:
+            try:
+                with tempfile.NamedTemporaryFile(
+                    prefix="rundra-task-manifest-", suffix=".json"
+                ) as stream:
+                    stream.write((request.task_manifest + "\n").encode("utf-8"))
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                    self._upload(
+                        (
+                            self._executable,
+                            "--archive",
+                            "--protect-args",
+                            "--",
+                            stream.name,
+                            _remote_destination(host, manifest_path, directory=False),
+                        ),
+                        kind="Task manifest",
+                        run_id=str(request.run_id),
+                    )
+            except RsyncStagerError:
+                raise
+            except OSError as error:
+                raise RsyncUploadError(
+                    f"Could not prepare Task manifest for Run {request.run_id}"
+                ) from error
+
         try:
             seal = self._transport.run(
                 _seal_command(workspace.source, workspace.inputs)
@@ -211,6 +239,17 @@ class RsyncStager:
                     ArtifactKind.EFFECTIVE_CONFIG,
                     workspace.config,
                     size_bytes=len(config_content),
+                ),
+                *(
+                    (
+                        Artifact(
+                            ArtifactKind.PROVENANCE_METADATA,
+                            manifest_path,
+                            size_bytes=len(request.task_manifest.encode("utf-8")) + 1,
+                        ),
+                    )
+                    if request.task_manifest is not None
+                    else ()
                 ),
             ),
             task_configs=task_config_paths,

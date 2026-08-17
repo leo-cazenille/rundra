@@ -348,6 +348,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 seeds=plan_inputs.seeds,
                 launch=plan_inputs.launch,
                 preparation=plan_inputs.preparation_plan,
+                sweep=plan_inputs.sweep,
             )
     elif arguments.command == "targets":
         result = targets_operation(arguments.targets_file)
@@ -413,6 +414,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 preparation=run_inputs.preparation_plan,
                 preparation_storage=run_inputs.preparation_storage,
                 progress=progress,
+                sweep=run_inputs.sweep,
             )
     elif arguments.command == "submit":
         resolved = resolve_run_inputs_operation(
@@ -452,6 +454,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 preparation=submit_inputs.preparation_plan,
                 preparation_storage=submit_inputs.preparation_storage,
                 progress=progress,
+                sweep=submit_inputs.sweep,
             )
     elif arguments.command == "status":
         result = status_operation(arguments.run_id, JsonRunStore(arguments.data_dir))

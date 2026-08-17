@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import stat
 from dataclasses import replace
@@ -169,6 +170,48 @@ def test_local_stage_creates_isolated_task_mutation_directories(
             (workspace.source / "main.py").write_text("changed\n", encoding="utf-8")
     finally:
         _restore_writes(workspace.source, workspace.inputs)
+
+
+def test_local_stage_writes_retrievable_task_manifest(tmp_path: Path) -> None:
+    source = _make_source(tmp_path)
+    task_ids = (TaskId.from_ordinal(0), TaskId.from_ordinal(1))
+    manifest = json.dumps(
+        {
+            "schema_version": 1,
+            "tasks": [
+                {
+                    "task_id": str(task_ids[0]),
+                    "seed": 7,
+                    "parameter_set": {
+                        "id": "parameter_set_000000",
+                        "choices": {"regime": "ballistic"},
+                    },
+                    "config_sha256": "a" * 64,
+                    "output": f"output/{task_ids[0]}",
+                }
+            ],
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    request = replace(
+        _request(source, tmp_path / "workspace"),
+        task_ids=task_ids,
+        task_configs={
+            task_id: ConfigSnapshot(source / f"{task_id}.yaml", f"seed: {ordinal}\n")
+            for ordinal, task_id in enumerate(task_ids)
+        },
+        task_manifest=manifest,
+    )
+
+    workspace = LocalStager().stage(request)
+
+    assert json.loads((workspace.metadata / "tasks.json").read_text()) == json.loads(
+        manifest
+    )
+    assert workspace.artifacts[-1].kind is ArtifactKind.PROVENANCE_METADATA
+    assert workspace.artifacts[-1].path == workspace.metadata / "tasks.json"
+    assert set(workspace.task_configs) == set(task_ids)
 
 
 def test_local_stage_is_collision_safe_and_run_snapshots_are_independent(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -25,8 +27,9 @@ from rundra.domain.states import (
     RetrievalState,
     aggregate_execution_state,
 )
+from rundra.domain.sweeps import ExpandedConfig
 from rundra.orchestration.models import SLURM_ARRAY, ExecutionPlan, ExecutionUnit
-from rundra.orchestration.planner import create_plan
+from rundra.orchestration.planner import create_plan, create_sweep_plan
 from rundra.orchestration.preparation import (
     RemotePreparationSpec,
     build_remote_preparation_command,
@@ -549,6 +552,9 @@ class OrchestrationService:
                         if request.plan.version == 3
                         else {}
                     ),
+                    task_manifest=(
+                        _task_manifest(units) if request.plan.version == 3 else None
+                    ),
                 )
             )
         except Exception as error:
@@ -873,13 +879,38 @@ class OrchestrationService:
                 code="PLAN_MISMATCH",
                 message="Execution plan resources do not match the experiment",
             )
-        expected_plan = create_plan(
-            request.experiment,
-            units[0].config,
-            request.plan.target,
-            seeds=tuple(unit.seed for unit in units),
-            preparation=request.plan.preparation,
-        )
+        if request.plan.version == 3:
+            parameter_configs: list[ExpandedConfig] = []
+            seen_parameters: set[str] = set()
+            for unit in units:
+                assert unit.parameter_set is not None
+                if unit.parameter_set.id not in seen_parameters:
+                    parameter_configs.append(
+                        ExpandedConfig(unit.config, unit.parameter_set)
+                    )
+                    seen_parameters.add(unit.parameter_set.id)
+            first_parameter = parameter_configs[0].parameter_set
+            assert first_parameter is not None
+            seed_values = tuple(
+                unit.seed
+                for unit in units
+                if unit.parameter_set == first_parameter
+            )
+            expected_plan = create_sweep_plan(
+                request.experiment,
+                parameter_configs,
+                request.plan.target,
+                seeds=seed_values,
+                preparation=request.plan.preparation,
+            )
+        else:
+            expected_plan = create_plan(
+                request.experiment,
+                units[0].config,
+                request.plan.target,
+                seeds=tuple(unit.seed for unit in units),
+                preparation=request.plan.preparation,
+            )
         if request.plan != expected_plan:
             raise OrchestrationError(
                 code="PLAN_MISMATCH",
@@ -1178,6 +1209,31 @@ def _container_working_directory(value: PurePath | None) -> PurePath:
     return _CONTAINER_SOURCE / value
 
 
+def _task_manifest(units: tuple[ExecutionUnit, ...]) -> str:
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "tasks": [
+                {
+                    "task_id": str(unit.task_id),
+                    "seed": unit.seed,
+                    "parameter_set": {
+                        "id": unit.parameter_set.id,
+                        "choices": dict(unit.parameter_set.choices),
+                    },
+                    "config_sha256": hashlib.sha256(
+                        unit.config.content.encode("utf-8")
+                    ).hexdigest(),
+                    "output": f"output/{unit.task_id}",
+                }
+                for unit in units
+                if unit.parameter_set is not None
+            ],
+        },
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
 def _single_observation(
     observations: tuple[SchedulerObservation, ...],
     expected_reference: object,

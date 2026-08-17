@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from datetime import timedelta
+from hashlib import sha256
 from typing import Any
 
 from rundra.cli.doctor import DoctorValue
@@ -319,6 +320,19 @@ def _plan_document(plan: ExecutionPlan) -> dict[str, Any]:
                 "config": str(unit.config.source),
                 "command": _command_document(unit.command),
                 "resources": _resources_document(unit.resources),
+                **(
+                    {
+                        "parameter_set": {
+                            "id": unit.parameter_set.id,
+                            "choices": dict(unit.parameter_set.choices),
+                        },
+                        "config_sha256": sha256(
+                            unit.config.content.encode("utf-8")
+                        ).hexdigest(),
+                    }
+                    if unit.parameter_set is not None
+                    else {}
+                ),
             }
             for unit in plan.units
         ],

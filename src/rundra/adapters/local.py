@@ -239,6 +239,11 @@ class LocalStager:
                 task_path = inputs / f"{task_id}.yaml"
                 task_path.write_text(task_config.content, encoding="utf-8")
                 task_config_paths[task_id] = task_path
+            manifest_path = metadata / "tasks.json"
+            if request.task_manifest is not None:
+                manifest_path.write_text(
+                    request.task_manifest + "\n", encoding="utf-8"
+                )
             _seal(source_snapshot)
             _seal(inputs)
         except Exception as error:
@@ -264,6 +269,17 @@ class LocalStager:
                     ArtifactKind.EFFECTIVE_CONFIG,
                     config,
                     size_bytes=len(config_content),
+                ),
+                *(
+                    (
+                        Artifact(
+                            ArtifactKind.PROVENANCE_METADATA,
+                            manifest_path,
+                            size_bytes=len(request.task_manifest.encode("utf-8")) + 1,
+                        ),
+                    )
+                    if request.task_manifest is not None
+                    else ()
                 ),
             ),
             task_configs=task_config_paths,

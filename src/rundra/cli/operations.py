@@ -22,7 +22,7 @@ from rundra.adapters import (
     validate_slurm_resources,
 )
 from rundra.config.errors import ConfigError
-from rundra.config.experiments import load_config_snapshot, load_experiment
+from rundra.config.experiments import load_experiment
 from rundra.config.launch import (
     LaunchResolutionError,
     LaunchValues,
@@ -32,6 +32,7 @@ from rundra.config.launch import (
     discover_user_launch,
     resolve_launch,
 )
+from rundra.config.sweeps import load_sweep_config
 from rundra.config.targets import load_targets, load_targets_config
 from rundra.domain.models import (
     Artifact,
@@ -55,8 +56,9 @@ from rundra.domain.states import (
     RetrievalState,
     aggregate_retrieval_state,
 )
+from rundra.domain.sweeps import SweepExpansion
 from rundra.orchestration.models import ExecutionPlan, PlanningError
-from rundra.orchestration.planner import create_plan, expand_seeds
+from rundra.orchestration.planner import create_plan, create_sweep_plan, expand_seeds
 from rundra.orchestration.preparation import (
     PreparationError,
     RemotePreparationSpec,
@@ -367,6 +369,7 @@ class ResolvedRunInputs:
     rebuild: bool = False
     offline: bool = False
     preparation_storage: PreparationStorageConfig = PreparationStorageConfig()
+    sweep: SweepExpansion | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -391,6 +394,8 @@ class ResolvedRunInputs:
             raise TypeError("ResolvedRunInputs resolution must be ResolvedLaunch")
         if type(self.preparation_storage) is not PreparationStorageConfig:
             raise TypeError("ResolvedRunInputs preparation storage is invalid")
+        if self.sweep is not None and type(self.sweep) is not SweepExpansion:
+            raise TypeError("ResolvedRunInputs sweep is invalid")
         _validate_preparation_inputs(
             self.preparation,
             self.mutable_source,
@@ -424,18 +429,28 @@ class ResolvedRunInputs:
             ),
         )
         if len(self.seeds) == 1:
+            seed_source = (
+                "config"
+                if self.sweep is not None and self.sweep.seeds == self.seeds
+                else self.resolution.sources.get("seed", "generated")
+            )
             return LaunchResolutionValue(
                 base.profile,
                 {**base.values, "seed": self.seeds[0]},
                 {
                     **base.sources,
-                    "seed": self.resolution.sources.get("seed", "generated"),
+                    "seed": seed_source,
                 },
             )
+        seeds_source = (
+            "config"
+            if self.sweep is not None and self.sweep.seeds == self.seeds
+            else "cli"
+        )
         return LaunchResolutionValue(
             base.profile,
             {**base.values, "seeds": f"{self.seeds[0]}:{self.seeds[-1]}"},
-            {**base.sources, "seeds": "cli"},
+            {**base.sources, "seeds": seeds_source},
         )
 
     @property
@@ -457,6 +472,7 @@ class ResolvedPlanInputs:
     prepare_location: str = "auto"
     rebuild: bool = False
     offline: bool = False
+    sweep: SweepExpansion | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.config, Path) or not isinstance(self.targets_file, Path):
@@ -473,6 +489,8 @@ class ResolvedPlanInputs:
             raise TypeError("ResolvedPlanInputs resolution must be ResolvedLaunch")
         if self.source_root is not None and not isinstance(self.source_root, Path):
             raise TypeError("ResolvedPlanInputs source_root must be a Path or None")
+        if self.sweep is not None and type(self.sweep) is not SweepExpansion:
+            raise TypeError("ResolvedPlanInputs sweep is invalid")
         _validate_preparation_inputs(
             self.preparation,
             self.source_root is not None,
@@ -498,10 +516,17 @@ class ResolvedPlanInputs:
             base = _launch_resolution_value(
                 self.resolution, ("config", "target", "targets_file")
             )
+            seeds_source = (
+                "config"
+                if self.sweep is not None
+                and self.sweep.seeds is not None
+                and self.seeds == f"{self.sweep.seeds[0]}:{self.sweep.seeds[-1]}"
+                else "cli"
+            )
             return LaunchResolutionValue(
                 base.profile,
                 {**base.values, "seeds": self.seeds},
-                {**base.sources, "seeds": "cli"},
+                {**base.sources, "seeds": seeds_source},
             )
         return _launch_resolution_value(
             self.resolution, ("config", "seed", "target", "targets_file")
@@ -606,10 +631,12 @@ def plan_operation(
     seeds: object = None,
     launch: LaunchResolutionValue | None = None,
     preparation: PreparationPlan | None = None,
+    sweep: SweepExpansion | None = None,
 ) -> OperationResult[PlanValue]:
     try:
         experiment = load_experiment(experiment_source)
-        config = load_config_snapshot(config_source)
+        expansion = sweep or load_sweep_config(config_source)
+        config = expansion.configs[0].config
         targets = load_targets(targets_source)
         if target_name not in targets:
             return OperationResult.failure(
@@ -626,12 +653,23 @@ def plan_operation(
         unsupported = _unsupported_execution_target(target, experiment)
         if unsupported is not None:
             return OperationResult.failure("plan", unsupported)
-        plan = create_plan(
-            experiment,
-            config,
-            target,
-            seeds=expand_seeds(seed=seed, seeds=seeds),
-            preparation=preparation,
+        seed_values = expand_seeds(seed=seed, seeds=seeds)
+        plan = (
+            create_sweep_plan(
+                experiment,
+                expansion.configs,
+                target,
+                seeds=seed_values,
+                preparation=preparation,
+            )
+            if expansion.is_sweep
+            else create_plan(
+                experiment,
+                config,
+                target,
+                seeds=seed_values,
+                preparation=preparation,
+            )
         )
         return OperationResult.success("plan", PlanValue(plan, launch))
     except ConfigError as error:
@@ -736,7 +774,26 @@ def resolve_plan_inputs_operation(
             ),
         )
     values = resolved.values
+    assert values.config is not None
+    sweep = None
+    if values.config.is_file():
+        try:
+            sweep = load_sweep_config(values.config)
+        except ConfigError as error:
+            return OperationResult.failure("plan", _config_error(error))
     resolved_seed = values.seed
+    if requested_seed_forms == 0 and sweep is not None and sweep.seeds is not None:
+        if len(sweep.seeds) == 1:
+            resolved_seed = sweep.seeds[0]
+            values = replace(values, seed=resolved_seed)
+            resolved = ResolvedLaunch(
+                values,
+                {**resolved.sources, "seed": "config"},
+                resolved.profile,
+            )
+        else:
+            seeds = f"{sweep.seeds[0]}:{sweep.seeds[-1]}"
+            resolved_seed = None
     if seeds is not None:
         resolved_seed = None
         resolved = ResolvedLaunch(
@@ -786,6 +843,7 @@ def resolve_plan_inputs_operation(
             prepare_location=prepare_location,
             rebuild=rebuild,
             offline=offline,
+            sweep=sweep,
         ),
     )
 
@@ -906,6 +964,31 @@ def resolve_run_inputs_operation(
             ),
         )
     values = resolved.values
+    assert values.config is not None
+    sweep = None
+    if values.config.is_file():
+        try:
+            sweep = load_sweep_config(values.config)
+        except ConfigError as error:
+            return OperationResult.failure(operation, _config_error(error))
+    if (
+        explicit_seeds is None
+        and seed is None
+        and not random_seed
+        and sweep is not None
+        and sweep.seeds is not None
+    ):
+        explicit_seeds = sweep.seeds
+        values = replace(values, seed=None)
+        resolved = ResolvedLaunch(
+            values,
+            {
+                name: source
+                for name, source in resolved.sources.items()
+                if name != "seed"
+            },
+            resolved.profile,
+        )
     if explicit_seeds is None and (values.seed is None or random_seed):
         generator = seed_factory or (lambda: secrets.randbits(63))
         generated_seed = generator()
@@ -957,6 +1040,7 @@ def resolve_run_inputs_operation(
             preparation_storage=(
                 user.preparation if user is not None else PreparationStorageConfig()
             ),
+            sweep=sweep,
         ),
     )
 
@@ -1073,6 +1157,7 @@ def run_operation(
     preparation: PreparationPlan | None = None,
     preparation_storage: PreparationStorageConfig = _DEFAULT_PREPARATION_STORAGE,
     progress: ProgressObserver | None = None,
+    sweep: SweepExpansion | None = None,
 ) -> OperationResult[RunValue]:
     try:
         _report_progress(
@@ -1082,8 +1167,10 @@ def run_operation(
             f"experiment={experiment_source} config={config_source}",
         )
         experiment = load_experiment(experiment_source)
-        config = load_config_snapshot(config_source)
+        expansion = sweep or load_sweep_config(config_source)
+        config = expansion.configs[0].config
         seed_values = _execution_seed_values(seed=seed, seeds=seeds)
+        task_total = len(seed_values) * len(expansion.configs)
         targets_config = load_targets_config(targets_source)
         targets = targets_config.targets
         if target_name not in targets:
@@ -1101,7 +1188,7 @@ def run_operation(
             ProgressPhase.RESOLVE,
             1,
             _target_progress_message(target),
-            task_total=len(seed_values),
+            task_total=task_total,
         )
         target_storage = targets_config.preparation.get(
             target_name, PreparationStorageConfig()
@@ -1200,12 +1287,22 @@ def run_operation(
                 "not configured",
                 task_total=len(seed_values),
             )
-        plan = create_plan(
-            effective_experiment,
-            config,
-            target,
-            seeds=seed_values,
-            preparation=preparation,
+        plan = (
+            create_sweep_plan(
+                effective_experiment,
+                expansion.configs,
+                target,
+                seeds=seed_values,
+                preparation=preparation,
+            )
+            if expansion.is_sweep
+            else create_plan(
+                effective_experiment,
+                config,
+                target,
+                seeds=seed_values,
+                preparation=preparation,
+            )
         )
         service = OrchestrationService(
             store=store,
@@ -1291,6 +1388,7 @@ def submit_operation(
     preparation: PreparationPlan | None = None,
     preparation_storage: PreparationStorageConfig = _DEFAULT_PREPARATION_STORAGE,
     progress: ProgressObserver | None = None,
+    sweep: SweepExpansion | None = None,
 ) -> OperationResult[RunValue]:
     try:
         _report_progress(
@@ -1300,8 +1398,10 @@ def submit_operation(
             f"experiment={experiment_source} config={config_source}",
         )
         experiment = load_experiment(experiment_source)
-        config = load_config_snapshot(config_source)
+        expansion = sweep or load_sweep_config(config_source)
+        config = expansion.configs[0].config
         seed_values = _execution_seed_values(seed=seed, seeds=seeds)
+        task_total = len(seed_values) * len(expansion.configs)
         targets_config = load_targets_config(targets_source)
         targets = targets_config.targets
         if target_name not in targets:
@@ -1319,7 +1419,7 @@ def submit_operation(
             ProgressPhase.RESOLVE,
             1,
             _target_progress_message(target),
-            task_total=len(seed_values),
+            task_total=task_total,
         )
         target_storage = targets_config.preparation.get(
             target_name, PreparationStorageConfig()
@@ -1403,12 +1503,22 @@ def submit_operation(
                 "not configured",
                 task_total=len(seed_values),
             )
-        plan = create_plan(
-            effective_experiment,
-            config,
-            target,
-            seeds=seed_values,
-            preparation=preparation,
+        plan = (
+            create_sweep_plan(
+                effective_experiment,
+                expansion.configs,
+                target,
+                seeds=seed_values,
+                preparation=preparation,
+            )
+            if expansion.is_sweep
+            else create_plan(
+                effective_experiment,
+                config,
+                target,
+                seeds=seed_values,
+                preparation=preparation,
+            )
         )
         service = OrchestrationService(
             store=store,

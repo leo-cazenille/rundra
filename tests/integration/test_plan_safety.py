@@ -94,3 +94,58 @@ targets:
     assert _snapshot(tmp_path) == before
     assert not workspace.exists()
     assert not (tmp_path / "records").exists()
+
+
+def test_plan_expands_parameter_sets_and_seeds_as_v3(tmp_path: Path) -> None:
+    experiment = tmp_path / "experiment.yaml"
+    experiment.write_text(
+        """version: 1
+experiment: {name: sweep-plan}
+command:
+  argv: [/bin/sh, run.sh, --config, "{config}", --seed, "{seed}"]
+container: {image: image.sif, gpu: false}
+resources: {nodes: 1, tasks: 1, cpus_per_task: 1, memory: 1GiB, walltime: "00:05:00"}
+outputs: {include: [results/**]}
+""",
+        encoding="utf-8",
+    )
+    config = tmp_path / "sweep.yaml"
+    config.write_text(
+        """_rundr: {version: 1}
+parameters:
+  speed: {batch_options: [1, 2]}
+""",
+        encoding="utf-8",
+    )
+    targets = tmp_path / "targets.yaml"
+    targets.write_text(
+        f"""version: 1
+targets:
+  cluster:
+    transport: {{type: ssh, host: cluster}}
+    scheduler: {{type: slurm}}
+    staging: {{type: rsync}}
+    container: {{type: apptainer}}
+    workspace: {tmp_path / "workspace"}
+""",
+        encoding="utf-8",
+    )
+
+    result = operations.plan_operation(
+        experiment, config, targets, "cluster", seeds="0:1"
+    )
+
+    assert result.error is None
+    document = result_document(result)
+    assert document["format_version"] == 3
+    assert document["plan"]["version"] == 3
+    units = document["plan"]["units"]
+    assert len(units) == 4
+    assert [unit["seed"] for unit in units] == [0, 1, 0, 1]
+    assert [unit["parameter_set"]["choices"] for unit in units] == [
+        {"parameters.speed": 1},
+        {"parameters.speed": 1},
+        {"parameters.speed": 2},
+        {"parameters.speed": 2},
+    ]
+    assert all(len(unit["config_sha256"]) == 64 for unit in units)
