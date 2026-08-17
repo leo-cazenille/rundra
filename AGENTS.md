@@ -227,3 +227,13 @@ prefer the latter.
 
 Do not generalize beyond an observed or clearly documented requirement merely
 because a future backend might need it.
+
+## SSH Access
+For SSH access to the shoal cluster, use:
+
+    ssh -F /var/local/codex/shoal/ssh/config HOST COMMAND
+
+Allowed hosts are fishvision and shoal1 through shoal8.
+
+Do not alter SSH configuration, keys, known_hosts, or authorized_keys.
+Do not use SSH port forwarding or agent forwarding.
