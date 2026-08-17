@@ -1214,7 +1214,7 @@ def run_operation(
                 ProgressPhase.PREPARE,
                 1,
                 f"location={preparation.requested_location} source={preparation.source_mode} rebuild={preparation.rebuild} offline={preparation.offline}",
-                task_total=len(seed_values),
+                task_total=task_total,
             )
             _validate_preparation_compatibility(experiment, preparation.recipe)
         unsupported = _unsupported_execution_target(target, experiment)
@@ -1292,7 +1292,7 @@ def run_operation(
                     preparation_record.image_action,
                     preparation_record.builder_location or "not_requested",
                 ),
-                task_total=len(seed_values),
+                task_total=task_total,
             )
         else:
             _report_progress(
@@ -1300,7 +1300,7 @@ def run_operation(
                 ProgressPhase.PREPARE,
                 2,
                 "not configured",
-                task_total=len(seed_values),
+                task_total=task_total,
             )
         plan = (
             create_sweep_plan(
@@ -1364,7 +1364,7 @@ def run_operation(
             6,
             f"run={record.run.id} state={record.run.state.value} retrieval={record.run.retrieval_state.value}",
             record.run.id,
-            task_total=len(seed_values),
+            task_total=task_total,
         )
         return OperationResult.success("run", RunValue(record, launch))
     except ConfigError as error:
@@ -1445,7 +1445,7 @@ def submit_operation(
                 ProgressPhase.PREPARE,
                 1,
                 f"location={preparation.requested_location} source={preparation.source_mode} rebuild={preparation.rebuild} offline={preparation.offline}",
-                task_total=len(seed_values),
+                task_total=task_total,
             )
             _validate_preparation_compatibility(experiment, preparation.recipe)
         unsupported = _unsupported_execution_target(
@@ -1508,7 +1508,7 @@ def submit_operation(
                     preparation_record.image_action,
                     preparation_record.builder_location or "not_requested",
                 ),
-                task_total=len(seed_values),
+                task_total=task_total,
             )
         else:
             _report_progress(
@@ -1516,7 +1516,7 @@ def submit_operation(
                 ProgressPhase.PREPARE,
                 2,
                 "not configured",
-                task_total=len(seed_values),
+                task_total=task_total,
             )
         plan = (
             create_sweep_plan(
@@ -1562,7 +1562,7 @@ def submit_operation(
             6,
             f"run={result.record.run.id} state={result.record.run.state.value} submission durable",
             result.record.run.id,
-            task_total=len(seed_values),
+            task_total=task_total,
         )
         return OperationResult.success("submit", RunValue(result.record, launch))
     except ConfigError as error:

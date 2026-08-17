@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import secrets
 import shlex
 import shutil
@@ -154,88 +153,45 @@ class RsyncStager:
         self._upload(tuple(source_argv), kind="source", run_id=str(request.run_id))
 
         config_content = request.config.content.encode("utf-8")
+        task_config_paths = {
+            task_id: workspace.inputs / f"{task_id}.yaml"
+            for task_id in request.task_configs
+        }
+        manifest_path = workspace.metadata / "tasks.json"
         try:
-            with tempfile.NamedTemporaryFile(
-                prefix="rundra-config-", suffix=".yaml"
-            ) as stream:
-                stream.write(config_content)
-                stream.flush()
-                os.fsync(stream.fileno())
-                config_argv = (
-                    *self._rsync_prefix,
-                    "--archive",
-                    "--protect-args",
-                    "--",
-                    stream.name,
-                    _remote_destination(host, workspace.config, directory=False),
-                )
+            with tempfile.TemporaryDirectory(prefix="rundra-inputs-") as temporary:
+                batch_root = Path(temporary)
+                batch_inputs = batch_root / "input"
+                batch_inputs.mkdir()
+                (batch_inputs / "config.yaml").write_bytes(config_content)
+                for task_id, task_config in request.task_configs.items():
+                    (batch_inputs / f"{task_id}.yaml").write_text(
+                        task_config.content, encoding="utf-8"
+                    )
+                if request.task_manifest is not None:
+                    batch_metadata = batch_root / "metadata"
+                    batch_metadata.mkdir()
+                    (batch_metadata / "tasks.json").write_text(
+                        request.task_manifest + "\n", encoding="utf-8"
+                    )
                 self._upload(
-                    config_argv, kind="effective config", run_id=str(request.run_id)
+                    (
+                        *self._rsync_prefix,
+                        "--archive",
+                        "--protect-args",
+                        "--",
+                        f"{batch_root}/",
+                        _remote_destination(host, workspace.root, directory=True),
+                    ),
+                    kind="effective inputs",
+                    run_id=str(request.run_id),
                 )
         except RsyncStagerError:
             raise
         except OSError as error:
             raise RsyncUploadError(
-                f"Could not prepare effective config for Run {request.run_id}"
+                f"Could not prepare effective inputs for Run {request.run_id}"
             ) from error
-
-        task_config_paths: dict[TaskId, PurePath] = {}
-        for task_id, task_config in request.task_configs.items():
-            task_path = workspace.inputs / f"{task_id}.yaml"
-            try:
-                with tempfile.NamedTemporaryFile(
-                    prefix="rundra-task-config-", suffix=".yaml"
-                ) as stream:
-                    stream.write(task_config.content.encode("utf-8"))
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                    self._upload(
-                        (
-                            *self._rsync_prefix,
-                            "--archive",
-                            "--protect-args",
-                            "--",
-                            stream.name,
-                            _remote_destination(host, task_path, directory=False),
-                        ),
-                        kind="Task effective config",
-                        run_id=str(request.run_id),
-                    )
-            except RsyncStagerError:
-                raise
-            except OSError as error:
-                raise RsyncUploadError(
-                    f"Could not prepare Task config for Run {request.run_id}"
-                ) from error
-            task_config_paths[task_id] = task_path
-
-        manifest_path = workspace.metadata / "tasks.json"
-        if request.task_manifest is not None:
-            try:
-                with tempfile.NamedTemporaryFile(
-                    prefix="rundra-task-manifest-", suffix=".json"
-                ) as stream:
-                    stream.write((request.task_manifest + "\n").encode("utf-8"))
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                    self._upload(
-                        (
-                            *self._rsync_prefix,
-                            "--archive",
-                            "--protect-args",
-                            "--",
-                            stream.name,
-                            _remote_destination(host, manifest_path, directory=False),
-                        ),
-                        kind="Task manifest",
-                        run_id=str(request.run_id),
-                    )
-            except RsyncStagerError:
-                raise
-            except OSError as error:
-                raise RsyncUploadError(
-                    f"Could not prepare Task manifest for Run {request.run_id}"
-                ) from error
 
         try:
             seal = self._transport.run(

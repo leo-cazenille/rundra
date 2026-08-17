@@ -26,6 +26,7 @@ from rundra.domain.models import (
     ResourceRequest,
     RunId,
     Target,
+    TaskId,
 )
 from rundra.ports import (
     CapabilityCheck,
@@ -106,7 +107,7 @@ def test_rsync_stager_uploads_live_tree_exact_config_and_seals_snapshot(
     ) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         if len(calls) == 2:
-            config_bytes.append(Path(argv[-2]).read_bytes())
+            config_bytes.append((Path(argv[-2]) / "input/config.yaml").read_bytes())
         assert options == {
             "capture_output": True,
             "check": False,
@@ -180,7 +181,7 @@ def test_rsync_stager_uploads_live_tree_exact_config_and_seals_snapshot(
         f"cluster-alias:{run_root}/source/",
     )
     assert calls[1][0:4] == ("rsync", "--archive", "--protect-args", "--")
-    assert calls[1][-1] == f"cluster-alias:{run_root}/input/config.yaml"
+    assert calls[1][-1] == f"cluster-alias:{run_root}/"
     assert config_bytes == [b"value: exact\r\n"]
     assert transport.calls[-1] == Command(
         (
@@ -196,6 +197,60 @@ def test_rsync_stager_uploads_live_tree_exact_config_and_seals_snapshot(
     assert workspace.artifacts[1].kind is ArtifactKind.EFFECTIVE_CONFIG
     assert workspace.artifacts[1].size_bytes == len(b"value: exact\r\n")
     assert (source / "untracked.txt").exists()
+
+
+def test_rsync_stager_batches_all_task_configs_and_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = _source(tmp_path)
+    task_ids = tuple(TaskId.from_ordinal(index) for index in range(3))
+    request = replace(
+        _request(source),
+        task_ids=task_ids,
+        task_configs={
+            task_id: ConfigSnapshot(
+                PurePosixPath(f"config-{index}.yaml"), f"value: {index}\n"
+            )
+            for index, task_id in enumerate(task_ids)
+        },
+        task_manifest='{"schema_version":1,"tasks":[]}',
+    )
+    transport = RecordingTransport(deque([0] * 10))
+    calls: list[tuple[str, ...]] = []
+    staged_files: dict[str, str] = {}
+    monkeypatch.setattr(shutil, "which", lambda executable: "/usr/bin/rsync")
+
+    def run(
+        argv: tuple[str, ...], **options: object
+    ) -> subprocess.CompletedProcess[str]:
+        del options
+        calls.append(argv)
+        if len(calls) == 2:
+            root = Path(argv[-2])
+            staged_files.update(
+                {
+                    path.relative_to(root).as_posix(): path.read_text(encoding="utf-8")
+                    for path in root.rglob("*")
+                    if path.is_file()
+                }
+            )
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    workspace = RsyncStager(transport).stage(request)
+
+    assert len(calls) == 2
+    assert staged_files == {
+        "input/config.yaml": "value: exact\n",
+        "input/task_000000.yaml": "value: 0\n",
+        "input/task_000001.yaml": "value: 1\n",
+        "input/task_000002.yaml": "value: 2\n",
+        "metadata/tasks.json": '{"schema_version":1,"tasks":[]}\n',
+    }
+    assert workspace.task_configs == {
+        task_id: workspace.inputs / f"{task_id}.yaml" for task_id in task_ids
+    }
 
 
 def test_rsync_stager_reports_capability_and_upload_failures_without_data_leaks(
@@ -317,7 +372,7 @@ def test_rsync_stager_reports_config_and_sealing_failures(
             argv, next(outcomes), "", ""
         ),
     )
-    with pytest.raises(RsyncUploadError, match="effective config"):
+    with pytest.raises(RsyncUploadError, match="effective inputs"):
         RsyncStager(RecordingTransport(deque([0, 0, 0]))).stage(request)
 
     monkeypatch.setattr(

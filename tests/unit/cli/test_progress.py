@@ -60,6 +60,7 @@ def test_combined_verbose_progress_reports_details_without_overcounting() -> Non
     run_id = RunId("run_0123456789abcdef0123456789abcdef")
     reporter(ProgressEvent(ProgressPhase.RESOLVE, 1, 6, "target=shoal"))
     reporter(ProgressEvent(ProgressPhase.WAIT, 104, 1006, "tasks=100/1000", run_id))
+    reporter(ProgressEvent(ProgressPhase.PREPARE, 2, 506, "cache probe", run_id))
     reporter(ProgressEvent(ProgressPhase.WAIT, 504, 1006, "tasks=500/1000", run_id))
     reporter(
         ProgressEvent(ProgressPhase.COMPLETE, 1006, 1006, "state=SUCCEEDED", run_id)
@@ -76,6 +77,7 @@ def test_combined_verbose_progress_reports_details_without_overcounting() -> Non
     assert bars[0].lines == [
         "[rundr] resolve: target=shoal",
         "[rundr] wait: tasks=100/1000",
+        "[rundr] prepare: cache probe",
         "[rundr] wait: tasks=500/1000",
         "[rundr] complete: state=SUCCEEDED",
     ]
