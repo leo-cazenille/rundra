@@ -381,8 +381,11 @@ class RsyncStager:
             validate_remote_workspace(request.workspace)
         except RemoteWorkspaceError as error:
             raise RsyncRetrievalError(str(error)) from error
-        if any("\x00" in pattern for pattern in request.patterns):
-            raise RsyncRetrievalError("Fetch patterns must not contain NUL")
+        if any(
+            "\x00" in pattern or "\n" in pattern or "\r" in pattern
+            for pattern in request.patterns
+        ):
+            raise RsyncRetrievalError("Fetch patterns must not contain NUL or newlines")
         destination = _fetch_destination(request.destination)
         try:
             reject_destination_tree_symlinks(destination)
@@ -404,30 +407,34 @@ class RsyncStager:
                     "Local retrieval destination is not a directory"
                 )
 
-        output_argv: list[str] = [
-            *self._rsync_prefix,
-            "--archive",
-            "--no-links",
-            "--protect-args",
-            "--delay-updates",
-            "--prune-empty-dirs",
-            "--include",
-            "*/",
-        ]
-        for pattern in request.patterns:
-            output_argv.extend(("--include", pattern))
-        output_argv.extend(
-            (
-                "--exclude",
-                "*",
+        with tempfile.TemporaryDirectory(prefix="rundra-rsync-filters-") as temporary:
+            filters = Path(temporary) / "filters"
+            filters.write_text(
+                "".join(
+                    (
+                        "+ */\n",
+                        *(f"+ {pattern}\n" for pattern in request.patterns),
+                        "- *\n",
+                    )
+                ),
+                encoding="utf-8",
+            )
+            output_argv = (
+                *self._rsync_prefix,
+                "--archive",
+                "--no-links",
+                "--protect-args",
+                "--delay-updates",
+                "--prune-empty-dirs",
+                "--filter",
+                f"merge {filters}",
                 "--",
                 _remote_destination(
                     self._host, request.workspace.outputs, directory=True
                 ),
                 f"{output_destination}/",
             )
-        )
-        self._retrieve(tuple(output_argv), tree="output")
+            self._retrieve(output_argv, tree="output")
         self._retrieve_tree(
             self._host,
             request.workspace.logs,

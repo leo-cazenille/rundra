@@ -482,6 +482,7 @@ def test_rsync_fetch_is_idempotent_and_returns_result_log_metadata_artifacts(
 ) -> None:
     monkeypatch.setattr(shutil, "which", lambda executable: "/usr/bin/rsync")
     calls: list[tuple[str, ...]] = []
+    filter_contents: list[str] = []
     generation = 0
 
     def run(
@@ -489,6 +490,11 @@ def test_rsync_fetch_is_idempotent_and_returns_result_log_metadata_artifacts(
     ) -> subprocess.CompletedProcess[str]:
         nonlocal generation
         calls.append(argv)
+        if "--filter" in argv:
+            filter_argument = argv[argv.index("--filter") + 1]
+            filter_contents.append(
+                Path(filter_argument.removeprefix("merge ")).read_text(encoding="utf-8")
+            )
         destination = Path(argv[-1])
         destination.mkdir(parents=True, exist_ok=True)
         tree = len(calls) % 3
@@ -513,24 +519,22 @@ def test_rsync_fetch_is_idempotent_and_returns_result_log_metadata_artifacts(
     second = stager.fetch(request)
 
     workspace = _workspace()
-    assert calls[:3] == [
-        (
-            "rsync",
-            "--archive",
-            "--no-links",
-            "--protect-args",
-            "--delay-updates",
-            "--prune-empty-dirs",
-            "--include",
-            "*/",
-            "--include",
-            "results/**",
-            "--exclude",
-            "*",
-            "--",
-            f"cluster-alias:{workspace.outputs}/",
-            f"{destination.resolve()}/output/",
-        ),
+    assert calls[0][:7] == (
+        "rsync",
+        "--archive",
+        "--no-links",
+        "--protect-args",
+        "--delay-updates",
+        "--prune-empty-dirs",
+        "--filter",
+    )
+    assert calls[0][-3:] == (
+        "--",
+        f"cluster-alias:{workspace.outputs}/",
+        f"{destination.resolve()}/output/",
+    )
+    assert filter_contents == ["+ */\n+ results/**\n- *\n"] * 2
+    assert calls[1:3] == [
         (
             "rsync",
             "--archive",

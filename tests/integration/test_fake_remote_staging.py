@@ -82,6 +82,19 @@ def _fake_rsync(tmp_path: Path) -> Path:
                 elif options[index] == "--include":
                     includes.append(options[index + 1])
                     index += 2
+                elif options[index] == "--filter":
+                    filter_kind, filter_path = options[index + 1].split(" ", 1)
+                    if filter_kind != "merge":
+                        raise SystemExit(96)
+                    for rule in Path(filter_path).read_text(encoding="utf-8").splitlines():
+                        action, pattern = rule.split(" ", 1)
+                        if action == "+":
+                            includes.append(pattern)
+                        elif action == "-":
+                            excludes.append(pattern)
+                        else:
+                            raise SystemExit(95)
+                    index += 2
                 else:
                     index += 1
 

@@ -93,6 +93,7 @@ class ArrayCancellationScheduler:
     cancelled: tuple[SchedulerObservation, ...]
     query_references: tuple[SchedulerReference, ...] = ()
     cancel_references: tuple[SchedulerReference, ...] = ()
+    cancellation_requested: bool = False
 
     def submit(self, group: SchedulerGroup) -> SchedulerSubmission:
         raise AssertionError("lifecycle reconciliation must not submit")
@@ -101,12 +102,13 @@ class ArrayCancellationScheduler:
         self, references: tuple[SchedulerReference, ...]
     ) -> tuple[SchedulerObservation, ...]:
         self.query_references = references
-        return self.refreshed
+        return self.cancelled if self.cancellation_requested else self.refreshed
 
     def cancel(
         self, references: tuple[SchedulerReference, ...]
     ) -> tuple[SchedulerObservation, ...]:
         self.cancel_references = references
+        self.cancellation_requested = True
         return self.cancelled
 
 
@@ -585,7 +587,7 @@ def test_concurrent_cancel_requests_are_idempotent(tmp_path: Path) -> None:
     assert cancelled.native_state == "CANCELLED"
 
 
-def test_array_cancel_reconciles_first_and_cancels_only_active_elements(
+def test_array_cancel_reconciles_first_and_cancels_scheduler_roots(
     tmp_path: Path,
 ) -> None:
     record = _array_record()
@@ -598,6 +600,7 @@ def test_array_cancel_reconciles_first_and_cancels_only_active_elements(
             _array_observation(2, ExecutionState.QUEUED, "PENDING"),
         ),
         cancelled=(
+            _array_observation(0, ExecutionState.SUCCEEDED, "COMPLETED", exit_code=0),
             _array_observation(1, ExecutionState.CANCELLED, "CANCELLED", exit_code=0),
             _array_observation(2, ExecutionState.SUCCEEDED, "COMPLETED", exit_code=0),
         ),
@@ -628,10 +631,7 @@ def test_array_cancel_reconciles_first_and_cancels_only_active_elements(
         SchedulerReference("777_1"),
         SchedulerReference("777_2"),
     )
-    assert scheduler.cancel_references == (
-        SchedulerReference("777_1"),
-        SchedulerReference("777_2"),
-    )
+    assert scheduler.cancel_references == (SchedulerReference("12345"),)
     assert repeated == cancelled
 
 

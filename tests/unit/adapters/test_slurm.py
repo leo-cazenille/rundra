@@ -639,6 +639,65 @@ def test_slurm_scheduler_discovers_bound_for_portable_array_request() -> None:
     }
 
 
+def test_slurm_scheduler_splits_portable_arrays_at_controller_bound() -> None:
+    transport = ScriptedTransport(deque([]))
+    scheduler = SlurmScheduler(
+        transport, log_directory=PurePosixPath("/remote/run/logs")
+    )
+    source = _array_request(count=5)
+    portable = SchedulerArrayRequest(source.group, source.mapping, source.manifest_path)
+    transport.results.extend(
+        (
+            _command_result(Command(("unused",)), 0, "MaxArraySize = 2\n"),
+            _command_result(Command(("unused",)), 0, "501\n"),
+            _command_result(Command(("unused",)), 0, "502\n"),
+            _command_result(Command(("unused",)), 0, "503\n"),
+        )
+    )
+
+    submission = scheduler.submit_array(portable)
+
+    assert submission.references == (
+        SchedulerReference("501"),
+        SchedulerReference("502"),
+        SchedulerReference("503"),
+    )
+    assert submission.task_native_ids == {
+        TaskId.from_ordinal(0): "501_0",
+        TaskId.from_ordinal(1): "501_1",
+        TaskId.from_ordinal(2): "502_0",
+        TaskId.from_ordinal(3): "502_1",
+        TaskId.from_ordinal(4): "503",
+    }
+    assert [call.argv[4] for call in transport.run_calls[1:3]] == [
+        "/remote/run/metadata/tasks.part-000000.sh",
+        "/remote/run/metadata/tasks.part-000001.sh",
+    ]
+    assert transport.run_calls[3].argv[0:2] == ("/bin/sh", "-c")
+
+
+def test_slurm_scheduler_cancels_submitted_roots_after_partial_chunk_failure() -> None:
+    transport = ScriptedTransport(deque([]))
+    scheduler = SlurmScheduler(
+        transport, log_directory=PurePosixPath("/remote/run/logs")
+    )
+    source = _array_request(count=3)
+    portable = SchedulerArrayRequest(source.group, source.mapping, source.manifest_path)
+    transport.results.extend(
+        (
+            _command_result(Command(("unused",)), 0, "MaxArraySize = 2\n"),
+            _command_result(Command(("unused",)), 0, "601\n"),
+            _command_result(Command(("unused",)), 1, "", "rejected"),
+            _command_result(Command(("unused",)), 0, ""),
+        )
+    )
+
+    with pytest.raises(SlurmSubmissionError, match="exit code 1"):
+        scheduler.submit_array(portable)
+
+    assert transport.run_calls[-1] == Command(("scancel", "--", "601"))
+
+
 def test_render_sbatch_script_translates_portable_and_allowed_native_resources() -> (
     None
 ):
@@ -1009,6 +1068,38 @@ def test_slurm_query_reconciles_array_elements_independently() -> None:
     assert observations[0].metadata["stdout_path"] == "/remote/run/logs/123_0.stdout"
     assert observations[1].metadata["stderr_path"] == "/remote/run/logs/123_1.stderr"
     assert observations[2].metadata["stdout_path"] == "/remote/run/logs/123_2.stdout"
+
+
+def test_slurm_query_batches_large_reference_sets() -> None:
+    references = tuple(SchedulerReference(str(index)) for index in range(1, 502))
+    first, second = references[:500], references[500:]
+    transport = ScriptedTransport(
+        deque(
+            (
+                _command_result(
+                    Command(("unused",)),
+                    0,
+                    "".join(
+                        f"{item.native_id}|RUNNING|Unknown|node01\n" for item in first
+                    ),
+                ),
+                _command_result(
+                    Command(("unused",)),
+                    0,
+                    "".join(
+                        f"{item.native_id}|RUNNING|Unknown|node01\n" for item in second
+                    ),
+                ),
+            )
+        )
+    )
+
+    observations = SlurmScheduler(transport).query(references)
+
+    assert tuple(item.reference for item in observations) == references
+    assert len(transport.run_calls) == 2
+    assert transport.run_calls[0].argv[4].count(",") == 499
+    assert transport.run_calls[1].argv[4] == "501"
 
 
 def test_slurm_controller_array_limit_is_explicitly_discovered() -> None:

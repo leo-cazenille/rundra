@@ -31,6 +31,7 @@ _SAFE_NATIVE_VALUE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.@,+:/=\[\]&|*~-]*\Z")
 _PARSABLE_SUBMISSION = re.compile(r"(?P<job_id>[0-9]+)(?:;(?P<cluster>[^;\r\n]+))?\Z")
 _SLURM_REFERENCE = re.compile(r"[0-9]+(?:_[0-9]+)?\Z")
 _MAX_ARRAY_SIZE = re.compile(r"(?:^|\n)\s*MaxArraySize\s*=\s*([0-9]+)\s*(?:\n|$)")
+_MAX_QUERY_REFERENCES = 500
 _SUBMIT_SCRIPT = """\
 set -eu
 script=$(mktemp "${TMPDIR:-/tmp}/rundra-sbatch.XXXXXX")
@@ -304,14 +305,7 @@ class SlurmScheduler:
             raise TypeError(
                 "SlurmScheduler.submit_array requires a SchedulerArrayRequest"
             )
-        bounded = SlurmArrayRequest(
-            request.group,
-            request.mapping,
-            request.manifest_path,
-            self.array_limit(),
-            request.allow_duplicate_seeds,
-        )
-        return self.submit_bounded_array(bounded)
+        return self._submit_array_chunks(request, dependency=None)
 
     def submit_array_afterok(
         self,
@@ -323,16 +317,70 @@ class SlurmScheduler:
             raise TypeError(
                 "SlurmScheduler.submit_array_afterok requires a SchedulerArrayRequest"
             )
-        bounded = SlurmArrayRequest(
-            request.group,
-            request.mapping,
-            request.manifest_path,
-            self.array_limit(),
-            request.allow_duplicate_seeds,
-        )
-        return self._submit_bounded_array(
-            bounded,
-            dependency=_dependency(dependency),
+        return self._submit_array_chunks(request, dependency=_dependency(dependency))
+
+    def _submit_array_chunks(
+        self,
+        request: SchedulerArrayRequest,
+        *,
+        dependency: str | None,
+    ) -> SchedulerSubmission:
+        max_array_size = self.array_limit()
+        submissions: list[SchedulerSubmission] = []
+        try:
+            for chunk_ordinal, start in enumerate(
+                range(0, len(request.mapping), max_array_size)
+            ):
+                source_mapping = request.mapping[start : start + max_array_size]
+                units = request.group.units[start : start + max_array_size]
+                if len(units) == 1:
+                    submissions.append(
+                        self._submit(SchedulerGroup(units), dependency=dependency)
+                    )
+                    continue
+                mapping = tuple(
+                    ArrayTaskMapping(item.task_id, item.seed, array_index)
+                    for array_index, item in enumerate(source_mapping)
+                )
+                manifest_path = request.manifest_path.with_name(
+                    f"{request.manifest_path.stem}.part-{chunk_ordinal:06d}"
+                    f"{request.manifest_path.suffix}"
+                )
+                bounded = SlurmArrayRequest(
+                    SchedulerGroup(units),
+                    mapping,
+                    manifest_path,
+                    max_array_size,
+                    request.allow_duplicate_seeds,
+                )
+                submissions.append(
+                    self._submit_bounded_array(bounded, dependency=dependency)
+                )
+        except Exception:
+            if submissions:
+                try:
+                    self._transport.run(
+                        Command(
+                            (
+                                self._scancel,
+                                "--",
+                                *(item.reference.native_id for item in submissions),
+                            )
+                        )
+                    )
+                except Exception:
+                    pass
+            raise
+
+        primary, *additional = submissions
+        return SchedulerSubmission(
+            primary.reference,
+            {
+                task_id: native_id
+                for submission in submissions
+                for task_id, native_id in submission.task_native_ids.items()
+            },
+            tuple(item.reference for item in additional),
         )
 
     def submit_bounded_array(self, request: SlurmArrayRequest) -> SchedulerSubmission:
@@ -405,6 +453,16 @@ class SlurmScheduler:
         normalized = _references(references)
         if not normalized:
             return ()
+        observations: dict[SchedulerReference, SchedulerObservation] = {}
+        for start in range(0, len(normalized), _MAX_QUERY_REFERENCES):
+            observations.update(
+                self._query_batch(normalized[start : start + _MAX_QUERY_REFERENCES])
+            )
+        return tuple(observations[reference] for reference in normalized)
+
+    def _query_batch(
+        self, normalized: tuple[SchedulerReference, ...]
+    ) -> dict[SchedulerReference, SchedulerObservation]:
         joined = ",".join(reference.native_id for reference in normalized)
         queued = self._run_query(
             Command(
@@ -453,8 +511,8 @@ class SlurmScheduler:
                 observations.update(
                     _parse_sacct(accounting.stdout, missing, self._timezone)
                 )
-        return tuple(
-            self._with_log_metadata(
+        return {
+            reference: self._with_log_metadata(
                 observations.get(
                     reference,
                     SchedulerObservation(
@@ -466,7 +524,7 @@ class SlurmScheduler:
                 )
             )
             for reference in normalized
-        )
+        }
 
     def array_limit(self) -> int:
         """Read the controller's positive MaxArraySize submission bound."""

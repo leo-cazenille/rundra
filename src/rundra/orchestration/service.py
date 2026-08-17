@@ -286,16 +286,12 @@ class SchedulerLifecycleService:
             current = self.refresh(record)
             if current.run.state in _TERMINAL_STATES:
                 return current
-            task_references = _record_task_references(current)
-            active = tuple(
-                (task_id, reference)
-                for task_id, reference in task_references
-                if next(task for task in current.run.tasks if task.id == task_id).state
-                not in _TERMINAL_STATES
+            references = tuple(
+                SchedulerReference(native_id) for native_id in current.scheduler_job_ids
             )
-            references = tuple(reference for _, reference in active)
-            observations = self._scheduler.cancel(references)
-            _validate_observations(observations, references)
+            if not references:
+                raise ValueError("Run has no scheduler root job IDs")
+            self._scheduler.cancel(references)
         except RunStoreError:
             raise
         except Exception as error:
@@ -304,16 +300,7 @@ class SchedulerLifecycleService:
                 message=f"Run {record.run.id} cancellation failed: {error}",
                 run_id=record.run.id,
             ) from error
-        updated = _observed_records(
-            current,
-            tuple(
-                (task_id, observation)
-                for (task_id, _), observation in zip(active, observations, strict=True)
-            ),
-            self._clock(),
-        )
-        self._store.update(updated, expected=current)
-        return self.wait(updated, timeout=timeout, poll_interval=poll_interval)
+        return self.wait(current, timeout=timeout, poll_interval=poll_interval)
 
     def _cancel_preparation(self, record: RunRecord) -> RunRecord:
         preparation = record.preparation
@@ -721,7 +708,9 @@ class OrchestrationService:
 
         updated = replace(
             _with_execution_state(record, ExecutionState.SUBMITTED),
-            scheduler_job_ids=(submission.reference.native_id,),
+            scheduler_job_ids=tuple(
+                reference.native_id for reference in submission.references
+            ),
             task_scheduler_ids=submission.task_native_ids,
             submitted_at=submission_started_at,
         )
@@ -730,7 +719,9 @@ class OrchestrationService:
         self._report(
             ProgressPhase.SUBMIT,
             4,
-            f"scheduler_job={submission.reference.native_id} tasks={len(units)}",
+            "scheduler_jobs="
+            f"{','.join(reference.native_id for reference in submission.references)} "
+            f"tasks={len(units)}",
             run_id,
             len(units),
         )

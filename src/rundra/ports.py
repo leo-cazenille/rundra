@@ -187,6 +187,7 @@ class SchedulerSubmission:
 
     reference: SchedulerReference
     task_native_ids: Mapping[TaskId, str]
+    additional_references: tuple[SchedulerReference, ...] = ()
 
     def __post_init__(self) -> None:
         if type(self.reference) is not SchedulerReference:
@@ -207,6 +208,16 @@ class SchedulerSubmission:
         ):
             raise ValueError("Scheduler Task native IDs must be nonblank and safe")
         object.__setattr__(self, "task_native_ids", MappingProxyType(mapping))
+        if self.reference in self.additional_references:
+            raise ValueError("Additional scheduler references must exclude the primary")
+        if len(set(self.additional_references)) != len(self.additional_references):
+            raise ValueError("Additional scheduler references must be unique")
+
+    @property
+    def references(self) -> tuple[SchedulerReference, ...]:
+        """Return every scheduler root created for this logical submission."""
+
+        return (self.reference, *self.additional_references)
 
 
 @dataclass(frozen=True, slots=True)
