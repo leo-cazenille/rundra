@@ -3330,6 +3330,32 @@ Future-looking sections must remain clearly labeled as future constraints or roa
 
 ---
 
+## 50.1 Scalable Run state and current implementation boundary
+
+Target schema version 3 owns hard Task, confirmation, active-task, array,
+worker-pool, output-shard, and automatic-retrieval limits. Version-4 plans use
+a constant-size TaskSpace and no more than ten preview units. Version-4 durable
+Run summaries use CompactRun plus a sparse per-Run SQLite sidecar; untouched
+Tasks are represented implicitly, while transactional updates, grouped counts,
+direct lookup, and pages of at most 1,000 preserve individual identity.
+
+Slurm submissions larger than `MaxArraySize` are partitioned into multiple
+bounded arrays. All root IDs are persisted, status queries are batched, root
+cancellation is bounded, partial submission cancels known roots, and rsync
+retrieval uses a filter file rather than one argument per output pattern.
+
+The compute-node worker core assigns deterministic strided leases, records and
+continues scientific failures without retrying them, signals requeue before an
+unsealable lease, and atomically publishes read-only uncompressed tar shards
+with indexed member hashes. Shard verification and selected extraction reject
+links and traversal and explicitly refuse computation on `fishvision`.
+
+Worker-pool submission, remote journal ingestion, and launch-time retrieval
+policy are not yet connected to `run` or `submit`. Until that orchestration path
+is implemented and system-tested, worker-pool CLI support is planning-only.
+
+---
+
 ## 51. Architectural invariants
 
 The following are intended as durable constraints.

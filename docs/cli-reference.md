@@ -8,7 +8,7 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 | Command | Positional | Options | Semantics |
 |---|---|---|---|
 | `validate` | `EXPERIMENT` | `--json` | Validate experiment YAML without executing. |
-| `plan` | `EXPERIMENT` | `--config`, `--seed`/`--seeds`/`--random-seed`, `--target`, `--targets-file`, `--project-file`, `--profile`, preparation options, `--json` | Resolve and inspect execution without target contact or state changes. |
+| `plan` | `EXPERIMENT` | `--config`, `--seed`/`--seeds`/`--random-seed`, `--target`, `--targets-file`, `--project-file`, `--profile`, preparation options, `--execution-strategy`, `--retrieval`, `--json` | Resolve and inspect execution without target contact or state changes. |
 | `targets` | none | `--targets-file`, `--json` | Validate and list configured targets. |
 | `doctor` | optional `EXPERIMENT` | `--target`, `--targets-file`, `--project-file`, `--profile`, `--connect`, `--json` | Diagnose static target setup and optionally perform a read-only live SSH probe. |
 | `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--verbose`, `--progress`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
@@ -21,6 +21,7 @@ For synchronous arrays the bar total is six lifecycle units plus the number of
 Tasks; scheduler updates show terminal/total, running, queued, failed, and
 allocated-node counts.
 | `status` | `RUN_ID` | `--data-dir`, `--json` | Reconcile scheduler state and return portable Run/Task status. |
+| `tasks` | `RUN_ID` | `--offset`, `--limit`, `--data-dir`, `--json` | Return one bounded page from a compact version-4 TaskSpace sidecar. |
 | `list` | none | `--data-dir`, `--json` | List persisted Runs in deterministic order. |
 | `logs` | `RUN_ID` | `--task`, `--data-dir`, `--json` | Read one Task's framework-managed stdout/stderr. |
 | `fetch` | `RUN_ID` | required `--destination`; repeatable `--task`; `--data-dir`, `--json` | Idempotently retrieve all or selected Task artifacts. |
@@ -39,6 +40,15 @@ using `batch_options`, `batch_options_range`, and
 `batch_hierarchical_options`. `plan`, `run`, and `submit` expand parameter sets
 automatically. `_rundr.seeds` supplies an integer or inclusive range unless a
 CLI seed selector overrides it. Sweep plans and Runs use format version 3.
+
+Target configuration version 3 enables constant-memory version-4 planning.
+`--execution-strategy auto|multi-array|worker-pool` selects or previews the
+target-bounded strategy, while `--retrieval all|manifest|none` records the
+intended output policy. Version-4 plan JSON reports the exact TaskSpace count,
+a maximum ten-Task preview, scheduler batch or worker counts, target limits,
+and confirmation threshold. Planning remains network-free. Worker-pool launch
+through `run` and `submit` is not yet exposed; its worker, sparse-state, and
+shard components remain internal until orchestration is complete.
 
 Prepared project-v2 operations accept `--prepare-location auto|local|target`,
 `--rebuild`, and `--offline`. `plan` additionally accepts `--source-root` to
@@ -72,7 +82,8 @@ returning so later processes can operate by Run ID.
 All programmatically useful commands support the checked versioned
 [JSON contracts](schemas/README.md). Unprepared projects continue emitting
 `format_version: 1`; prepared plans and RunRecords emit `format_version: 2`;
-parameterized plans and Runs emit `format_version: 3`.
+parameterized plans and Runs emit `format_version: 3`. Compact TaskSpace plans,
+RunRecords, and `tasks` pages emit `format_version: 4`.
 JSON goes to stdout with an empty stderr. Human errors go to stderr. Both
 renderers consume the same operation result.
 

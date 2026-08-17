@@ -12,7 +12,8 @@ positional, and option names; their semantics are in the
 
 Every CLI document has a `format_version`, an `operation` name, and an `ok`
 flag. Unprepared operations retain version 1; prepared plans and Runs use
-version 2; parameterized plans and Runs use version 3. A successful document contains an operation-specific value. A
+version 2; parameterized plans and Runs use version 3; compact TaskSpace
+documents use version 4. A successful document contains an operation-specific value. A
 failed document contains `error.code`, `error.message`, and `error.details`
 instead. Use the fields, not object-key order or human output, as the interface.
 
@@ -20,7 +21,7 @@ instead. Use the fields, not object-key order or human output, as the interface.
 
 | Operation or document | Checked example | Primary payload |
 |---|---|---|
-| CLI surface | [`cli-surface-v1.json`](cli-surface-v1.json) | program, commands, positionals, options |
+| CLI surface | [`cli-surface-v4.json`](cli-surface-v4.json) | current program, commands, positionals, options |
 | `validate` | [`validate-success-v1.json`](validate-success-v1.json) | `experiment` |
 | `plan` | [`plan-success-v1.json`](plan-success-v1.json) | `plan`, plus launch resolution |
 | parameterized `plan` | [`plan-success-v3.json`](plan-success-v3.json) | Task parameter sets and effective-config hashes |
@@ -28,6 +29,7 @@ instead. Use the fields, not object-key order or human output, as the interface.
 | `run` | [`run-success-v1.json`](run-success-v1.json) | terminal `run`, plus launch resolution |
 | `submit` | [`submit-success-v1.json`](submit-success-v1.json) | submitted `run` |
 | `status` | [`status-success-v1.json`](status-success-v1.json) | aggregate and Task status |
+| `tasks` | composed and contract-tested | bounded v4 Task-state page |
 | `list` | [`list-success-v1.json`](list-success-v1.json) | ordered `runs` summaries |
 | `logs` | [`logs-success-v1.json`](logs-success-v1.json) | one Task's stdout/stderr and paths |
 | `fetch` | [`fetch-success-v1.json`](fetch-success-v1.json) | destination, selected Tasks, artifacts |
@@ -55,6 +57,13 @@ fields.
 
 `inspect` deliberately embeds `run-record-v1.json` unchanged beneath `record`.
 Keeping one RunRecord fixture avoids two copies of the durable schema drifting.
+
+Version-4 plans replace complete Task arrays with a compact arithmetic seed
+range, parameter-set count, exact product, and bounded preview. Version-4
+RunRecords identify the sparse SQLite task-state sidecar and record execution
+and retrieval strategies. The `tasks` operation returns at most 1,000
+individually identified states per request. Older documents do not gain
+version-4 fields.
 
 For shell pipelines, use an available JSON parser rather than matching text:
 
