@@ -62,7 +62,7 @@ from rundra.orchestration.preparation import (
     create_remote_preparation_spec,
     prepare_local,
     prepare_source_snapshot,
-    read_remote_prepared_outputs,
+    read_remote_preparation_result,
     remote_platform_fingerprint,
     remote_preparation_record,
 )
@@ -1091,12 +1091,19 @@ def run_operation(
         )
         record = result.record
         if remote_preparation is not None:
-            outputs = read_remote_prepared_outputs(transport, result.workspace)
-            if outputs is not None:
+            preparation_result = read_remote_preparation_result(
+                transport, result.workspace
+            )
+            if preparation_result is not None:
                 assert record.preparation is not None
                 updated = replace(
                     record,
-                    preparation=replace(record.preparation, build_outputs=outputs),
+                    preparation=replace(
+                        record.preparation,
+                        image_action=preparation_result.image_action,
+                        build_action=preparation_result.build_action,
+                        build_outputs=preparation_result.outputs,
+                    ),
                 )
                 store.update(updated, expected=record)
                 record = updated

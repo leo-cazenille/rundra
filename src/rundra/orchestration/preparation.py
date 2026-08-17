@@ -65,6 +65,13 @@ class RemotePreparationSpec:
     image_search_paths: tuple[PurePath, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class RemotePreparationResult:
+    outputs: tuple[PreparedOutput, ...]
+    image_action: str
+    build_action: str
+
+
 def prepare_source_snapshot(
     plan: PreparationPlan,
     *,
@@ -180,6 +187,8 @@ def build_remote_preparation_command(
         f"cache={shlex.quote(str(target_cache))}",
         f"image={shlex.quote(str(image))}",
         f"image_lock={shlex.quote(str(image_lock))}",
+        "image_action=reuse_image_cache",
+        "build_action=not_requested",
         'mkdir -p -- "$cache/images" "$cache/builds" "$cache/locks"',
         "attempt=0",
         'while ! mkdir -- "$image_lock" 2>/dev/null; do',
@@ -205,6 +214,7 @@ def build_remote_preparation_command(
                 '      cp -- "$candidate" "$image_tmp"',
                 '      chmod a-w -- "$image_tmp"',
                 '      mv -- "$image_tmp" "$image"',
+                "      image_action=cache_verified_candidate",
                 "    fi",
                 "  fi",
             )
@@ -224,6 +234,7 @@ def build_remote_preparation_command(
                 f"  [ \"$actual\" = {shlex.quote(recipe.image.sha256)} ] || {{ printf '%s\\n' 'pulled image digest mismatch' >&2; exit 65; }}",
                 '  chmod a-w -- "$image_tmp"',
                 '  mv -- "$image_tmp" "$image"',
+                "  image_action=pull_image",
             )
         )
     lines.extend(("  fi", "fi", 'rmdir -- "$image_lock"', "trap - EXIT HUP INT TERM"))
@@ -244,6 +255,7 @@ def build_remote_preparation_command(
                 "done",
                 "trap 'rmdir -- \"$build_lock\" 2>/dev/null || :' EXIT HUP INT TERM",
                 f'if [ ! -f "$entry/.complete" ] || {"true" if plan.rebuild else "false"}; then',
+                "  build_action=build_and_publish",
                 '  work=$(mktemp -d "$cache/builds/.work.XXXXXX")',
                 '  publish=$(mktemp -d "$cache/builds/.publish.XXXXXX")',
                 '  trap \'rm -rf -- "$work" "$publish"; rmdir -- "$build_lock" 2>/dev/null || :\' EXIT HUP INT TERM',
@@ -288,6 +300,8 @@ def build_remote_preparation_command(
                 '  rm -rf -- "$entry"',
                 '  mv -- "$publish" "$entry"',
                 '  rm -rf -- "$work"',
+                "else",
+                "  build_action=reuse_build_cache",
                 "fi",
                 f"run_source_tmp={shlex.quote(str(workspace.root / '.prepared-source'))}",
                 'if [ -e "$run_source_tmp" ]; then chmod -R u+w -- "$run_source_tmp"; fi',
@@ -324,7 +338,42 @@ def build_remote_preparation_command(
                 'mv -- "$manifest_tmp" "$manifest"',
             )
         )
+    lines.extend(
+        (
+            f"actions_tmp={shlex.quote(str(workspace.metadata / '.preparation-actions.tmp'))}",
+            f"actions={shlex.quote(str(workspace.metadata / 'preparation-actions.tsv'))}",
+            'printf \'image_action\\t%s\\nbuild_action\\t%s\\n\' "$image_action" "$build_action" > "$actions_tmp"',
+            'chmod a-w -- "$actions_tmp"',
+            'mv -- "$actions_tmp" "$actions"',
+        )
+    )
     return Command(("/bin/sh", "-c", "\n".join(lines)))
+
+
+def read_remote_preparation_result(
+    transport: Transport,
+    workspace: StagedWorkspace,
+) -> RemotePreparationResult | None:
+    """Read verified preparation outcomes produced by the target job."""
+    action_result = transport.run(
+        Command(("cat", "--", str(workspace.metadata / "preparation-actions.tsv")))
+    )
+    if action_result.exit_code != 0:
+        return None
+    actions: dict[str, str] = {}
+    for line in action_result.stdout.splitlines():
+        fields = line.split("\t")
+        if len(fields) != 2 or fields[0] in actions or not fields[1]:
+            raise PreparationError("Target preparation action manifest is invalid")
+        actions[fields[0]] = fields[1]
+    if set(actions) != {"image_action", "build_action"}:
+        raise PreparationError("Target preparation action manifest is incomplete")
+    outputs = read_remote_prepared_outputs(transport, workspace) or ()
+    return RemotePreparationResult(
+        outputs,
+        actions["image_action"],
+        actions["build_action"],
+    )
 
 
 def read_remote_prepared_outputs(
@@ -400,8 +449,9 @@ def prepare_local(
     key: str | None = None
     outputs: tuple[PreparedOutput, ...] = ()
     logs: tuple[PurePath, ...] = ()
+    build_action: str | None = None
     if plan.recipe.build is not None:
-        prepared_source, key, outputs, logs = _resolve_build(
+        prepared_source, key, outputs, logs, build_action = _resolve_build(
             plan,
             snapshot=snapshot,
             source_digest=source_digest,
@@ -440,6 +490,7 @@ def prepare_local(
         resolution_location="local",
         build_cache_key=key,
         builder_location="local" if key is not None else None,
+        build_action=build_action,
         build_outputs=outputs,
         logs=logs,
     )
@@ -624,7 +675,13 @@ def _resolve_build(
     cache_root: Path,
     target: Target,
     apptainer_executable: str,
-) -> tuple[Path, str, tuple[PreparedOutput, ...], tuple[PurePath, ...]]:
+) -> tuple[
+    Path,
+    str,
+    tuple[PreparedOutput, ...],
+    tuple[PurePath, ...],
+    str,
+]:
     build = plan.recipe.build
     assert build is not None
     fingerprint = _platform_fingerprint()
@@ -643,7 +700,13 @@ def _resolve_build(
     with _lock(cache_root / "locks" / f"build-{key}.lock"):
         if prepared.is_dir() and not plan.rebuild:
             outputs = _verify_outputs(prepared, build.outputs)
-            return prepared, key, outputs, (stdout_path, stderr_path)
+            return (
+                prepared,
+                key,
+                outputs,
+                (stdout_path, stderr_path),
+                "reuse_build_cache",
+            )
         with tempfile.TemporaryDirectory(prefix="rundra-build-", dir=cache_root) as raw:
             temporary_entry = Path(raw) / "entry"
             work = temporary_entry / "source"
@@ -684,7 +747,13 @@ def _resolve_build(
                 _make_writable(entry)
                 shutil.rmtree(entry)
             _publish_directory(temporary_entry, entry)
-    return prepared, key, outputs, (stdout_path, stderr_path)
+    return (
+        prepared,
+        key,
+        outputs,
+        (stdout_path, stderr_path),
+        "build_and_publish",
+    )
 
 
 def _verify_outputs(

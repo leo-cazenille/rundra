@@ -8,6 +8,7 @@ from pathlib import Path, PurePath
 
 import pytest
 
+from rundra.adapters import LocalTransport
 from rundra.domain.models import (
     BackendConfig,
     Command,
@@ -30,6 +31,7 @@ from rundra.orchestration.preparation import (
     build_remote_preparation_command,
     create_remote_preparation_spec,
     prepare_local,
+    read_remote_preparation_result,
 )
 from rundra.ports import StagedWorkspace
 
@@ -148,6 +150,8 @@ def test_local_preparation_publishes_and_reuses_verified_build_cache(
     assert cold.record.image_sha256 == recipe.image.sha256
     assert cold.record.image_path.is_absolute()
     assert cold.record.build_cache_key == warm.record.build_cache_key
+    assert cold.record.build_action == "build_and_publish"
+    assert warm.record.build_action == "reuse_build_cache"
     assert warm.record.source_action == "reuse_source_cache"
     assert (cold.source_root / "bin/model").read_text(encoding="utf-8") == "built"
     assert cold.record.build_outputs[0].executable is True
@@ -315,12 +319,20 @@ def test_remote_preparation_script_builds_and_reuses_target_cache(
     cold = subprocess.run(
         command.argv, check=False, capture_output=True, text=True, timeout=10
     )
+    cold_result = read_remote_preparation_result(LocalTransport(), workspace)
     warm = subprocess.run(
         command.argv, check=False, capture_output=True, text=True, timeout=10
     )
+    warm_result = read_remote_preparation_result(LocalTransport(), workspace)
 
     assert (cold.returncode, cold.stderr) == (0, "")
     assert (warm.returncode, warm.stderr) == (0, "")
+    assert cold_result is not None
+    assert cold_result.image_action == "cache_verified_candidate"
+    assert cold_result.build_action == "build_and_publish"
+    assert warm_result is not None
+    assert warm_result.image_action == "reuse_image_cache"
+    assert warm_result.build_action == "reuse_build_cache"
     assert (workspace.source / "bin/model").read_text(encoding="utf-8") == "built"
     assert spec.build_key is not None
     assert (target_cache / "images" / f"{recipe.image.sha256}.sif").is_file()

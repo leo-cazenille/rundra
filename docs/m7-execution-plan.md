@@ -38,6 +38,8 @@ increments so version-1 projects remain unchanged throughout.
 
 - Persist version-2 RunRecords containing source/image/build identities,
   actions, hashes, preparation logs, and the separate preparation scheduler ID.
+- Finalize remote image and compiled-output cache actions from an atomic
+  preparation manifest after synchronous execution.
 - Extend status, inspect, logs, fetch, and cancel for preparation state.
 - Preserve partial-output retrieval and meaningful nonzero exits.
 

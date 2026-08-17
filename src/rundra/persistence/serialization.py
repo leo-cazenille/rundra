@@ -220,6 +220,7 @@ def _preparation_to_dict(value: PreparationRecord) -> JsonObject:
         "builder_scheduler_id": value.builder_scheduler_id,
         "builder_status": value.builder_status,
         "builder_state": value.builder_state,
+        "build_action": value.build_action,
         "build_outputs": [
             {
                 "path": str(output.path),
@@ -237,6 +238,7 @@ def _parse_preparation(value: object) -> PreparationRecord:
     document = _object(value, path=path)
     document.setdefault("builder_status", None)
     document.setdefault("builder_state", None)
+    document.setdefault("build_action", None)
     _exact_fields(
         document,
         frozenset(
@@ -254,6 +256,7 @@ def _parse_preparation(value: object) -> PreparationRecord:
                 "builder_scheduler_id",
                 "builder_status",
                 "builder_state",
+                "build_action",
                 "build_outputs",
                 "logs",
             }
@@ -314,6 +317,9 @@ def _parse_preparation(value: object) -> PreparationRecord:
             ),
             builder_state=_optional_string(
                 document["builder_state"], path=f"{path}.builder_state"
+            ),
+            build_action=_optional_string(
+                document["build_action"], path=f"{path}.build_action"
             ),
             build_outputs=tuple(outputs),
             logs=tuple(

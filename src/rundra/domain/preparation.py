@@ -176,6 +176,7 @@ class PreparationRecord:
     builder_scheduler_id: str | None = None
     builder_status: str | None = None
     builder_state: str | None = None
+    build_action: str | None = None
     build_outputs: tuple[PreparedOutput, ...] = ()
     logs: tuple[PurePath, ...] = ()
 
@@ -199,6 +200,7 @@ class PreparationRecord:
             "builder_scheduler_id",
             "builder_status",
             "builder_state",
+            "build_action",
         ):
             value = getattr(self, name)
             if value is not None and (

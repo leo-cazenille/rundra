@@ -1351,6 +1351,9 @@ The target preparation design extends this lifecycle with one bounded Slurm
 job on a remote cache miss. Compilation must not run in an SSH login process,
 and experiment jobs use a framework-owned `afterok` dependency. Preparation
 state and scheduler identity remain separate from scientific Task identities.
+After a synchronous prepared run, the version-2 record finalizes whether the
+target image was pulled, copied from a verified candidate, or reused and
+whether compiled outputs were built or reused.
 The implementation status and remaining adapter work are tracked in
 `docs/m7-execution-plan.md`.
 
