@@ -1261,6 +1261,7 @@ def status_operation(
     store: RunStore,
     *,
     scheduler: Scheduler | None = None,
+    transport: Transport | None = None,
 ) -> OperationResult[StatusValue]:
     record, error = _load_record(run_id, store)
     if error is not None:
@@ -1289,6 +1290,21 @@ def status_operation(
                     {"run_id": str(record.run.id)},
                 ),
             )
+    try:
+        record = _finalize_remote_preparation(record, store, transport=transport)
+    except RunStoreError as store_error:
+        return OperationResult.failure(
+            "status", _run_store_operation_error(store_error, record.run.id)
+        )
+    except (PreparationError, RuntimeError, TypeError, ValueError) as error:
+        return OperationResult.failure(
+            "status",
+            OperationError(
+                "PREPARATION_PROVENANCE_FAILED",
+                f"Run {record.run.id} preparation provenance failed: {error}",
+                {"run_id": str(record.run.id)},
+            ),
+        )
     return OperationResult.success("status", _status_value(record))
 
 
@@ -1809,6 +1825,40 @@ def _record_workspace(record: RunRecord) -> StagedWorkspace:
         logs=root / "logs",
         metadata=root / "metadata",
     )
+
+
+def _finalize_remote_preparation(
+    record: RunRecord,
+    store: RunStore,
+    *,
+    transport: Transport | None = None,
+) -> RunRecord:
+    preparation = record.preparation
+    if (
+        preparation is None
+        or preparation.builder_status != ExecutionState.SUCCEEDED.value
+        or preparation.image_action != "resolve_in_preparation_job"
+        or record.run.target.transport.kind != "ssh"
+    ):
+        return record
+    active_transport = transport or _record_ssh_transport(record)
+    result = read_remote_preparation_result(
+        active_transport,
+        _record_workspace(record),
+    )
+    if result is None:
+        raise PreparationError("Completed preparation manifest is unavailable")
+    updated = replace(
+        record,
+        preparation=replace(
+            preparation,
+            image_action=result.image_action,
+            build_action=result.build_action,
+            build_outputs=result.outputs,
+        ),
+    )
+    store.update(updated, expected=record)
+    return updated
 
 
 def _record_stager(record: RunRecord) -> Stager:

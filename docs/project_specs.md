@@ -1354,6 +1354,8 @@ state and scheduler identity remain separate from scientific Task identities.
 After a synchronous prepared run, the version-2 record finalizes whether the
 target image was pulled, copied from a verified candidate, or reused and
 whether compiled outputs were built or reused.
+For asynchronous `submit`, the same finalization occurs during a later
+successful `status` reconciliation; `inspect` remains network-free.
 The implementation status and remaining adapter work are tracked in
 `docs/m7-execution-plan.md`.
 

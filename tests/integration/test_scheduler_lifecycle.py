@@ -158,6 +158,18 @@ class LogTransport:
         return CommandResult(command, 0, content, "", _CREATED, _CREATED)
 
 
+class PreparationManifestTransport(LogTransport):
+    def run(self, command: Command) -> CommandResult:
+        self.calls.append(command)
+        path = str(command.argv[-1])
+        content = (
+            "image_action\tpull_image\nbuild_action\tbuild_and_publish\n"
+            if path.endswith("preparation-actions.tsv")
+            else f"{'12' * 32}\t1\texamples/model\n"
+        )
+        return CommandResult(command, 0, content, "", _CREATED, _CREATED)
+
+
 def _record() -> RunRecord:
     target = Target(
         "cluster",
@@ -413,6 +425,45 @@ def test_failed_preparation_prevents_scientific_status_progression(tmp_path) -> 
     assert failed.preparation is not None
     assert failed.preparation.builder_status == "FAILED"
     assert scheduler.queried == [(SchedulerReference("900"),)]
+
+
+def test_status_finalizes_completed_async_preparation_provenance(tmp_path) -> None:
+    submitted = _prepared_record()
+    preparation = submitted.preparation
+    assert preparation is not None
+    completed = replace(
+        submitted,
+        run=replace(
+            submitted.run,
+            state=ExecutionState.SUCCEEDED,
+            tasks=tuple(
+                replace(task, state=ExecutionState.SUCCEEDED)
+                for task in submitted.run.tasks
+            ),
+        ),
+        preparation=replace(
+            preparation,
+            builder_status="SUCCEEDED",
+            builder_state="COMPLETED",
+        ),
+        completed_at=_CREATED + timedelta(seconds=4),
+    )
+    store = JsonRunStore(tmp_path / "records")
+    store.create(completed)
+    transport = PreparationManifestTransport()
+
+    status = status_operation(
+        str(_RUN_ID),
+        store,
+        transport=transport,
+    )
+
+    assert status.ok
+    restored = store.load(_RUN_ID)
+    assert restored.preparation is not None
+    assert restored.preparation.image_action == "pull_image"
+    assert restored.preparation.build_action == "build_and_publish"
+    assert restored.preparation.build_outputs[0].sha256 == "12" * 32
 
 
 def test_cancel_covers_preparation_and_dependent_scientific_job(tmp_path) -> None:
