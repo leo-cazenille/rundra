@@ -342,5 +342,78 @@ def test_remote_preparation_script_builds_and_reuses_target_cache(
     assert stat_mode(entry) & 0o222 == 0
 
 
+def test_remote_preparation_pull_uses_a_nonexistent_destination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "remote/runs/run_0/source"
+    source.mkdir(parents=True)
+    image_contents = b"pulled-immutable-sif"
+    recipe_image = tmp_path / "expected.sif"
+    recipe_image.write_bytes(image_contents)
+    recipe = _recipe(recipe_image, build=False)
+    plan = PreparationPlan(
+        recipe,
+        source_mode="working_tree",
+        source_root=tmp_path,
+        offline=False,
+    )
+    target = _target(tmp_path)
+    prepared_source = PreparedSource(source, "34" * 32, "snapshot", "working-tree")
+    target_cache = tmp_path / "cache"
+    spec = create_remote_preparation_spec(
+        plan,
+        prepared_source,
+        target,
+        "56" * 32,
+        cache_root=target_cache,
+    )
+    workspace = StagedWorkspace(
+        root=source.parent,
+        source=source,
+        inputs=source.parent / "input",
+        config=source.parent / "input/config.yaml",
+        runtime=source.parent / "runtime",
+        outputs=source.parent / "output",
+        logs=source.parent / "logs",
+        metadata=source.parent / "metadata",
+    )
+    workspace.metadata.mkdir()
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_apptainer = fake_bin / "apptainer"
+    fake_apptainer.write_text(
+        """#!/usr/bin/env python3
+import pathlib
+import sys
+
+destination = pathlib.Path(sys.argv[-2])
+if destination.exists():
+    print(f"destination already exists: {destination}", file=sys.stderr)
+    raise SystemExit(17)
+destination.write_bytes(b"pulled-immutable-sif")
+""",
+        encoding="utf-8",
+    )
+    fake_apptainer.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ['PATH']}")
+
+    completed = subprocess.run(
+        build_remote_preparation_command(spec, workspace).argv,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    result = read_remote_preparation_result(LocalTransport(), workspace)
+
+    assert (completed.returncode, completed.stderr) == (0, "")
+    assert result is not None
+    assert result.image_action == "pull_image"
+    assert (
+        target_cache / "images" / f"{recipe.image.sha256}.sif"
+    ).read_bytes() == image_contents
+
+
 def stat_mode(path: Path) -> int:
     return path.stat().st_mode

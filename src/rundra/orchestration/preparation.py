@@ -227,13 +227,15 @@ def build_remote_preparation_command(
     else:
         lines.extend(
             (
-                '  image_tmp=$(mktemp "$cache/images/.pull.XXXXXX")',
-                '  trap \'rm -f -- "$image_tmp"; rmdir -- "$image_lock" 2>/dev/null || :\' EXIT HUP INT TERM',
+                '  image_tmp_dir=$(mktemp -d "$cache/images/.pull.XXXXXX")',
+                '  image_tmp="$image_tmp_dir/image.sif"',
+                '  trap \'rm -rf -- "$image_tmp_dir"; rmdir -- "$image_lock" 2>/dev/null || :\' EXIT HUP INT TERM',
                 f'  apptainer pull --disable-cache "$image_tmp" {shlex.quote(recipe.image.uri)}',
                 "  actual=$(sha256sum -- \"$image_tmp\" | cut -d' ' -f1)",
                 f"  [ \"$actual\" = {shlex.quote(recipe.image.sha256)} ] || {{ printf '%s\\n' 'pulled image digest mismatch' >&2; exit 65; }}",
                 '  chmod a-w -- "$image_tmp"',
                 '  mv -- "$image_tmp" "$image"',
+                '  rmdir -- "$image_tmp_dir"',
                 "  image_action=pull_image",
             )
         )
