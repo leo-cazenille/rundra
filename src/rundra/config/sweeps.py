@@ -5,7 +5,7 @@ import itertools
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import yaml
 
@@ -285,7 +285,7 @@ def _expand_range(
 
 
 def _get(document: object, path: tuple[PathPart, ...]) -> Any:
-    current = document
+    current: Any = document
     for part in path:
         current = current[part]
     return current
@@ -309,5 +309,5 @@ def _fail(
     path: tuple[PathPart, ...],
     code: str,
     message: str,
-) -> None:
+) -> NoReturn:
     raise ConfigError(code=code, message=message, source=source, path=path)
