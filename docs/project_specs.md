@@ -1341,6 +1341,12 @@ Builds run inside the verified SIF against a writable copy of the source
 snapshot. Declared outputs and executable bits are verified before the prepared
 source is sealed and published.
 
+Optional version-2 user and target configuration may select preparation cache
+roots and explicit image search directories. Version-1 configuration shapes
+remain unchanged. Local paths default to `~/.cache/rundra`; target paths default
+to `<target.workspace>/cache`. Resolution checks only the requested logical
+filename in configured directories and never recursively scans a home tree.
+
 The target preparation design extends this lifecycle with one bounded Slurm
 job on a remote cache miss. Compilation must not run in an SSH login process,
 and experiment jobs use a framework-owned `afterok` dependency. Preparation

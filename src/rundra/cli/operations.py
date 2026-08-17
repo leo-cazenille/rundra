@@ -31,7 +31,7 @@ from rundra.config.launch import (
     discover_user_launch,
     resolve_launch,
 )
-from rundra.config.targets import load_targets
+from rundra.config.targets import load_targets, load_targets_config
 from rundra.domain.models import (
     Artifact,
     ArtifactKind,
@@ -46,6 +46,7 @@ from rundra.domain.preparation import (
     PreparationConfig,
     PreparationPlan,
     PreparationRecord,
+    PreparationStorageConfig,
 )
 from rundra.domain.records import RunRecord
 from rundra.domain.states import (
@@ -87,6 +88,8 @@ from rundra.ports import (
 )
 from rundra.provenance import GitProvenanceCapture
 from rundra.results import OperationError, OperationResult
+
+_DEFAULT_PREPARATION_STORAGE = PreparationStorageConfig()
 
 
 @dataclass(frozen=True, slots=True)
@@ -341,6 +344,7 @@ class ResolvedRunInputs:
     prepare_location: str = "auto"
     rebuild: bool = False
     offline: bool = False
+    preparation_storage: PreparationStorageConfig = PreparationStorageConfig()
 
     def __post_init__(self) -> None:
         for name in (
@@ -363,6 +367,8 @@ class ResolvedRunInputs:
             raise ValueError("ResolvedRunInputs target must be nonblank")
         if type(self.resolution) is not ResolvedLaunch:
             raise TypeError("ResolvedRunInputs resolution must be ResolvedLaunch")
+        if type(self.preparation_storage) is not PreparationStorageConfig:
+            raise TypeError("ResolvedRunInputs preparation storage is invalid")
         _validate_preparation_inputs(
             self.preparation,
             self.mutable_source,
@@ -915,6 +921,9 @@ def resolve_run_inputs_operation(
             prepare_location=prepare_location,
             rebuild=rebuild,
             offline=offline,
+            preparation_storage=(
+                user.preparation if user is not None else PreparationStorageConfig()
+            ),
         ),
     )
 
@@ -925,6 +934,8 @@ def _remote_preparation_inputs(
     target: Target,
     source_root: Path,
     transport: Transport,
+    local_storage: PreparationStorageConfig,
+    target_storage: PreparationStorageConfig,
 ) -> tuple[Path, ExperimentSpec, PreparationRecord, RemotePreparationSpec]:
     if plan.recipe.build is None:
         raise PreparationError(
@@ -934,9 +945,21 @@ def _remote_preparation_inputs(
         plan,
         source_root=source_root,
         excludes=experiment.sync_excludes,
+        cache_root=(
+            None
+            if local_storage.cache_root is None
+            else Path(str(local_storage.cache_root))
+        ),
     )
     fingerprint = remote_platform_fingerprint(transport)
-    spec = create_remote_preparation_spec(plan, source, target, fingerprint)
+    spec = create_remote_preparation_spec(
+        plan,
+        source,
+        target,
+        fingerprint,
+        cache_root=target_storage.cache_root,
+        image_search_paths=target_storage.image_search_paths,
+    )
     record = remote_preparation_record(spec, target)
     assert experiment.container is not None
     effective_experiment = replace(
@@ -959,11 +982,13 @@ def run_operation(
     seeds: object = None,
     launch: LaunchResolutionValue | None = None,
     preparation: PreparationPlan | None = None,
+    preparation_storage: PreparationStorageConfig = _DEFAULT_PREPARATION_STORAGE,
 ) -> OperationResult[RunValue]:
     try:
         experiment = load_experiment(experiment_source)
         config = load_config_snapshot(config_source)
-        targets = load_targets(targets_source)
+        targets_config = load_targets_config(targets_source)
+        targets = targets_config.targets
         if target_name not in targets:
             return OperationResult.failure(
                 "run",
@@ -974,6 +999,9 @@ def run_operation(
                 ),
             )
         target = targets[target_name]
+        target_storage = targets_config.preparation.get(
+            target_name, PreparationStorageConfig()
+        )
         if preparation is not None:
             _validate_preparation_compatibility(experiment, preparation.recipe)
         unsupported = _unsupported_execution_target(target, experiment)
@@ -992,6 +1020,20 @@ def run_operation(
                     target,
                     project_root=experiment_source.expanduser().resolve().parent,
                     source_root=source_root,
+                    cache_root=(
+                        Path(str(target_storage.cache_root))
+                        if target_storage.cache_root is not None
+                        else Path(str(preparation_storage.cache_root))
+                        if preparation_storage.cache_root is not None
+                        else None
+                    ),
+                    image_search_paths=tuple(
+                        Path(str(path))
+                        for path in (
+                            *target_storage.image_search_paths,
+                            *preparation_storage.image_search_paths,
+                        )
+                    ),
                 )
                 effective_experiment = prepared.experiment
                 effective_source_root = prepared.source_root
@@ -1017,6 +1059,8 @@ def run_operation(
                     target,
                     source_root,
                     transport,
+                    preparation_storage,
+                    target_storage,
                 )
         plan = create_plan(
             effective_experiment,
@@ -1091,11 +1135,13 @@ def submit_operation(
     seeds: object = None,
     launch: LaunchResolutionValue | None = None,
     preparation: PreparationPlan | None = None,
+    preparation_storage: PreparationStorageConfig = _DEFAULT_PREPARATION_STORAGE,
 ) -> OperationResult[RunValue]:
     try:
         experiment = load_experiment(experiment_source)
         config = load_config_snapshot(config_source)
-        targets = load_targets(targets_source)
+        targets_config = load_targets_config(targets_source)
+        targets = targets_config.targets
         if target_name not in targets:
             return OperationResult.failure(
                 "submit",
@@ -1106,6 +1152,9 @@ def submit_operation(
                 ),
             )
         target = targets[target_name]
+        target_storage = targets_config.preparation.get(
+            target_name, PreparationStorageConfig()
+        )
         if preparation is not None:
             _validate_preparation_compatibility(experiment, preparation.recipe)
         unsupported = _unsupported_execution_target(
@@ -1148,6 +1197,8 @@ def submit_operation(
                 target,
                 source_root,
                 transport,
+                preparation_storage,
+                target_storage,
             )
         plan = create_plan(
             effective_experiment,

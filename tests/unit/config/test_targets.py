@@ -42,10 +42,45 @@ targets:
         targets["other"] = targets["local"]
 
 
+def test_version_two_target_preparation_storage_is_separate_and_strict(
+    tmp_path: Path,
+) -> None:
+    from rundra.config.targets import load_targets_config
+
+    source = tmp_path / "targets.yaml"
+    source.write_text(
+        """\
+version: 2
+targets:
+  shoal:
+    transport: {type: ssh, host: cluster}
+    scheduler: {type: slurm}
+    staging: {type: rsync}
+    container: {type: apptainer}
+    workspace: /remote/work
+    preparation:
+      cache_root: /shared/rundra/cache
+      image_search_paths: [/shared/images, /opt/images]
+""",
+        encoding="utf-8",
+    )
+
+    config = load_targets_config(source)
+
+    assert config.version == 2
+    assert "preparation" not in config.targets["shoal"].transport.options
+    storage = config.preparation["shoal"]
+    assert storage.cache_root == PurePosixPath("/shared/rundra/cache")
+    assert storage.image_search_paths == (
+        PurePosixPath("/shared/images"),
+        PurePosixPath("/opt/images"),
+    )
+
+
 @pytest.mark.parametrize(
     "content, code, path",
     [
-        ("version: 2\ntargets: {}\n", "UNSUPPORTED_VERSION", ("version",)),
+        ("version: 3\ntargets: {}\n", "UNSUPPORTED_VERSION", ("version",)),
         ("version: 1\n", "MISSING_FIELD", ("targets",)),
         (
             "version: 1\ntargets: []\n",

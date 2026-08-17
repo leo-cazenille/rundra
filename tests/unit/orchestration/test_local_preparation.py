@@ -225,6 +225,37 @@ def test_offline_preparation_rejects_an_unverified_image_candidate(
         )
 
 
+def test_local_preparation_checks_requested_name_in_explicit_search_path(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    search = tmp_path / "shared-images"
+    search.mkdir()
+    image = search / "application.sif"
+    image.write_bytes(b"verified-shared-image")
+    recipe = _recipe(image, build=False)
+    plan = PreparationPlan(
+        recipe,
+        source_mode="working_tree",
+        source_root=source,
+        offline=True,
+    )
+
+    prepared = prepare_local(
+        plan,
+        _experiment(recipe),
+        _target(tmp_path),
+        project_root=tmp_path / "project-without-image",
+        source_root=source,
+        cache_root=tmp_path / "cache",
+        image_search_paths=(search,),
+    )
+
+    assert prepared.record.image_action == "cache_verified_candidate"
+    assert prepared.record.image_path.read_bytes() == b"verified-shared-image"
+
+
 def test_remote_preparation_script_builds_and_reuses_target_cache(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -251,11 +282,17 @@ def test_remote_preparation_script_builds_and_reuses_target_cache(
         workspace=tmp_path / "remote",
     )
     prepared_source = PreparedSource(source, "34" * 32, "snapshot", "working-tree")
+    target_cache = tmp_path / "shared-cache"
+    image_search = tmp_path / "shared-images"
+    image_search.mkdir()
+    (image_search / recipe.image.name).write_bytes(image_candidate.read_bytes())
     spec = create_remote_preparation_spec(
         plan,
         prepared_source,
         target,
         "56" * 32,
+        cache_root=target_cache,
+        image_search_paths=(image_search,),
     )
     run_root = source.parent
     workspace = StagedWorkspace(
@@ -269,9 +306,6 @@ def test_remote_preparation_script_builds_and_reuses_target_cache(
         metadata=run_root / "metadata",
     )
     workspace.metadata.mkdir()
-    image = target.workspace / "cache/images" / f"{recipe.image.sha256}.sif"
-    image.parent.mkdir(parents=True)
-    image.write_bytes(image_candidate.read_bytes())
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     _fake_apptainer(fake_bin).rename(fake_bin / "apptainer")
@@ -289,7 +323,8 @@ def test_remote_preparation_script_builds_and_reuses_target_cache(
     assert (warm.returncode, warm.stderr) == (0, "")
     assert (workspace.source / "bin/model").read_text(encoding="utf-8") == "built"
     assert spec.build_key is not None
-    entry = target.workspace / "cache/builds" / spec.build_key
+    assert (target_cache / "images" / f"{recipe.image.sha256}.sif").is_file()
+    entry = target_cache / "builds" / spec.build_key
     assert (entry / ".complete").is_file()
     assert (entry / "source/bin/model").is_file()
     assert stat_mode(entry) & 0o222 == 0

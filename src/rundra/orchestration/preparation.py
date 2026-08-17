@@ -61,6 +61,8 @@ class RemotePreparationSpec:
     source_identity: str
     platform_fingerprint: str
     build_key: str | None
+    target_cache_root: PurePath | None = None
+    image_search_paths: tuple[PurePath, ...] = ()
 
 
 def prepare_source_snapshot(
@@ -106,6 +108,9 @@ def create_remote_preparation_spec(
     source: PreparedSource,
     target: Target,
     platform_fingerprint: str,
+    *,
+    cache_root: PurePath | None = None,
+    image_search_paths: tuple[PurePath, ...] = (),
 ) -> RemotePreparationSpec:
     """Create deterministic target preparation identities before submission."""
     build = plan.recipe.build
@@ -126,6 +131,12 @@ def create_remote_preparation_spec(
         source_identity=source.identity,
         platform_fingerprint=platform_fingerprint,
         build_key=key,
+        target_cache_root=(
+            PurePath(str(target.workspace)) / "cache"
+            if cache_root is None
+            else cache_root
+        ),
+        image_search_paths=image_search_paths,
     )
 
 
@@ -135,8 +146,7 @@ def remote_preparation_record(
 ) -> PreparationRecord:
     """Create pre-submission target preparation provenance."""
     image = (
-        PurePath(str(target.workspace))
-        / "cache"
+        (spec.target_cache_root or PurePath(str(target.workspace)) / "cache")
         / "images"
         / (f"{spec.plan.recipe.image.sha256}.sif")
     )
@@ -161,7 +171,7 @@ def build_remote_preparation_command(
     """Render one bounded target job that verifies, builds, and publishes caches."""
     plan = spec.plan
     recipe = plan.recipe
-    target_cache = workspace.root.parent.parent / "cache"
+    target_cache = spec.target_cache_root or workspace.root.parent.parent / "cache"
     image = target_cache / "images" / f"{recipe.image.sha256}.sif"
     image_lock = target_cache / "locks" / f"image-{recipe.image.sha256}.lock"
     lines = [
@@ -183,6 +193,23 @@ def build_remote_preparation_command(
         f"  [ \"$actual\" = {shlex.quote(recipe.image.sha256)} ] || {{ printf '%s\\n' 'cached image digest mismatch' >&2; exit 65; }}",
         "else",
     ]
+    for search_root in spec.image_search_paths:
+        candidate = search_root / recipe.image.name
+        lines.extend(
+            (
+                f"  candidate={shlex.quote(str(candidate))}",
+                '  if [ -f "$candidate" ] && [ ! -L "$candidate" ]; then',
+                "    actual=$(sha256sum -- \"$candidate\" | cut -d' ' -f1)",
+                f'    if [ "$actual" = {shlex.quote(recipe.image.sha256)} ]; then',
+                '      image_tmp=$(mktemp "$cache/images/.candidate.XXXXXX")',
+                '      cp -- "$candidate" "$image_tmp"',
+                '      chmod a-w -- "$image_tmp"',
+                '      mv -- "$image_tmp" "$image"',
+                "    fi",
+                "  fi",
+            )
+        )
+    lines.append('  if [ ! -f "$image" ]; then')
     if plan.offline:
         lines.append(
             "  printf '%s\\n' 'verified image unavailable in offline mode' >&2; exit 69"
@@ -199,7 +226,7 @@ def build_remote_preparation_command(
                 '  mv -- "$image_tmp" "$image"',
             )
         )
-    lines.extend(("fi", 'rmdir -- "$image_lock"', "trap - EXIT HUP INT TERM"))
+    lines.extend(("  fi", "fi", 'rmdir -- "$image_lock"', "trap - EXIT HUP INT TERM"))
     build = recipe.build
     if build is not None:
         assert spec.build_key is not None
@@ -335,6 +362,7 @@ def prepare_local(
     project_root: Path,
     source_root: Path,
     cache_root: Path | None = None,
+    image_search_paths: tuple[Path, ...] = (),
     apptainer_executable: str = "apptainer",
 ) -> PreparedApplication:
     """Resolve and build one project recipe in local immutable caches."""
@@ -343,7 +371,7 @@ def prepare_local(
     if type(experiment) is not ExperimentSpec or type(target) is not Target:
         raise TypeError("prepare_local requires experiment and target domain values")
     root = (
-        Path(str(target.workspace)).expanduser().resolve() / "cache"
+        Path("~/.cache/rundra").expanduser().resolve()
         if cache_root is None
         else cache_root.expanduser().resolve()
     )
@@ -366,6 +394,7 @@ def prepare_local(
         cache_root=root,
         target=target,
         apptainer_executable=apptainer_executable,
+        image_search_paths=image_search_paths,
     )
     prepared_source = snapshot
     key: str | None = None
@@ -530,6 +559,7 @@ def _resolve_image(
     cache_root: Path,
     target: Target,
     apptainer_executable: str,
+    image_search_paths: tuple[Path, ...],
 ) -> tuple[Path, str]:
     recipe = plan.recipe.image
     images = cache_root / "images"
@@ -539,7 +569,7 @@ def _resolve_image(
     candidates = (
         cached,
         project_root / requested,
-        Path(str(target.workspace)).expanduser().resolve() / "cache" / requested,
+        *(path.expanduser().resolve() / requested for path in image_search_paths),
     )
     for candidate in candidates:
         if candidate.is_symlink() or not candidate.is_file():

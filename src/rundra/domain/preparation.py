@@ -226,6 +226,24 @@ class PreparationRecord:
         object.__setattr__(self, "logs", logs)
 
 
+@dataclass(frozen=True, slots=True)
+class PreparationStorageConfig:
+    """Operator-selected cache root and non-recursive image search paths."""
+
+    cache_root: PurePath | None = None
+    image_search_paths: tuple[PurePath, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.cache_root is not None and not isinstance(self.cache_root, PurePath):
+            raise TypeError("Preparation cache root must be a path or None")
+        paths = tuple(self.image_search_paths)
+        if any(not isinstance(path, PurePath) for path in paths):
+            raise TypeError("Preparation image search paths must be paths")
+        if len(set(paths)) != len(paths):
+            raise ValueError("Preparation image search paths must be unique")
+        object.__setattr__(self, "image_search_paths", paths)
+
+
 def source_recipe_identity(source: PreparationSourceGit) -> str:
     """Return a deterministic identity for an acquired-source recipe."""
     if type(source) is not PreparationSourceGit:

@@ -158,6 +158,31 @@ defaults:
     assert discover_user_launch(tmp_path / "absent.yaml") is None
 
 
+def test_user_version_two_config_resolves_local_preparation_storage(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "user" / "config.yaml"
+    source.parent.mkdir()
+    source.write_text(
+        """\
+version: 2
+preparation:
+  cache_root: cache
+  image_search_paths: [images, ~/shared-images]
+""",
+        encoding="utf-8",
+    )
+
+    user = load_user_launch(source)
+
+    assert user.defaults == LaunchValues()
+    assert user.preparation.cache_root == (source.parent / "cache").resolve()
+    assert user.preparation.image_search_paths == (
+        (source.parent / "images").resolve(),
+        Path("~/shared-images").expanduser().resolve(),
+    )
+
+
 @pytest.mark.parametrize(
     "content, code, path",
     [

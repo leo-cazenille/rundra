@@ -339,6 +339,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 seeds=run_inputs.seeds if len(run_inputs.seeds) > 1 else None,
                 launch=run_inputs.launch,
                 preparation=run_inputs.preparation_plan,
+                preparation_storage=run_inputs.preparation_storage,
             )
     elif arguments.command == "submit":
         resolved = resolve_run_inputs_operation(
@@ -376,6 +377,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 seeds=submit_inputs.seeds if len(submit_inputs.seeds) > 1 else None,
                 launch=submit_inputs.launch,
                 preparation=submit_inputs.preparation_plan,
+                preparation_storage=submit_inputs.preparation_storage,
             )
     elif arguments.command == "status":
         result = status_operation(arguments.run_id, JsonRunStore(arguments.data_dir))

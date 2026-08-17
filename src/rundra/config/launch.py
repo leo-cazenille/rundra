@@ -11,12 +11,12 @@ from rundra.config._schema import (
     expect_integer,
     expect_mapping,
     expect_string,
+    expect_string_list,
     fail,
-    require_version_one,
 )
 from rundra.config._yaml import read_yaml_document
 from rundra.config.preparation import parse_preparation
-from rundra.domain.preparation import PreparationConfig
+from rundra.domain.preparation import PreparationConfig, PreparationStorageConfig
 from rundra.security import is_credential_field
 
 _PROJECT_V1_FIELDS = frozenset({"version", "default_profile", "defaults", "profiles"})
@@ -24,7 +24,8 @@ _PROJECT_V2_FIELDS = _PROJECT_V1_FIELDS | {"preparation"}
 _LAUNCH_VALUE_FIELDS = frozenset(
     {"config", "seed", "target", "source_root", "destination"}
 )
-_USER_FIELDS = frozenset({"version", "defaults"})
+_USER_V1_FIELDS = frozenset({"version", "defaults"})
+_USER_V2_FIELDS = _USER_V1_FIELDS | {"preparation"}
 _USER_VALUE_FIELDS = frozenset(
     {
         "config",
@@ -128,19 +129,24 @@ class ProjectLaunchConfig:
 
 @dataclass(frozen=True, slots=True)
 class UserLaunchConfig:
-    """Strict version-1 per-user launch defaults, separate from targets."""
+    """Strict per-user launch defaults and local preparation storage."""
 
     version: int
     source: Path
     defaults: LaunchValues
+    preparation: PreparationStorageConfig = PreparationStorageConfig()
 
     def __post_init__(self) -> None:
-        if type(self.version) is not int or self.version != 1:
-            raise ValueError("UserLaunchConfig version must be 1")
+        if type(self.version) is not int or self.version not in {1, 2}:
+            raise ValueError("UserLaunchConfig version must be 1 or 2")
         if not isinstance(self.source, Path) or not self.source.is_absolute():
             raise ValueError("UserLaunchConfig source must be an absolute Path")
         if type(self.defaults) is not LaunchValues:
             raise TypeError("UserLaunchConfig defaults must be LaunchValues")
+        if type(self.preparation) is not PreparationStorageConfig:
+            raise TypeError("UserLaunchConfig preparation has an invalid type")
+        if self.version == 1 and self.preparation != PreparationStorageConfig():
+            raise ValueError("UserLaunchConfig v1 cannot define preparation")
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,28 +307,98 @@ def load_user_launch(source: Path) -> UserLaunchConfig:
         read_yaml_document(normalized_source), source=normalized_source, path=()
     )
     _reject_credential_fields(document, normalized_source, ())
+    if "version" not in document:
+        fail(
+            source=normalized_source,
+            path=("version",),
+            code="MISSING_FIELD",
+            message="Required field 'version' is missing",
+        )
+    version = expect_integer(
+        document["version"], source=normalized_source, path=("version",), minimum=1
+    )
+    if version not in {1, 2}:
+        fail(
+            source=normalized_source,
+            path=("version",),
+            code="UNSUPPORTED_VERSION",
+            message="Unsupported user config version; supported versions are 1 and 2",
+        )
     check_fields(
         document,
-        allowed=_USER_FIELDS,
-        required=frozenset({"version", "defaults"}),
+        allowed=_USER_V1_FIELDS if version == 1 else _USER_V2_FIELDS,
+        required=(
+            frozenset({"version", "defaults"})
+            if version == 1
+            else frozenset({"version", "preparation"})
+        ),
         source=normalized_source,
         path=(),
     )
-    version = require_version_one(document["version"], source=normalized_source)
-    defaults = _launch_values(
-        document["defaults"],
-        normalized_source,
-        ("defaults",),
-        allowed=_USER_VALUE_FIELDS,
+    defaults = (
+        _launch_values(
+            document["defaults"],
+            normalized_source,
+            ("defaults",),
+            allowed=_USER_VALUE_FIELDS,
+        )
+        if "defaults" in document
+        else LaunchValues()
     )
-    if defaults == LaunchValues():
+    if version == 1 and defaults == LaunchValues():
         fail(
             source=normalized_source,
             path=("defaults",),
             code="EMPTY_LAUNCH_CONFIG",
             message="User launch defaults must not be empty",
         )
-    return UserLaunchConfig(version, normalized_source, defaults)
+    preparation = (
+        _user_preparation_storage(
+            document["preparation"], normalized_source, ("preparation",)
+        )
+        if version == 2
+        else PreparationStorageConfig()
+    )
+    return UserLaunchConfig(version, normalized_source, defaults, preparation)
+
+
+def _user_preparation_storage(
+    value: object,
+    source: Path,
+    path: ConfigPath,
+) -> PreparationStorageConfig:
+    section = expect_mapping(value, source=source, path=path)
+    check_fields(
+        section,
+        allowed=frozenset({"cache_root", "image_search_paths"}),
+        required=frozenset(),
+        source=source,
+        path=path,
+    )
+    if not section:
+        fail(
+            source=source,
+            path=path,
+            code="EMPTY_PREPARATION_STORAGE",
+            message="User preparation storage must not be empty",
+        )
+    cache_root = _optional_path(section, "cache_root", source, path)
+    search_paths = tuple(
+        _resolve_declared_path(raw, source)
+        for raw in expect_string_list(
+            section.get("image_search_paths", []),
+            source=source,
+            path=(*path, "image_search_paths"),
+        )
+    )
+    return PreparationStorageConfig(cache_root, search_paths)
+
+
+def _resolve_declared_path(raw: str, source: Path) -> Path:
+    declared = Path(raw).expanduser()
+    if not declared.is_absolute():
+        declared = source.parent / declared
+    return declared.resolve()
 
 
 def discover_user_launch(source: Path | None = None) -> UserLaunchConfig | None:
