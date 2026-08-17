@@ -1425,7 +1425,10 @@ def run_operation(
                 remote_preparation=remote_preparation,
                 remote_source_root=remote_source_root,
                 max_concurrent_jobs=(
-                    targets_config.execution[target_name].max_concurrent_jobs
+                    min(
+                        targets_config.execution[target_name].max_concurrent_jobs,
+                        targets_config.execution[target_name].worker_pool.max_workers,
+                    )
                     if target_name in targets_config.execution
                     else None
                 ),
@@ -1662,7 +1665,10 @@ def submit_operation(
                 remote_preparation=remote_preparation,
                 remote_source_root=remote_source_root,
                 max_concurrent_jobs=(
-                    targets_config.execution[target_name].max_concurrent_jobs
+                    min(
+                        targets_config.execution[target_name].max_concurrent_jobs,
+                        targets_config.execution[target_name].worker_pool.max_workers,
+                    )
                     if target_name in targets_config.execution
                     else None
                 ),
