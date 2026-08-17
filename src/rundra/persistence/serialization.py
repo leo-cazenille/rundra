@@ -23,6 +23,7 @@ from rundra.domain.models import (
     Task,
     TaskId,
 )
+from rundra.domain.parameters import ParameterSet
 from rundra.domain.preparation import PreparationRecord, PreparedOutput
 from rundra.domain.records import RunRecord
 from rundra.domain.states import ExecutionState, RetrievalState
@@ -60,6 +61,7 @@ _RECORD_FIELDS_V1 = frozenset(
     }
 )
 _RECORD_FIELDS_V2 = _RECORD_FIELDS_V1 | {"preparation"}
+_RECORD_FIELDS_V3 = _RECORD_FIELDS_V2
 
 
 def record_to_dict(record: RunRecord) -> JsonObject:
@@ -69,7 +71,7 @@ def record_to_dict(record: RunRecord) -> JsonObject:
     document: JsonObject = {
         "format_version": record.format_version,
         "framework_version": record.framework_version,
-        "run": _run_to_dict(record.run),
+        "run": _run_to_dict(record.run, version=record.format_version),
         "experiment": _experiment_to_dict(record.experiment),
         "source_root": str(record.source_root),
         "experiment_source": _path_or_none(record.experiment_source),
@@ -110,9 +112,12 @@ def record_to_dict(record: RunRecord) -> JsonObject:
         },
         "artifacts": [_artifact_to_dict(artifact) for artifact in record.artifacts],
     }
-    if record.format_version == 2:
-        assert record.preparation is not None
-        document["preparation"] = _preparation_to_dict(record.preparation)
+    if record.format_version in {2, 3}:
+        document["preparation"] = (
+            None
+            if record.preparation is None
+            else _preparation_to_dict(record.preparation)
+        )
     return document
 
 
@@ -122,7 +127,7 @@ def record_from_dict(value: object) -> RunRecord:
     version = document.get("format_version")
     if type(version) is not int:
         raise RunRecordFormatError("record.format_version must be an integer")
-    if version not in {1, 2}:
+    if version not in {1, 2, 3}:
         raise RunRecordFormatError(f"unsupported format_version {version}")
     document.setdefault("task_array_mapping", [])
     document.setdefault("task_scheduler_ids", {})
@@ -130,10 +135,12 @@ def record_from_dict(value: object) -> RunRecord:
     document.setdefault("task_retrieval_states", {})
     _exact_fields(
         document,
-        _RECORD_FIELDS_V1 if version == 1 else _RECORD_FIELDS_V2,
+        _RECORD_FIELDS_V1
+        if version == 1
+        else (_RECORD_FIELDS_V2 if version == 2 else _RECORD_FIELDS_V3),
         path="record",
     )
-    run = _parse_run(document["run"], path="run")
+    run = _parse_run(document["run"], path="run", version=version)
     try:
         return RunRecord(
             format_version=version,
@@ -155,7 +162,9 @@ def record_from_dict(value: object) -> RunRecord:
                 document["container_digest"], path="container_digest"
             ),
             preparation=(
-                _parse_preparation(document["preparation"]) if version == 2 else None
+                _parse_preparation(document["preparation"])
+                if version in {2, 3} and document["preparation"] is not None
+                else None
             ),
             scheduler_job_ids=_string_tuple(
                 document["scheduler_job_ids"], path="scheduler_job_ids"
@@ -411,8 +420,8 @@ def _config_to_dict(config: ConfigSnapshot) -> JsonObject:
     return {"source": str(config.source), "content": config.content}
 
 
-def _task_to_dict(task: Task) -> JsonObject:
-    return {
+def _task_to_dict(task: Task, *, version: int) -> JsonObject:
+    document: JsonObject = {
         "id": str(task.id),
         "run_id": str(task.run_id),
         "experiment_name": task.experiment_name,
@@ -421,14 +430,21 @@ def _task_to_dict(task: Task) -> JsonObject:
         "resources": _resources_to_dict(task.resources),
         "state": task.state.value,
     }
+    if version == 3:
+        assert task.parameter_set is not None
+        document["parameter_set"] = {
+            "id": task.parameter_set.id,
+            "choices": dict(task.parameter_set.choices),
+        }
+    return document
 
 
-def _run_to_dict(run: Run) -> JsonObject:
+def _run_to_dict(run: Run, *, version: int) -> JsonObject:
     return {
         "id": str(run.id),
         "experiment_name": run.experiment_name,
         "target": _target_to_dict(run.target),
-        "tasks": [_task_to_dict(task) for task in run.tasks],
+        "tasks": [_task_to_dict(task, version=version) for task in run.tasks],
         "created_at": run.created_at.isoformat(),
         "state": run.state.value,
         "retrieval_state": run.retrieval_state.value,
@@ -616,7 +632,7 @@ def _parse_config(value: object, *, path: str) -> ConfigSnapshot:
         _invalid(path, error)
 
 
-def _parse_task(value: object, *, path: str) -> Task:
+def _parse_task(value: object, *, path: str, version: int) -> Task:
     document = _object(value, path=path)
     _exact_fields(
         document,
@@ -629,6 +645,7 @@ def _parse_task(value: object, *, path: str) -> Task:
                 "seed",
                 "resources",
                 "state",
+                *(('parameter_set',) if version == 3 else ()),
             }
         ),
         path=path,
@@ -643,6 +660,13 @@ def _parse_task(value: object, *, path: str) -> Task:
             config=_parse_config(document["config"], path=f"{path}.config"),
             seed=_integer(document["seed"], path=f"{path}.seed"),
             resources=_parse_resources(document["resources"], path=f"{path}.resources"),
+            parameter_set=(
+                _parse_parameter_set(
+                    document["parameter_set"], path=f"{path}.parameter_set"
+                )
+                if version == 3
+                else None
+            ),
             state=_execution_state(document["state"], path=f"{path}.state"),
         )
     except RunRecordFormatError:
@@ -651,7 +675,7 @@ def _parse_task(value: object, *, path: str) -> Task:
         _invalid(path, error)
 
 
-def _parse_run(value: object, *, path: str) -> Run:
+def _parse_run(value: object, *, path: str, version: int) -> Run:
     document = _object(value, path=path)
     _exact_fields(
         document,
@@ -677,7 +701,7 @@ def _parse_run(value: object, *, path: str) -> Run:
             ),
             target=_parse_target(document["target"], path=f"{path}.target"),
             tasks=tuple(
-                _parse_task(item, path=f"{path}.tasks[{index}]")
+                _parse_task(item, path=f"{path}.tasks[{index}]", version=version)
                 for index, item in enumerate(task_values)
             ),
             created_at=_datetime(document["created_at"], path=f"{path}.created_at"),
@@ -688,6 +712,19 @@ def _parse_run(value: object, *, path: str) -> Run:
         )
     except RunRecordFormatError:
         raise
+    except (TypeError, ValueError) as error:
+        _invalid(path, error)
+
+
+def _parse_parameter_set(value: object, *, path: str) -> ParameterSet:
+    document = _object(value, path=path)
+    _exact_fields(document, frozenset({"id", "choices"}), path=path)
+    choices = _object(document["choices"], path=f"{path}.choices")
+    try:
+        return ParameterSet(
+            _string(document["id"], path=f"{path}.id"),
+            choices,
+        )
     except (TypeError, ValueError) as error:
         _invalid(path, error)
 

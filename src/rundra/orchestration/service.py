@@ -544,6 +544,11 @@ class OrchestrationService:
                     target=request.plan.target,
                     source_root=request.source_root,
                     task_ids=tuple(unit.task_id for unit in units),
+                    task_configs=(
+                        {unit.task_id: unit.config for unit in units}
+                        if request.plan.version == 3
+                        else {}
+                    ),
                 )
             )
         except Exception as error:
@@ -670,6 +675,7 @@ class OrchestrationService:
                     scheduler_group,
                     request.plan.array_mapping,
                     workspace.metadata / "slurm-array-tasks.sh",
+                    allow_duplicate_seeds=request.plan.version == 3,
                 )
                 submission = (
                     cast(DependencyScheduler, self._scheduler).submit_array_afterok(
@@ -894,6 +900,7 @@ class OrchestrationService:
                 config=unit.config,
                 seed=unit.seed,
                 resources=unit.resources,
+                parameter_set=unit.parameter_set,
             )
             for unit in request.plan.units
         )

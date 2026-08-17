@@ -10,6 +10,7 @@ from pathlib import PurePath
 from types import MappingProxyType
 from uuid import uuid4
 
+from rundra.domain.parameters import ParameterSet
 from rundra.domain.states import ExecutionState, RetrievalState
 
 _RUN_ID_PATTERN = re.compile(r"run_[0-9a-f]{32}\Z")
@@ -284,6 +285,7 @@ class Task:
     config: ConfigSnapshot
     seed: int
     resources: ResourceRequest
+    parameter_set: ParameterSet | None = None
     state: ExecutionState = ExecutionState.CREATED
 
     def __post_init__(self) -> None:
@@ -299,6 +301,8 @@ class Task:
             raise TypeError("Task config must be a ConfigSnapshot")
         if type(self.resources) is not ResourceRequest:
             raise TypeError("Task resources must be a ResourceRequest")
+        if self.parameter_set is not None and type(self.parameter_set) is not ParameterSet:
+            raise TypeError("Task parameter_set must be a ParameterSet or None")
         if type(self.state) is not ExecutionState:
             raise TypeError("Task state must be an ExecutionState")
         if type(self.seed) is not int:
@@ -348,11 +352,15 @@ class Run:
             raise ValueError(
                 "Run Tasks must use contiguous ordinal IDs in requested seed order"
             )
-        if len({task.seed for task in tasks}) != len(tasks):
-            raise ValueError("Run must contain unique Task seeds in version 0.1")
-        effective_config = tasks[0].config
-        if any(task.config != effective_config for task in tasks[1:]):
-            raise ValueError("Run Tasks must share one effective config in version 0.1")
+        parameterized = tuple(task.parameter_set is not None for task in tasks)
+        if any(parameterized) and not all(parameterized):
+            raise ValueError("Run Tasks must consistently define parameter sets")
+        if not any(parameterized):
+            if len({task.seed for task in tasks}) != len(tasks):
+                raise ValueError("Run must contain unique Task seeds")
+            effective_config = tasks[0].config
+            if any(task.config != effective_config for task in tasks[1:]):
+                raise ValueError("Run Tasks must share one effective config")
         if not isinstance(self.created_at, datetime):
             raise TypeError("Run created_at must be a datetime")
         if self.created_at.utcoffset() is None:

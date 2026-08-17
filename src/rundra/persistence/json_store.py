@@ -268,6 +268,7 @@ def _task_definition(task: Task) -> tuple[object, ...]:
         task.config,
         task.seed,
         task.resources,
+        task.parameter_set,
     )
 
 

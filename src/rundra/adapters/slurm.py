@@ -121,6 +121,7 @@ class SlurmArrayRequest:
     mapping: tuple[ArrayTaskMapping, ...]
     manifest_path: PurePath
     max_array_size: int
+    allow_duplicate_seeds: bool = False
 
     def __post_init__(self) -> None:
         if type(self.group) is not SchedulerGroup:
@@ -143,7 +144,9 @@ class SlurmArrayRequest:
             raise SlurmScriptError(
                 "Slurm array indices must be contiguous and zero-based"
             )
-        if len({item.seed for item in mapping}) != len(mapping):
+        if type(self.allow_duplicate_seeds) is not bool:
+            raise TypeError("SlurmArrayRequest allow_duplicate_seeds must be bool")
+        if not self.allow_duplicate_seeds and len({item.seed for item in mapping}) != len(mapping):
             raise SlurmScriptError("Slurm array mapping seeds must be unique")
         resources = self.group.units[0].resources
         if any(unit.resources != resources for unit in self.group.units[1:]):
@@ -295,6 +298,7 @@ class SlurmScheduler:
             request.mapping,
             request.manifest_path,
             self.array_limit(),
+            request.allow_duplicate_seeds,
         )
         return self.submit_bounded_array(bounded)
 
@@ -313,6 +317,7 @@ class SlurmScheduler:
             request.mapping,
             request.manifest_path,
             self.array_limit(),
+            request.allow_duplicate_seeds,
         )
         return self._submit_bounded_array(
             bounded,

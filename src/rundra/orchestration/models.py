@@ -12,6 +12,7 @@ from rundra.domain.models import (
     Target,
     TaskId,
 )
+from rundra.domain.parameters import ParameterSet
 from rundra.domain.preparation import PreparationPlan
 
 ONE_UNIT_PER_TASK = "one_unit_per_task"
@@ -44,6 +45,7 @@ class ExecutionUnit:
     config: ConfigSnapshot
     command: Command
     resources: ResourceRequest
+    parameter_set: ParameterSet | None = None
 
     def __post_init__(self) -> None:
         if type(self.task_id) is not TaskId:
@@ -56,6 +58,8 @@ class ExecutionUnit:
             raise TypeError("ExecutionUnit command must be a Command")
         if type(self.resources) is not ResourceRequest:
             raise TypeError("ExecutionUnit resources must be a ResourceRequest")
+        if self.parameter_set is not None and type(self.parameter_set) is not ParameterSet:
+            raise TypeError("ExecutionUnit parameter_set must be a ParameterSet or None")
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,7 +100,9 @@ class ExecutionPlan:
             raise ValueError("ExecutionPlan v1 cannot contain preparation")
         if self.version == 2 and type(self.preparation) is not PreparationPlan:
             raise ValueError("ExecutionPlan v2 requires preparation")
-        if self.version not in {1, 2}:
+        if self.version == 3 and any(unit.parameter_set is None for unit in self.units):
+            raise ValueError("ExecutionPlan v3 requires parameterized units")
+        if self.version not in {1, 2, 3}:
             raise ValueError("ExecutionPlan version is unsupported")
         if type(self.experiment_name) is not str or not self.experiment_name.strip():
             raise ValueError("ExecutionPlan experiment_name must be nonblank")
@@ -114,10 +120,10 @@ class ExecutionPlan:
         expected_ids = tuple(TaskId.from_ordinal(index) for index in range(len(units)))
         if tuple(unit.task_id for unit in units) != expected_ids:
             raise ValueError("ExecutionPlan units must use contiguous ordinal Task IDs")
-        if len({unit.seed for unit in units}) != len(units):
+        if self.version < 3 and len({unit.seed for unit in units}) != len(units):
             raise ValueError("ExecutionPlan unit seeds must be unique")
         effective_config = units[0].config
-        if any(unit.config != effective_config for unit in units[1:]):
+        if self.version < 3 and any(unit.config != effective_config for unit in units[1:]):
             raise ValueError("ExecutionPlan units must share one effective config")
         groups = tuple(self.groups)
         if any(type(group) is not ExecutionGroup for group in groups):

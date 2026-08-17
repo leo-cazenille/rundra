@@ -366,3 +366,30 @@ def test_execution_plan_rejects_heterogeneous_array_resources() -> None:
             array_mapping=plan.array_mapping,
             strategy=plan.strategy,
         )
+
+
+def test_sweep_plan_crosses_parameter_sets_with_repeated_seeds() -> None:
+    from dataclasses import replace
+
+    from rundra.domain.parameters import ParameterSet
+    from rundra.domain.sweeps import ExpandedConfig
+    from rundra.orchestration.planner import create_sweep_plan
+
+    first = ExpandedConfig(
+        _config(), ParameterSet("parameter_set_000000", {"regime": "ballistic"})
+    )
+    second = ExpandedConfig(
+        replace(_config(), content="regime: tumble\n"),
+        ParameterSet("parameter_set_000001", {"regime": "long_tumble"}),
+    )
+
+    plan = create_sweep_plan(_spec(), (first, second), _target(), seeds=(4, 9))
+
+    assert plan.version == 3
+    assert [unit.seed for unit in plan.units] == [4, 9, 4, 9]
+    assert [unit.parameter_set.id for unit in plan.units if unit.parameter_set] == [
+        "parameter_set_000000",
+        "parameter_set_000000",
+        "parameter_set_000001",
+        "parameter_set_000001",
+    ]

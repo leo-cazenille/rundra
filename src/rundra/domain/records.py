@@ -76,8 +76,8 @@ class RunRecord:
     def __post_init__(self) -> None:
         if type(self.format_version) is not int:
             raise TypeError("RunRecord format_version must be an integer")
-        if self.format_version not in {1, 2}:
-            raise ValueError("RunRecord format_version must be 1 or 2")
+        if self.format_version not in {1, 2, 3}:
+            raise ValueError("RunRecord format_version must be 1, 2, or 3")
         if type(self.framework_version) is not str:
             raise TypeError("RunRecord framework_version must be a string")
         if not self.framework_version.strip():
@@ -92,6 +92,10 @@ class RunRecord:
             raise ValueError("RunRecord v1 cannot contain preparation")
         if self.format_version == 2 and type(self.preparation) is not PreparationRecord:
             raise ValueError("RunRecord v2 requires preparation")
+        if self.format_version == 3 and any(
+            task.parameter_set is None for task in self.run.tasks
+        ):
+            raise ValueError("RunRecord v3 requires parameterized Tasks")
         if self.preparation is not None:
             if self.container_digest != self.preparation.image_sha256:
                 raise ValueError(

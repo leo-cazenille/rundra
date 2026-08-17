@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import re
 from collections.abc import Sequence
 from typing import cast
@@ -15,6 +16,7 @@ from rundra.domain.models import (
     TaskId,
 )
 from rundra.domain.preparation import PreparationPlan
+from rundra.domain.sweeps import ExpandedConfig
 from rundra.orchestration.models import (
     ONE_UNIT_PER_TASK,
     SLURM_ARRAY,
@@ -90,6 +92,56 @@ def create_plan(
     uses_array = target.scheduler.kind == "slurm" and len(units) > 1
     return ExecutionPlan(
         version=2 if preparation is not None else 1,
+        experiment_name=spec.name,
+        target=target,
+        units=units,
+        groups=_execution_groups(target, units),
+        array_mapping=(
+            tuple(
+                ArrayTaskMapping(unit.task_id, unit.seed, index)
+                for index, unit in enumerate(units)
+            )
+            if uses_array
+            else ()
+        ),
+        strategy=SLURM_ARRAY if uses_array else ONE_UNIT_PER_TASK,
+        preparation=preparation,
+    )
+
+
+def create_sweep_plan(
+    spec: ExperimentSpec,
+    configs: Sequence[ExpandedConfig],
+    target: Target,
+    *,
+    seeds: Sequence[object],
+    preparation: PreparationPlan | None = None,
+) -> ExecutionPlan:
+    """Create one deterministic parameter-set by seed execution plan."""
+    normalized_seeds = _validate_seed_set(seeds)
+    expanded = tuple(configs)
+    if not expanded or any(config.parameter_set is None for config in expanded):
+        raise PlanningError(
+            code="INVALID_SWEEP",
+            message="Sweep plans require parameterized effective configs",
+        )
+    _validate_placeholders(spec.command)
+    units = tuple(
+        ExecutionUnit(
+            task_id=TaskId.from_ordinal(index),
+            seed=seed,
+            config=expanded_config.config,
+            command=_render_command(spec.command, expanded_config.config, seed),
+            resources=spec.resources,
+            parameter_set=expanded_config.parameter_set,
+        )
+        for index, (expanded_config, seed) in enumerate(
+            itertools.product(expanded, normalized_seeds)
+        )
+    )
+    uses_array = target.scheduler.kind == "slurm" and len(units) > 1
+    return ExecutionPlan(
+        version=3,
         experiment_name=spec.name,
         target=target,
         units=units,

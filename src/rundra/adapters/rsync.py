@@ -86,6 +86,7 @@ class RsyncStager:
             raise RsyncUnavailableError(
                 f"Could not search for rsync executable {self._executable!r}"
             ) from error
+
         if resolved is None:
             raise RsyncUnavailableError(
                 f"rsync executable {self._executable!r} was not found on PATH"
@@ -153,6 +154,36 @@ class RsyncStager:
                 f"Could not prepare effective config for Run {request.run_id}"
             ) from error
 
+        task_config_paths: dict[TaskId, PurePath] = {}
+        for task_id, task_config in request.task_configs.items():
+            task_path = workspace.inputs / f"{task_id}.yaml"
+            try:
+                with tempfile.NamedTemporaryFile(
+                    prefix="rundra-task-config-", suffix=".yaml"
+                ) as stream:
+                    stream.write(task_config.content.encode("utf-8"))
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                    self._upload(
+                        (
+                            self._executable,
+                            "--archive",
+                            "--protect-args",
+                            "--",
+                            stream.name,
+                            _remote_destination(host, task_path, directory=False),
+                        ),
+                        kind="Task effective config",
+                        run_id=str(request.run_id),
+                    )
+            except RsyncStagerError:
+                raise
+            except OSError as error:
+                raise RsyncUploadError(
+                    f"Could not prepare Task config for Run {request.run_id}"
+                ) from error
+            task_config_paths[task_id] = task_path
+
         try:
             seal = self._transport.run(
                 _seal_command(workspace.source, workspace.inputs)
@@ -182,6 +213,7 @@ class RsyncStager:
                     size_bytes=len(config_content),
                 ),
             ),
+            task_configs=task_config_paths,
         )
 
     def publish_verified_file(

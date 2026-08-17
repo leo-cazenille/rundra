@@ -12,7 +12,8 @@ import yaml
 from rundra.config._yaml import read_yaml_document
 from rundra.config.errors import ConfigError
 from rundra.domain.models import ConfigSnapshot
-from rundra.domain.sweeps import ExpandedConfig, ParameterSet, SweepExpansion
+from rundra.domain.parameters import ParameterSet
+from rundra.domain.sweeps import ExpandedConfig, SweepExpansion
 
 _SEEDS = re.compile(r"([0-9]+):([0-9]+)\Z")
 _MARKERS = frozenset(

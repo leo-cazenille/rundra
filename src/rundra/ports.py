@@ -131,6 +131,7 @@ class SchedulerArrayRequest:
     group: SchedulerGroup
     mapping: tuple[ArrayTaskMapping, ...]
     manifest_path: PurePath
+    allow_duplicate_seeds: bool = False
 
     def __post_init__(self) -> None:
         if type(self.group) is not SchedulerGroup:
@@ -152,6 +153,10 @@ class SchedulerArrayRequest:
             raise ValueError(
                 "SchedulerArrayRequest mapping must match SchedulerGroup order"
             )
+        if type(self.allow_duplicate_seeds) is not bool:
+            raise TypeError("SchedulerArrayRequest allow_duplicate_seeds must be bool")
+        if not self.allow_duplicate_seeds and len({item.seed for item in mapping}) != len(mapping):
+            raise ValueError("SchedulerArrayRequest mapping seeds must be unique")
         if not isinstance(self.manifest_path, PurePath):
             raise TypeError("SchedulerArrayRequest manifest_path must be a path")
         if not self.manifest_path.is_absolute() or "\x00" in str(self.manifest_path):
@@ -306,6 +311,7 @@ class StageRequest:
     target: Target
     source_root: PurePath
     task_ids: tuple[TaskId, ...] = ()
+    task_configs: Mapping[TaskId, ConfigSnapshot] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if type(self.run_id) is not RunId:
@@ -327,7 +333,16 @@ class StageRequest:
             raise TypeError("StageRequest task_ids must contain only TaskIds")
         if len(set(task_ids)) != len(task_ids):
             raise ValueError("StageRequest task_ids must be unique")
+        task_configs = dict(self.task_configs)
+        if any(
+            type(task_id) is not TaskId or type(config) is not ConfigSnapshot
+            for task_id, config in task_configs.items()
+        ):
+            raise TypeError("StageRequest task_configs must map TaskIds to configs")
+        if task_configs and set(task_configs) != set(task_ids):
+            raise ValueError("StageRequest task_configs must match task_ids")
         object.__setattr__(self, "task_ids", task_ids)
+        object.__setattr__(self, "task_configs", MappingProxyType(task_configs))
 
 
 @dataclass(frozen=True, slots=True)
@@ -343,6 +358,7 @@ class StagedWorkspace:
     logs: PurePath
     metadata: PurePath
     artifacts: tuple[Artifact, ...] = ()
+    task_configs: Mapping[TaskId, PurePath] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         for name in (
@@ -358,6 +374,13 @@ class StagedWorkspace:
             if not isinstance(getattr(self, name), PurePath):
                 raise TypeError(f"StagedWorkspace {name} must be a PurePath")
         object.__setattr__(self, "artifacts", _freeze_artifacts(self.artifacts))
+        task_configs = dict(self.task_configs)
+        if any(
+            type(task_id) is not TaskId or not isinstance(path, PurePath)
+            for task_id, path in task_configs.items()
+        ):
+            raise TypeError("StagedWorkspace task_configs must map TaskIds to paths")
+        object.__setattr__(self, "task_configs", MappingProxyType(task_configs))
 
     def for_task(self, task_id: TaskId) -> TaskWorkspace:
         """Derive isolated mutable paths for one logical Task."""
@@ -367,7 +390,7 @@ class StagedWorkspace:
         return TaskWorkspace(
             task_id=task_id,
             source=self.source,
-            config=self.config,
+            config=self.task_configs.get(task_id, self.config),
             runtime=self.runtime / name,
             outputs=self.outputs / name,
             stdout=self.logs / f"{name}.stdout",

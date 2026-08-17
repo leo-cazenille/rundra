@@ -16,7 +16,7 @@ from rundra.adapters._local_paths import (
     reject_destination_tree_symlinks,
     resolve_write_destination,
 )
-from rundra.domain.models import Artifact, ArtifactKind, Command
+from rundra.domain.models import Artifact, ArtifactKind, Command, TaskId
 from rundra.domain.states import ExecutionState
 from rundra.ports import (
     CapabilityCheck,
@@ -234,6 +234,11 @@ class LocalStager:
                 stream.write(config_content)
                 stream.flush()
                 os.fsync(stream.fileno())
+            task_config_paths: dict[TaskId, Path] = {}
+            for task_id, task_config in request.task_configs.items():
+                task_path = inputs / f"{task_id}.yaml"
+                task_path.write_text(task_config.content, encoding="utf-8")
+                task_config_paths[task_id] = task_path
             _seal(source_snapshot)
             _seal(inputs)
         except Exception as error:
@@ -261,6 +266,7 @@ class LocalStager:
                     size_bytes=len(config_content),
                 ),
             ),
+            task_configs=task_config_paths,
         )
 
     def fetch(self, request: FetchRequest) -> FetchResult:
