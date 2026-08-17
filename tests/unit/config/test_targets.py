@@ -122,6 +122,7 @@ targets:
     assert config.version == 3
     assert policy.hard_task_limit == 100_000_000
     assert policy.max_active_tasks == 800
+    assert policy.max_concurrent_jobs == 256
     assert policy.worker_pool.max_workers == 64
     assert policy.worker_pool.tasks_per_lease == 100
 

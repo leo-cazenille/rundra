@@ -407,6 +407,7 @@ def _plan_document(plan: ExecutionPlan) -> dict[str, Any]:
             "scheduler_batches": plan.scheduler_batches,
             "worker_count": plan.worker_count,
             "max_active_tasks": policy.max_active_tasks,
+            "max_concurrent_jobs": policy.max_concurrent_jobs,
             "max_array_size": policy.max_array_size,
         }
         document["retrieval_policy"] = plan.retrieval_policy

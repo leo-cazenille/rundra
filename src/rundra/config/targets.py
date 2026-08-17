@@ -17,7 +17,11 @@ from rundra.config._schema import (
 from rundra.config._yaml import read_yaml_document
 from rundra.domain.models import BackendConfig, NativeValue, Target
 from rundra.domain.preparation import PreparationStorageConfig
-from rundra.domain.scaling import ExecutionPolicy, WorkerPoolPolicy
+from rundra.domain.scaling import (
+    DEFAULT_MAX_CONCURRENT_JOBS,
+    ExecutionPolicy,
+    WorkerPoolPolicy,
+)
 from rundra.security import is_credential_field, is_safe_ssh_destination
 
 _TARGET_V1_FIELDS = frozenset(
@@ -167,6 +171,7 @@ def _execution_policy(
             "hard_task_limit",
             "confirmation_threshold",
             "max_active_tasks",
+            "max_concurrent_jobs",
             "max_array_size",
             "output_shard_tasks",
             "automatic_retrieval_threshold",
@@ -176,7 +181,7 @@ def _execution_policy(
     check_fields(
         section,
         allowed=fields,
-        required=fields,
+        required=fields - {"max_concurrent_jobs"},
         source=source,
         path=path,
     )
@@ -245,6 +250,12 @@ def _execution_policy(
                     path=(*worker_path, "requeue_limit"),
                     minimum=0,
                 ),
+            ),
+            max_concurrent_jobs=expect_integer(
+                section.get("max_concurrent_jobs", DEFAULT_MAX_CONCURRENT_JOBS),
+                source=source,
+                path=(*path, "max_concurrent_jobs"),
+                minimum=1,
             ),
         )
     except (TypeError, ValueError) as error:

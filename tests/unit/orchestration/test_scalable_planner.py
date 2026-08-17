@@ -78,20 +78,18 @@ def test_scalable_plan_is_constant_size_and_selects_worker_pool() -> None:
 
 
 def test_scalable_plan_reports_multi_array_batches_without_controller_probe() -> None:
-    plan = create_scalable_plan(
-        _spec(),
-        (ExpandedConfig(ConfigSnapshot(PurePosixPath("a.yaml"), "mode: a\n")),),
-        _target(),
-        seeds=compact_seed_range(seeds="0:19999"),
-        policy=_policy(),
-        strategy="multi-array",
-        retrieval_policy="none",
-    )
+    with pytest.raises(PlanningError) as caught:
+        create_scalable_plan(
+            _spec(),
+            (ExpandedConfig(ConfigSnapshot(PurePosixPath("a.yaml"), "mode: a\n")),),
+            _target(),
+            seeds=compact_seed_range(seeds="0:19999"),
+            policy=_policy(),
+            strategy="multi-array",
+            retrieval_policy="none",
+        )
 
-    assert plan.strategy == "multi-array"
-    assert plan.scheduler_batches == 20
-    assert plan.worker_count is None
-    assert plan.retrieval_policy == "none"
+    assert caught.value.code == "CONCURRENT_JOB_LIMIT_EXCEEDED"
 
 
 def test_target_limits_and_exact_confirmation_are_enforced() -> None:

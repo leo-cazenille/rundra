@@ -721,7 +721,7 @@ concerns and are never contacted by `plan`.
 Target configuration version 2 adds preparation cache roots and explicit image
 search paths. Version 3 adds a required per-target `execution` policy. Every
 limit is explicit and site-owned: `hard_task_limit`, `confirmation_threshold`,
-`max_active_tasks`, `max_array_size`, `output_shard_tasks`,
+`max_active_tasks`, `max_concurrent_jobs`, `max_array_size`, `output_shard_tasks`,
 `automatic_retrieval_threshold`, and a `worker_pool` mapping containing
 `activation_threshold`, `max_workers`, `tasks_per_lease`,
 `infrastructure_retry_limit`, and `requeue_limit`. Project configuration and

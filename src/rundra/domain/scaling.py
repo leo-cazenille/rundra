@@ -6,6 +6,8 @@ from datetime import datetime
 from rundra.domain.models import Run, RunId, Target, TaskId
 from rundra.domain.states import ExecutionState, RetrievalState
 
+DEFAULT_MAX_CONCURRENT_JOBS = 256
+
 
 def _integer_at_least(value: object, minimum: int, field_name: str) -> int:
     if type(value) is not int:
@@ -147,6 +149,7 @@ class ExecutionPolicy:
     output_shard_tasks: int
     automatic_retrieval_threshold: int
     worker_pool: WorkerPoolPolicy
+    max_concurrent_jobs: int = DEFAULT_MAX_CONCURRENT_JOBS
 
     def __post_init__(self) -> None:
         _integer_at_least(self.hard_task_limit, 1, "hard_task_limit")
@@ -157,11 +160,14 @@ class ExecutionPolicy:
         _integer_at_least(
             self.automatic_retrieval_threshold, 0, "automatic_retrieval_threshold"
         )
+        _integer_at_least(self.max_concurrent_jobs, 1, "max_concurrent_jobs")
         if type(self.worker_pool) is not WorkerPoolPolicy:
             raise TypeError("worker_pool must be a WorkerPoolPolicy")
         if self.confirmation_threshold > self.hard_task_limit:
             raise ValueError("confirmation_threshold must not exceed hard_task_limit")
         if self.max_active_tasks > self.hard_task_limit:
             raise ValueError("max_active_tasks must not exceed hard_task_limit")
+        if self.max_concurrent_jobs > self.hard_task_limit:
+            raise ValueError("max_concurrent_jobs must not exceed hard_task_limit")
         if self.worker_pool.activation_threshold > self.hard_task_limit:
             raise ValueError("worker_pool activation_threshold exceeds hard_task_limit")

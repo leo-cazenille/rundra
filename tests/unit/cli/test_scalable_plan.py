@@ -55,7 +55,7 @@ targets:
         targets,
         "shoal",
         seeds="0:19999",
-        execution_strategy="multi-array",
+        execution_strategy="auto",
         retrieval_policy="none",
     )
 
@@ -65,9 +65,10 @@ targets:
     assert document["plan"]["task_space"]["task_count"] == 20_000
     assert document["plan"]["task_space"]["preview_count"] == 10
     assert document["plan"]["scheduling"] == {
-        "scheduler_batches": 20,
-        "worker_count": None,
+        "scheduler_batches": 1,
+        "worker_count": 64,
         "max_active_tasks": 800,
+        "max_concurrent_jobs": 256,
         "max_array_size": 1001,
     }
     assert document["plan"]["retrieval_policy"] == "none"

@@ -148,9 +148,24 @@ def create_scalable_plan(
     selected = (
         WORKER_POOL
         if strategy == "auto"
-        and task_space.task_count >= policy.worker_pool.activation_threshold
+        and (
+            task_space.task_count > policy.max_concurrent_jobs
+            or task_space.task_count >= policy.worker_pool.activation_threshold
+        )
         else (MULTI_ARRAY if strategy == "auto" else strategy)
     )
+    if selected == MULTI_ARRAY and task_space.task_count > policy.max_concurrent_jobs:
+        raise PlanningError(
+            code="CONCURRENT_JOB_LIMIT_EXCEEDED",
+            message=(
+                f"multi-array would submit {task_space.task_count} scheduler elements; "
+                f"target limit is {policy.max_concurrent_jobs}; use worker-pool"
+            ),
+            details={
+                "task_count": task_space.task_count,
+                "max_concurrent_jobs": policy.max_concurrent_jobs,
+            },
+        )
     if selected == WORKER_POOL and target.scheduler.kind != "slurm":
         raise PlanningError(
             code="UNSUPPORTED_EXECUTION_STRATEGY",
@@ -180,6 +195,7 @@ def create_scalable_plan(
         worker_count = min(
             policy.worker_pool.max_workers,
             policy.max_active_tasks,
+            policy.max_concurrent_jobs,
             leases,
         )
         scheduler_batches = 1
