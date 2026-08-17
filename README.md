@@ -148,6 +148,15 @@ uv run rundr plan examples/minimal/experiment.yaml
 uv run rundr run examples/minimal/experiment.yaml
 ```
 
+Long runs can expose lifecycle transitions, a TQDM phase bar, or both without
+changing their final stdout result:
+
+```bash
+uv run rundr run examples/minimal/experiment.yaml --verbose
+uv run rundr run examples/minimal/experiment.yaml --progress
+uv run rundr run examples/minimal/experiment.yaml --verbose --progress
+```
+
 When no seed is configured, Rundra generates a non-negative 63-bit integer
 before planning, displays it, passes it to the application, and stores it in the
 RunRecord. An independent `plan` and `run` generate different values. Replay a

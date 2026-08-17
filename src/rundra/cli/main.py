@@ -22,6 +22,11 @@ from rundra.cli.operations import (
     targets_operation,
     validate_operation,
 )
+from rundra.cli.progress import (
+    ProgressUnavailableError,
+    close_progress_reporter,
+    create_progress_reporter,
+)
 from rundra.cli.render import render_human, render_json
 from rundra.persistence import JsonRunStore
 from rundra.results import OperationError, OperationResult
@@ -97,6 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--project-file", type=Path)
     run.add_argument("--profile")
     _add_preparation_arguments(run)
+    _add_feedback_arguments(run)
     _add_store_option(run, use_default=False)
     _add_json_option(run)
 
@@ -109,6 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
     submit.add_argument("--project-file", type=Path)
     submit.add_argument("--profile")
     _add_preparation_arguments(submit)
+    _add_feedback_arguments(submit)
     _add_store_option(submit, use_default=False)
     _add_json_option(submit)
 
@@ -232,6 +239,19 @@ def _add_preparation_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_feedback_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="print detailed lifecycle transitions to stderr",
+    )
+    parser.add_argument(
+        "--progress",
+        action="store_true",
+        help="show a TQDM lifecycle progress bar on stderr",
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the rundr command-line interface."""
     raw_arguments = tuple(sys.argv[1:] if argv is None else argv)
@@ -268,6 +288,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
         parser.print_help()
         return 0
+    try:
+        progress = create_progress_reporter(
+            verbose=getattr(arguments, "verbose", False),
+            progress=getattr(arguments, "progress", False),
+            stream=sys.stderr,
+        )
+    except ProgressUnavailableError as error:
+        unavailable: OperationResult[Any] = OperationResult.failure(
+            arguments.command,
+            OperationError("PROGRESS_UNAVAILABLE", str(error)),
+        )
+        output = (
+            render_json(unavailable) if arguments.json else render_human(unavailable)
+        )
+        print(output, file=sys.stdout if arguments.json else sys.stderr)
+        return 1
     result: OperationResult[Any]
     if arguments.command == "validate":
         result = validate_operation(arguments.experiment)
@@ -340,6 +376,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 launch=run_inputs.launch,
                 preparation=run_inputs.preparation_plan,
                 preparation_storage=run_inputs.preparation_storage,
+                progress=progress,
             )
     elif arguments.command == "submit":
         resolved = resolve_run_inputs_operation(
@@ -378,6 +415,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 launch=submit_inputs.launch,
                 preparation=submit_inputs.preparation_plan,
                 preparation_storage=submit_inputs.preparation_storage,
+                progress=progress,
             )
     elif arguments.command == "status":
         result = status_operation(arguments.run_id, JsonRunStore(arguments.data_dir))
@@ -403,6 +441,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = cancel_operation(arguments.run_id, JsonRunStore(arguments.data_dir))
     else:
         raise AssertionError(f"Unhandled CLI command: {arguments.command}")
+    close_progress_reporter(progress)
     output = render_json(result) if arguments.json else render_human(result)
     stream = sys.stdout if arguments.json or result.ok else sys.stderr
     print(output, file=stream)

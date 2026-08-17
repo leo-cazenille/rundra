@@ -220,6 +220,7 @@ version = "0.1.0.dev0"
 source = { editable = "." }
 dependencies = [
     { name = "pyyaml" },
+    { name = "tqdm" },
 ]
 
 [package.dev-dependencies]
@@ -231,7 +232,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pyyaml", specifier = ">=6.0.2,<7" }]
+requires-dist = [
+    { name = "pyyaml", specifier = ">=6.0.2,<7" },
+    { name = "tqdm", specifier = ">=4.67,<5" },
+]
 
 [package.metadata.requires-dev]
 dev = [
@@ -239,6 +243,14 @@ dev = [
     { name = "pytest", specifier = ">=8.3" },
     { name = "ruff", specifier = ">=0.9" },
     { name = "types-pyyaml", specifier = ">=6.0.12" },
+]
+
+[[package]]
+name = "tqdm"
+version = "4.67.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
 ]
 
 [[package]]

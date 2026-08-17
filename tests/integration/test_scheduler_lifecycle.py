@@ -326,6 +326,8 @@ def _observation(
 
 
 def test_new_process_can_wait_from_durable_reference_to_terminal(tmp_path) -> None:
+    from rundra.orchestration.progress import ProgressEvent, ProgressPhase
+
     store_path = tmp_path / "records"
     JsonRunStore(store_path).create(_record())
     scheduler = SequenceScheduler(
@@ -338,11 +340,13 @@ def test_new_process_can_wait_from_durable_reference_to_terminal(tmp_path) -> No
         )
     )
     reloaded_store = JsonRunStore(store_path)
+    progress: list[ProgressEvent] = []
     service = SchedulerLifecycleService(
         store=reloaded_store,
         scheduler=scheduler,
         clock=lambda: _CREATED + timedelta(seconds=4),
         sleeper=lambda delay: None,
+        progress=progress.append,
     )
 
     completed = service.wait(reloaded_store.load(_RUN_ID), poll_interval=0.01)
@@ -353,6 +357,14 @@ def test_new_process_can_wait_from_durable_reference_to_terminal(tmp_path) -> No
     assert completed.allocated_nodes == ("node01",)
     assert reloaded_store.load(_RUN_ID) == completed
     assert scheduler.query_calls == 3
+    assert [event.phase for event in progress] == [ProgressPhase.WAIT] * 4
+    assert [event.message.split()[0] for event in progress] == [
+        "run=SUBMITTED",
+        "run=QUEUED",
+        "run=RUNNING",
+        "run=SUCCEEDED",
+    ]
+    assert progress[-1].completed == 5
 
 
 def test_wait_timeout_preserves_last_nonterminal_scheduler_state(tmp_path) -> None:

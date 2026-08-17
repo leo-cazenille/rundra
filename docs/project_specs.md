@@ -1363,6 +1363,13 @@ successful `status` reconciliation; `inspect` remains network-free.
 The implementation status and remaining adapter work are tracked in
 `docs/m7-execution-plan.md`.
 
+`run` and `submit` accept `--verbose` for meaningful lifecycle transitions and
+`--progress` for a TQDM phase display. Live feedback is always written to
+stderr, including when `--json` is selected, so stdout remains exactly one
+machine-readable result document. Scheduler polling emits feedback only when
+the preparation or scientific execution state changes. Neither option changes
+the persisted RunRecord or the execution plan.
+
 ---
 
 ### 21.3 `run`

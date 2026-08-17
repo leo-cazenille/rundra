@@ -52,3 +52,13 @@ increments so version-1 projects remain unchanged throughout.
   coverage for cold and warm preparation.
 - Run pytest, Ruff lint/format checks, mypy, JSON contracts, and the minimal
   local reproducibility example before completion.
+
+## 6. Interactive execution feedback
+
+- Add backend-neutral lifecycle events for resolution, preparation, staging,
+  submission, scheduler state changes, retrieval, and completion.
+- Add explicit `run`/`submit` `--verbose` details and an optional TQDM
+  `--progress` bar, writing live feedback only to stderr so final JSON on
+  stdout remains one stable document.
+- Report scheduler polling only when portable or native state changes and keep
+  the default command output unchanged when neither option is requested.

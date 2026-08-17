@@ -67,6 +67,7 @@ from rundra.orchestration.preparation import (
     remote_platform_fingerprint,
     remote_preparation_record,
 )
+from rundra.orchestration.progress import ProgressEvent, ProgressObserver, ProgressPhase
 from rundra.orchestration.service import (
     OrchestrationError,
     OrchestrationService,
@@ -91,6 +92,25 @@ from rundra.provenance import GitProvenanceCapture
 from rundra.results import OperationError, OperationResult
 
 _DEFAULT_PREPARATION_STORAGE = PreparationStorageConfig()
+
+
+def _report_progress(
+    observer: ProgressObserver | None,
+    phase: ProgressPhase,
+    completed: int,
+    message: str,
+    run_id: RunId | None = None,
+) -> None:
+    if observer is not None:
+        observer(ProgressEvent(phase, completed, 6, message, run_id))
+
+
+def _target_progress_message(target: Target) -> str:
+    return (
+        f"target={target.name} "
+        f"backends={target.transport.kind}/{target.scheduler.kind}/"
+        f"{target.staging.kind}/{target.container.kind}"
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1040,8 +1060,15 @@ def run_operation(
     launch: LaunchResolutionValue | None = None,
     preparation: PreparationPlan | None = None,
     preparation_storage: PreparationStorageConfig = _DEFAULT_PREPARATION_STORAGE,
+    progress: ProgressObserver | None = None,
 ) -> OperationResult[RunValue]:
     try:
+        _report_progress(
+            progress,
+            ProgressPhase.RESOLVE,
+            0,
+            f"experiment={experiment_source} config={config_source}",
+        )
         experiment = load_experiment(experiment_source)
         config = load_config_snapshot(config_source)
         targets_config = load_targets_config(targets_source)
@@ -1056,10 +1083,22 @@ def run_operation(
                 ),
             )
         target = targets[target_name]
+        _report_progress(
+            progress,
+            ProgressPhase.RESOLVE,
+            1,
+            _target_progress_message(target),
+        )
         target_storage = targets_config.preparation.get(
             target_name, PreparationStorageConfig()
         )
         if preparation is not None:
+            _report_progress(
+                progress,
+                ProgressPhase.PREPARE,
+                1,
+                f"location={preparation.requested_location} source={preparation.source_mode} rebuild={preparation.rebuild} offline={preparation.offline}",
+            )
             _validate_preparation_compatibility(experiment, preparation.recipe)
         unsupported = _unsupported_execution_target(target, experiment)
         if unsupported is not None:
@@ -1126,6 +1165,24 @@ def run_operation(
                         preparation_storage,
                         target_storage,
                     )
+            assert preparation_record is not None
+            _report_progress(
+                progress,
+                ProgressPhase.PREPARE,
+                2,
+                "source_action={} image_action={} builder={}".format(
+                    preparation_record.source_action,
+                    preparation_record.image_action,
+                    preparation_record.builder_location or "not_requested",
+                ),
+            )
+        else:
+            _report_progress(
+                progress,
+                ProgressPhase.PREPARE,
+                2,
+                "not configured",
+            )
         plan = create_plan(
             effective_experiment,
             config,
@@ -1141,6 +1198,7 @@ def run_operation(
             transport=transport,
             framework_version=version("rundra"),
             provenance=GitProvenanceCapture(),
+            progress=progress,
         )
         result = service.execute_one(
             RunExecutionRequest(
@@ -1171,6 +1229,13 @@ def run_operation(
                 )
                 store.update(updated, expected=record)
                 record = updated
+        _report_progress(
+            progress,
+            ProgressPhase.COMPLETE,
+            6,
+            f"run={record.run.id} state={record.run.state.value} retrieval={record.run.retrieval_state.value}",
+            record.run.id,
+        )
         return OperationResult.success("run", RunValue(record, launch))
     except ConfigError as error:
         return OperationResult.failure("run", _config_error(error))
@@ -1207,8 +1272,15 @@ def submit_operation(
     launch: LaunchResolutionValue | None = None,
     preparation: PreparationPlan | None = None,
     preparation_storage: PreparationStorageConfig = _DEFAULT_PREPARATION_STORAGE,
+    progress: ProgressObserver | None = None,
 ) -> OperationResult[RunValue]:
     try:
+        _report_progress(
+            progress,
+            ProgressPhase.RESOLVE,
+            0,
+            f"experiment={experiment_source} config={config_source}",
+        )
         experiment = load_experiment(experiment_source)
         config = load_config_snapshot(config_source)
         targets_config = load_targets_config(targets_source)
@@ -1223,10 +1295,22 @@ def submit_operation(
                 ),
             )
         target = targets[target_name]
+        _report_progress(
+            progress,
+            ProgressPhase.RESOLVE,
+            1,
+            _target_progress_message(target),
+        )
         target_storage = targets_config.preparation.get(
             target_name, PreparationStorageConfig()
         )
         if preparation is not None:
+            _report_progress(
+                progress,
+                ProgressPhase.PREPARE,
+                1,
+                f"location={preparation.requested_location} source={preparation.source_mode} rebuild={preparation.rebuild} offline={preparation.offline}",
+            )
             _validate_preparation_compatibility(experiment, preparation.recipe)
         unsupported = _unsupported_execution_target(
             target, experiment, asynchronous=True
@@ -1278,6 +1362,24 @@ def submit_operation(
                     preparation_storage,
                     target_storage,
                 )
+            assert preparation_record is not None
+            _report_progress(
+                progress,
+                ProgressPhase.PREPARE,
+                2,
+                "source_action={} image_action={} builder={}".format(
+                    preparation_record.source_action,
+                    preparation_record.image_action,
+                    preparation_record.builder_location or "not_requested",
+                ),
+            )
+        else:
+            _report_progress(
+                progress,
+                ProgressPhase.PREPARE,
+                2,
+                "not configured",
+            )
         plan = create_plan(
             effective_experiment,
             config,
@@ -1293,6 +1395,7 @@ def submit_operation(
             transport=transport,
             framework_version=version("rundra"),
             provenance=GitProvenanceCapture(),
+            progress=progress,
         )
         result = service.submit_one(
             RunExecutionRequest(
@@ -1304,6 +1407,13 @@ def submit_operation(
                 preparation=preparation_record,
                 remote_preparation=remote_preparation,
             )
+        )
+        _report_progress(
+            progress,
+            ProgressPhase.COMPLETE,
+            6,
+            f"run={result.record.run.id} state={result.record.run.state.value} submission durable",
+            result.record.run.id,
         )
         return OperationResult.success("submit", RunValue(result.record, launch))
     except ConfigError as error:

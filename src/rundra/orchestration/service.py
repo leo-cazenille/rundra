@@ -31,6 +31,7 @@ from rundra.orchestration.preparation import (
     RemotePreparationSpec,
     build_remote_preparation_command,
 )
+from rundra.orchestration.progress import ProgressEvent, ProgressObserver, ProgressPhase
 from rundra.persistence.base import RunStore
 from rundra.persistence.errors import RunStoreError
 from rundra.ports import (
@@ -100,6 +101,7 @@ class SchedulerLifecycleService:
         clock: Callable[[], datetime] | None = None,
         sleeper: Callable[[float], None] = sleep,
         monotonic_clock: Callable[[], float] = monotonic,
+        progress: ProgressObserver | None = None,
     ) -> None:
         if not isinstance(store, RunStore):
             raise TypeError("SchedulerLifecycleService store must implement RunStore")
@@ -111,11 +113,14 @@ class SchedulerLifecycleService:
             raise TypeError("SchedulerLifecycleService clock must be callable")
         if not callable(sleeper) or not callable(monotonic_clock):
             raise TypeError("SchedulerLifecycleService timing hooks must be callable")
+        if progress is not None and not callable(progress):
+            raise TypeError("SchedulerLifecycleService progress must be callable")
         self._store = store
         self._scheduler = scheduler
         self._clock = clock or (lambda: datetime.now(UTC))
         self._sleeper = sleeper
         self._monotonic = monotonic_clock
+        self._progress = progress
 
     def refresh(self, record: RunRecord) -> RunRecord:
         """Query and durably apply every Task scheduler observation."""
@@ -190,7 +195,9 @@ class SchedulerLifecycleService:
             raise ValueError("Scheduler poll interval must be positive")
         deadline = None if timeout is None else self._monotonic() + float(timeout)
         current = record
+        self._report_wait(current)
         while current.run.state not in _TERMINAL_STATES:
+            previous = _progress_state(current)
             try:
                 current = self.refresh(current)
             except RunStoreError:
@@ -201,6 +208,8 @@ class SchedulerLifecycleService:
                     message=f"Run {record.run.id} scheduler query failed: {error}",
                     run_id=record.run.id,
                 ) from error
+            if _progress_state(current) != previous:
+                self._report_wait(current)
             if current.run.state in _TERMINAL_STATES:
                 return current
             now = self._monotonic()
@@ -215,6 +224,32 @@ class SchedulerLifecycleService:
                 delay = min(delay, max(0.0, deadline - now))
             self._sleeper(delay)
         return current
+
+    def _report_wait(self, record: RunRecord) -> None:
+        if self._progress is None:
+            return
+        preparation = record.preparation
+        details = [
+            f"run={record.run.state.value}",
+            f"native={record.native_state or '-'}",
+        ]
+        if preparation is not None and preparation.builder_scheduler_id is not None:
+            details.extend(
+                (
+                    f"preparation={preparation.builder_status or '-'}",
+                    f"preparation_native={preparation.builder_state or '-'}",
+                )
+            )
+        terminal = record.run.state in _TERMINAL_STATES
+        self._progress(
+            ProgressEvent(
+                ProgressPhase.WAIT,
+                5 if terminal else 4,
+                6,
+                " ".join(details),
+                record.run.id,
+            )
+        )
 
     def cancel(
         self,
@@ -396,6 +431,7 @@ class OrchestrationService:
         clock: Callable[[], datetime] | None = None,
         framework_version: str,
         provenance: ProvenanceProvider | None = None,
+        progress: ProgressObserver | None = None,
     ) -> None:
         for name, value, protocol in (
             ("store", store, RunStore),
@@ -418,6 +454,8 @@ class OrchestrationService:
             raise TypeError(
                 "OrchestrationService provenance must implement ProvenanceProvider"
             )
+        if progress is not None and not callable(progress):
+            raise TypeError("OrchestrationService progress must be callable")
         self.store = store
         self._stager = stager
         self._runtime = runtime
@@ -427,6 +465,7 @@ class OrchestrationService:
         self._clock = clock or (lambda: datetime.now(UTC))
         self._framework_version = framework_version
         self._provenance = provenance
+        self._progress = progress
 
     def execute_one(self, request: RunExecutionRequest) -> RunExecutionResult:
         """Execute and fetch one planned Task while durably recording each phase."""
@@ -454,6 +493,12 @@ class OrchestrationService:
                 provenance = GitProvenance()
         record = self._created_record(request, run_id, provenance)
         self.store.create(record)
+        self._report(
+            ProgressPhase.STAGE,
+            2,
+            f"run={run_id} target={request.plan.target.name} tasks={len(units)} checking capabilities",
+            run_id,
+        )
 
         try:
             self._transport.check()
@@ -465,6 +510,13 @@ class OrchestrationService:
                 message=f"Run {run_id} capability check failed: {error}",
                 run_id=run_id,
             ) from error
+
+        self._report(
+            ProgressPhase.STAGE,
+            2,
+            "capabilities verified; staging immutable inputs",
+            run_id,
+        )
 
         updated = _with_execution_state(record, ExecutionState.STAGING)
         self.store.update(updated, expected=record)
@@ -490,6 +542,12 @@ class OrchestrationService:
         updated = replace(record, artifacts=workspace.artifacts)
         self.store.update(updated, expected=record)
         record = updated
+        self._report(
+            ProgressPhase.STAGE,
+            3,
+            f"workspace={workspace.root}",
+            run_id,
+        )
 
         preparation_reference = None
         if request.remote_preparation is not None:
@@ -543,6 +601,12 @@ class OrchestrationService:
             )
             self.store.update(updated, expected=record)
             record = updated
+            self._report(
+                ProgressPhase.SUBMIT,
+                3,
+                f"preparation_job={preparation_reference.native_id} dependency=afterok",
+                run_id,
+            )
 
         try:
             scheduled_units = tuple(
@@ -628,6 +692,12 @@ class OrchestrationService:
         )
         self.store.update(updated, expected=record)
         record = updated
+        self._report(
+            ProgressPhase.SUBMIT,
+            4,
+            f"scheduler_job={submission.reference.native_id} tasks={len(units)}",
+            run_id,
+        )
 
         if not wait:
             return RunExecutionResult(record, workspace)
@@ -637,6 +707,7 @@ class OrchestrationService:
                 store=self.store,
                 scheduler=self._scheduler,
                 clock=self._clock,
+                progress=self._progress,
             )
             record = lifecycle.wait(record)
             command_result = None
@@ -695,6 +766,12 @@ class OrchestrationService:
         )
         self.store.update(updated, expected=record)
         record = updated
+        self._report(
+            ProgressPhase.RETRIEVE,
+            5,
+            f"destination={request.fetch_destination}",
+            run_id,
+        )
         try:
             fetched = self._stager.fetch(
                 FetchRequest(
@@ -728,7 +805,23 @@ class OrchestrationService:
             artifacts=(*record.artifacts, *fetched_artifacts),
         )
         self.store.update(updated, expected=record)
+        self._report(
+            ProgressPhase.RETRIEVE,
+            6,
+            f"artifacts={len(fetched_artifacts)} state={updated.run.retrieval_state.value}",
+            run_id,
+        )
         return RunExecutionResult(updated, workspace)
+
+    def _report(
+        self,
+        phase: ProgressPhase,
+        completed: int,
+        message: str,
+        run_id: RunId,
+    ) -> None:
+        if self._progress is not None:
+            self._progress(ProgressEvent(phase, completed, 6, message, run_id))
 
     @staticmethod
     def _validate_request(request: RunExecutionRequest) -> None:
@@ -849,6 +942,18 @@ class OrchestrationService:
 def _with_execution_state(record: RunRecord, state: ExecutionState) -> RunRecord:
     tasks = tuple(replace(task, state=state) for task in record.run.tasks)
     return replace(record, run=replace(record.run, tasks=tasks, state=state))
+
+
+def _progress_state(
+    record: RunRecord,
+) -> tuple[str, str | None, str | None, str | None]:
+    preparation = record.preparation
+    return (
+        record.run.state.value,
+        record.native_state,
+        preparation.builder_status if preparation is not None else None,
+        preparation.builder_state if preparation is not None else None,
+    )
 
 
 def _require_record(record: RunRecord) -> None:

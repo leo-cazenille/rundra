@@ -10,8 +10,12 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 | `validate` | `EXPERIMENT` | `--json` | Validate experiment YAML without executing. |
 | `plan` | `EXPERIMENT` | `--config`, `--seed`/`--seeds`/`--random-seed`, `--target`, `--targets-file`, `--project-file`, `--profile`, preparation options, `--json` | Resolve and inspect execution without target contact or state changes. |
 | `targets` | none | `--targets-file`, `--json` | Validate and list configured targets. |
-| `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
+| `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--verbose`, `--progress`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
 | `submit` | `EXPERIMENT` | same as `run` | Submit asynchronously when the selected scheduler supports it. |
+
+`--verbose` prints lifecycle details and `--progress` displays a TQDM phase
+bar. They may be combined. Both write only to stderr, preserving the final
+human or JSON result on stdout.
 | `status` | `RUN_ID` | `--data-dir`, `--json` | Reconcile scheduler state and return portable Run/Task status. |
 | `list` | none | `--data-dir`, `--json` | List persisted Runs in deterministic order. |
 | `logs` | `RUN_ID` | `--task`, `--data-dir`, `--json` | Read one Task's framework-managed stdout/stderr. |
