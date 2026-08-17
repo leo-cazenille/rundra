@@ -5,6 +5,8 @@ from pathlib import PurePath, PurePosixPath
 from rundra.domain.models import Command, RunId, TaskId
 from rundra.ports import CommandResult, StagedWorkspace, Transport
 
+_TASK_DIRECTORY_BATCH_SIZE = 256
+
 
 class RemoteWorkspaceError(RuntimeError):
     """Raised when an isolated remote Run workspace cannot be allocated."""
@@ -80,23 +82,26 @@ class RemoteWorkspaceAllocator:
             operation="create remote Run directories",
         )
         if task_ids:
-            self._checked_run(
-                Command(
-                    (
-                        "mkdir",
-                        "--",
-                        *(
-                            str(path)
-                            for task_id in task_ids
-                            for path in (
-                                workspace.runtime / str(task_id),
-                                workspace.outputs / str(task_id),
-                            )
-                        ),
-                    )
-                ),
-                operation="create remote Task directories",
-            )
+            for offset in range(0, len(task_ids), _TASK_DIRECTORY_BATCH_SIZE):
+                batch = task_ids[offset : offset + _TASK_DIRECTORY_BATCH_SIZE]
+                self._checked_run(
+                    Command(
+                        (
+                            "mkdir",
+                            "-p",
+                            "--",
+                            *(
+                                str(path)
+                                for task_id in batch
+                                for path in (
+                                    workspace.runtime / str(task_id),
+                                    workspace.outputs / str(task_id),
+                                )
+                            ),
+                        )
+                    ),
+                    operation="create remote Task directories",
+                )
         return workspace
 
     def _checked_run(self, command: Command, *, operation: str) -> None:

@@ -12,7 +12,7 @@ from rundra.adapters.remote import (
     RemoteWorkspaceCollisionError,
     RemoteWorkspaceError,
 )
-from rundra.domain.models import Command, RunId
+from rundra.domain.models import Command, RunId, TaskId
 from rundra.ports import CapabilityCheck, CommandResult
 
 
@@ -147,3 +147,24 @@ def test_remote_workspace_allocator_rejects_non_run_ids(value: object) -> None:
 def test_remote_workspace_allocator_requires_a_transport() -> None:
     with pytest.raises(TypeError, match="Transport"):
         RemoteWorkspaceAllocator(object())  # type: ignore[arg-type]
+
+
+def test_remote_workspace_allocator_batches_large_task_directory_sets() -> None:
+    task_ids = tuple(TaskId(f"task_{index:06d}") for index in range(20_000))
+    task_batch_count = 79
+    transport = _transport(*([0] * (3 + task_batch_count)))
+    run_id = RunId.new()
+
+    workspace = RemoteWorkspaceAllocator(transport).create(
+        run_id,
+        PurePosixPath("/remote/workspace"),
+        task_ids=task_ids,
+    )
+
+    task_commands = transport.run_calls[3:]
+    assert len(task_commands) == task_batch_count
+    assert all(command.argv[:3] == ("mkdir", "-p", "--") for command in task_commands)
+    assert all(len(command.argv) <= 515 for command in task_commands)
+    assert sum((len(command.argv) - 3) // 2 for command in task_commands) == 20_000
+    assert str(workspace.runtime / "task_000000") in task_commands[0].argv
+    assert str(workspace.outputs / "task_019999") in task_commands[-1].argv
