@@ -28,10 +28,10 @@ Run from the repository root:
 uv run rundr run examples/pogosim-shoal/experiment.yaml --seeds 0:2
 ```
 
-The adjacent `rundra.yaml` supplies the config, target, destination, full Git
+The adjacent `rundra.yaml` supplies the config, target, full Git
 commit, immutable image URI/SHA-256, build command, declared executable, and
 bounded build resources. `run` waits for preparation and scientific work, then
-retrieves results under `examples/pogosim-shoal/retrieved`.
+retrieves results under `examples/pogosim-shoal/retrieved/default`.
 
 Use `plan` to inspect the network-free execution description without probing
 the target or claiming cache hits:
@@ -59,6 +59,31 @@ uv run rundr inspect RUN_ID --json | python3 -m json.tool
 
 Each successful Task produces `data.feather` and `console.txt`. Raw experiment
 results remain separate from derived analysis outputs.
+
+## Twenty-seed MSD sweep
+
+The checked sweep compares mostly ballistic motion with long tumbles using the
+same 20 seeds for both parameter sets. The config's `_rundr.seeds` metadata
+means the complete 40-Task Slurm array needs one Rundra command:
+
+```bash
+uv run rundr run examples/pogosim-shoal/experiment.yaml \
+  --config examples/pogosim-shoal/conf/msd-120s.yaml --progress
+```
+
+Rundra retrieves raw results to `examples/pogosim-shoal/retrieved/msd-120s`.
+Its `metadata/tasks.json` maps every Task to its seed, parameter choices,
+effective-config digest, and output directory. Analyze the sweep with a
+self-contained PEP 723 script; `uv` resolves PyArrow in the script environment:
+
+```bash
+uv run examples/pogosim-shoal/analysis/analyze_msd.py \
+  --input examples/pogosim-shoal/retrieved/msd-120s \
+  --output examples/pogosim-shoal/derived/msd-120s
+```
+
+Derived `summary.json` and `curves.csv` files stay outside the immutable raw
+retrieval tree.
 
 ## Troubleshooting only
 

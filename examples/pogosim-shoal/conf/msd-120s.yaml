@@ -1,0 +1,82 @@
+_rundr:
+  version: 1
+  seeds: "0:19"
+
+window_width: 600
+window_height: 600
+boundary_condition: solid
+arena_file: /opt/pogosim/arenas/disk.csv
+arena_surface: 1.0e6
+delete_old_files: true
+
+enable_data_logging: true
+data_filename: /workspace/output/data.feather
+enable_console_logging: true
+console_filename: /workspace/output/console.txt
+save_data_period: 1.0
+save_video_period: -1.0
+frames_name: /workspace/output/f{:010.4f}.png
+
+show_time: false
+show_scale_bar: false
+show_communication_channels: false
+show_lateral_LEDs: false
+show_light_levels: false
+GUI: false
+
+simulation_time: 120.0
+time_step: 0.01
+GUI_speed_up: 10.0
+initial_formation: random
+
+objects:
+  global_light:
+    type: static_light
+    light_mode: static
+    geometry: global
+    value: 200
+    photo_start_at: 1.0
+    photo_start_duration: 1.0
+    photo_start_value: 32767
+  robots:
+    type: pogobot
+    nb: 50
+    geometry: disk
+    radius: 26.5
+    body_linear_damping: 0.3
+    body_angular_damping: 0.3
+    body_density: 10.0
+    body_friction: 0.3
+    body_restitution: 0.5
+    max_linear_speed: 100.0
+    max_angular_speed: 1.0
+    linear_noise_stddev: 0.5
+    angular_noise_stddev: 2.0
+    communication_radius: 80.0
+    msg_success_rate:
+      type: dynamic
+      alpha: 0.000004
+      beta: 2.8096
+      gamma: 2.3807
+      delta: 1.2457
+
+parameters:
+  batch_hierarchical_options:
+    name: regime
+    default:
+      run_duration_min: 100
+      run_duration_max: 1200
+      tumble_duration_min: 100
+      tumble_duration_max: 1100
+    ballistic:
+      run_duration_min: 20000
+      run_duration_max: 30000
+      tumble_duration_min: 100
+      tumble_duration_max: 200
+    long_tumble:
+      run_duration_min: 200
+      run_duration_max: 400
+      tumble_duration_min: 8000
+      tumble_duration_max: 12000
+  test_vect: [42.0, 23.0, 11.0, 18.0]
+  enable_backward_dir: true

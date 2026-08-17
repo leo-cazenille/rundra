@@ -2,9 +2,8 @@ version: 2
 default_profile: shoal
 
 defaults:
-  config: config.yaml
+  config: conf/default.yaml
   target: shoal
-  destination: retrieved
 
 profiles:
   shoal:

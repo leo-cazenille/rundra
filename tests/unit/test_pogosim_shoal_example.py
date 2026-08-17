@@ -64,7 +64,7 @@ targets:
 
     result = plan_operation(
         EXAMPLE_ROOT / "experiment.yaml",
-        EXAMPLE_ROOT / "config.yaml",
+        EXAMPLE_ROOT / "conf/default.yaml",
         targets,
         "shoal",
         seeds="0:2",
@@ -115,7 +115,7 @@ def test_pogosim_experiment_is_a_bounded_headless_cpu_workload() -> None:
 
 
 def test_pogosim_config_has_no_seed_and_writes_raw_outputs_only() -> None:
-    config = _load_yaml("config.yaml")
+    config = _load_yaml("conf/default.yaml")
 
     assert "seed" not in config
     assert config["GUI"] is False
@@ -140,7 +140,8 @@ def test_pogosim_profile_keeps_site_policy_out_of_the_example() -> None:
     assert loaded.preparation is not None
     assert loaded.default_profile == "shoal"
     assert profile["target"] == "shoal"
-    assert project_config["defaults"]["config"] == "config.yaml"
+    assert project_config["defaults"]["config"] == "conf/default.yaml"
+    assert "destination" not in project_config["defaults"]
     assert "targets_file" not in profile
     assert "account" not in profile
     assert "partition" not in profile
@@ -188,3 +189,13 @@ def test_pogosim_recipe_pins_build_inputs_and_declared_output() -> None:
             "executable": True,
         }
     ]
+
+
+def test_pogosim_msd_sweep_is_two_parameter_sets_across_twenty_seeds() -> None:
+    config = _load_yaml("conf/msd-120s.yaml")
+    hierarchy = config["parameters"]["batch_hierarchical_options"]
+
+    assert config["_rundr"] == {"version": 1, "seeds": "0:19"}
+    assert config["simulation_time"] == 120.0
+    assert hierarchy["name"] == "regime"
+    assert set(hierarchy) == {"name", "default", "ballistic", "long_tumble"}
