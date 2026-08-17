@@ -132,6 +132,7 @@ class SchedulerArrayRequest:
     mapping: tuple[ArrayTaskMapping, ...]
     manifest_path: PurePath
     allow_duplicate_seeds: bool = False
+    max_concurrent_jobs: int | None = None
 
     def __post_init__(self) -> None:
         if type(self.group) is not SchedulerGroup:
@@ -164,6 +165,13 @@ class SchedulerArrayRequest:
         if not self.manifest_path.is_absolute() or "\x00" in str(self.manifest_path):
             raise ValueError(
                 "SchedulerArrayRequest manifest_path must be absolute and safe"
+            )
+        if self.max_concurrent_jobs is not None and (
+            type(self.max_concurrent_jobs) is not int
+            or self.max_concurrent_jobs < 1
+        ):
+            raise ValueError(
+                "SchedulerArrayRequest max_concurrent_jobs must be positive or None"
             )
         object.__setattr__(self, "mapping", mapping)
 

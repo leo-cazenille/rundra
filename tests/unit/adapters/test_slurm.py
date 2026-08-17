@@ -698,6 +698,48 @@ def test_slurm_scheduler_cancels_submitted_roots_after_partial_chunk_failure() -
     assert transport.run_calls[-1] == Command(("scancel", "--", "601"))
 
 
+def test_slurm_scheduler_bundles_tasks_at_concurrent_job_limit() -> None:
+    transport = ScriptedTransport(deque([]))
+    scheduler = SlurmScheduler(
+        transport, log_directory=PurePosixPath("/remote/run/logs")
+    )
+    source = _array_request(
+        count=5,
+        resources=ResourceRequest(walltime=timedelta(minutes=2)),
+    )
+    portable = SchedulerArrayRequest(
+        source.group,
+        source.mapping,
+        source.manifest_path,
+        max_concurrent_jobs=2,
+    )
+    transport.results.extend(
+        (
+            _command_result(Command(("unused",)), 0, "MaxArraySize = 1001\n"),
+            _command_result(Command(("unused",)), 0, "777\n"),
+        )
+    )
+
+    submission = scheduler.submit_array(portable)
+
+    assert submission.references == (SchedulerReference("777"),)
+    assert submission.task_native_ids == {
+        TaskId.from_ordinal(0): "777_0",
+        TaskId.from_ordinal(1): "777_1",
+        TaskId.from_ordinal(2): "777_0",
+        TaskId.from_ordinal(3): "777_1",
+        TaskId.from_ordinal(4): "777_0",
+    }
+    command = transport.run_calls[1]
+    encoded = "".join(command.argv[9:])
+    manifest = gzip.decompress(base64.b64decode(encoded)).decode("utf-8")
+    assert "bundle-status" in manifest
+    assert "timeout --signal=TERM --kill-after=30s 120s" in manifest
+    assert manifest.count("# task_id=") == 5
+    assert "#SBATCH --array=0-1" in command.argv[5]
+    assert "#SBATCH --time=00:06:00" in command.argv[5]
+
+
 def test_render_sbatch_script_translates_portable_and_allowed_native_resources() -> (
     None
 ):

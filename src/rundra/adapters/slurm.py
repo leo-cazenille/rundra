@@ -32,6 +32,7 @@ _PARSABLE_SUBMISSION = re.compile(r"(?P<job_id>[0-9]+)(?:;(?P<cluster>[^;\r\n]+)
 _SLURM_REFERENCE = re.compile(r"[0-9]+(?:_[0-9]+)?\Z")
 _MAX_ARRAY_SIZE = re.compile(r"(?:^|\n)\s*MaxArraySize\s*=\s*([0-9]+)\s*(?:\n|$)")
 _MAX_QUERY_REFERENCES = 500
+_COMPRESSED_ARGUMENT_CHUNK = 60 * 1024
 _SUBMIT_SCRIPT = """\
 set -eu
 script=$(mktemp "${TMPDIR:-/tmp}/rundra-sbatch.XXXXXX")
@@ -97,6 +98,37 @@ manifest_tmp=
 mkdir -p -- "$4"
 printf '%s' "$3" > "$script"
 "$5" --parsable --dependency="$6" "$script"
+"""
+_SUBMIT_CHUNKED_ARRAY_SCRIPT = """\
+set -eu
+manifest=$1
+if [ -e "$manifest" ]; then
+  printf '%s\n' 'Rundra array manifest already exists' >&2
+  exit 73
+fi
+script_content=$2
+log_directory=$3
+sbatch=$4
+dependency=$5
+shift 5
+manifest_tmp=$(mktemp "${manifest}.XXXXXX")
+encoded=$(mktemp "${TMPDIR:-/tmp}/rundra-array.XXXXXX")
+script=$(mktemp "${TMPDIR:-/tmp}/rundra-sbatch.XXXXXX")
+trap 'rm -f "$manifest_tmp" "$encoded" "$script"' EXIT HUP INT TERM
+for chunk do
+  printf '%s' "$chunk"
+done > "$encoded"
+base64 -d < "$encoded" | gzip -d > "$manifest_tmp"
+chmod 500 "$manifest_tmp"
+mv -- "$manifest_tmp" "$manifest"
+manifest_tmp=
+mkdir -p -- "$log_directory"
+printf '%s' "$script_content" > "$script"
+if [ "$dependency" != - ]; then
+  "$sbatch" --parsable --dependency="$dependency" "$script"
+else
+  "$sbatch" --parsable "$script"
+fi
 """
 
 
@@ -326,6 +358,15 @@ class SlurmScheduler:
         dependency: str | None,
     ) -> SchedulerSubmission:
         max_array_size = self.array_limit()
+        if (
+            request.max_concurrent_jobs is not None
+            and len(request.mapping) > request.max_concurrent_jobs
+        ):
+            return self._submit_bundled_array(
+                request,
+                dependency=dependency,
+                max_array_size=max_array_size,
+            )
         submissions: list[SchedulerSubmission] = []
         try:
             for chunk_ordinal, start in enumerate(
@@ -382,6 +423,128 @@ class SlurmScheduler:
             },
             tuple(item.reference for item in additional),
         )
+
+    def _submit_bundled_array(
+        self,
+        request: SchedulerArrayRequest,
+        *,
+        dependency: str | None,
+        max_array_size: int,
+    ) -> SchedulerSubmission:
+        if self._log_directory is None:
+            raise SlurmSubmissionError(
+                "Slurm bundle submission requires a configured log directory"
+            )
+        assert request.max_concurrent_jobs is not None
+        worker_count = min(
+            request.max_concurrent_jobs,
+            max_array_size,
+            len(request.mapping),
+        )
+        max_assignment = (len(request.mapping) + worker_count - 1) // worker_count
+        resources = request.group.units[0].resources
+        if any(unit.resources != resources for unit in request.group.units[1:]):
+            raise SlurmScriptError("Slurm bundled Tasks must use uniform resources")
+        worker_resources = replace(
+            resources,
+            walltime=(
+                resources.walltime * max_assignment
+                if resources.walltime is not None
+                else None
+            ),
+        )
+        manifest_path = request.manifest_path.with_name(
+            f"{request.manifest_path.stem}.workers{request.manifest_path.suffix}"
+        )
+        status_root = request.manifest_path.parent / "bundle-status"
+        manifest = render_slurm_bundle_manifest(
+            request,
+            worker_count=worker_count,
+            status_root=status_root,
+        )
+        stdout_path, stderr_path = self._log_paths("%A_%a")
+        if stdout_path is None or stderr_path is None:  # pragma: no cover
+            raise AssertionError("configured Slurm logs must produce paths")
+        directives = _sbatch_directives(
+            job_name="rundra-worker",
+            resources=worker_resources,
+            stdout_path=_array_log_path(stdout_path, name="stdout"),
+            stderr_path=_array_log_path(stderr_path, name="stderr"),
+            array_stop=worker_count - 1,
+        )
+        quoted_manifest = shlex.quote(str(manifest_path))
+        script = "\n".join(
+            (
+                "#!/bin/sh",
+                *directives,
+                "",
+                "set -eu",
+                'if [ "${SLURM_ARRAY_TASK_ID+x}" != x ]; then',
+                "  printf '%s\\n' 'missing SLURM_ARRAY_TASK_ID' >&2",
+                "  exit 64",
+                "fi",
+                f'exec /bin/sh {quoted_manifest} "$SLURM_ARRAY_TASK_ID"',
+                "",
+            )
+        )
+        job_id = self._submit_chunked_array_payload(
+            manifest_path,
+            manifest,
+            script,
+            dependency=dependency,
+        )
+        return SchedulerSubmission(
+            SchedulerReference(job_id),
+            {
+                item.task_id: f"{job_id}_{ordinal % worker_count}"
+                for ordinal, item in enumerate(request.mapping)
+            },
+        )
+
+    def _submit_chunked_array_payload(
+        self,
+        manifest_path: PurePath,
+        manifest: str,
+        script: str,
+        *,
+        dependency: str | None,
+    ) -> str:
+        assert self._log_directory is not None
+        encoded = _compressed_text(manifest)
+        chunks = tuple(
+            encoded[offset : offset + _COMPRESSED_ARGUMENT_CHUNK]
+            for offset in range(0, len(encoded), _COMPRESSED_ARGUMENT_CHUNK)
+        )
+        command = Command(
+            (
+                "/bin/sh",
+                "-c",
+                _SUBMIT_CHUNKED_ARRAY_SCRIPT,
+                "rundra-slurm-bundle-submit",
+                str(manifest_path),
+                script,
+                str(self._log_directory),
+                self._sbatch,
+                dependency or "-",
+                *chunks,
+            )
+        )
+        try:
+            result = self._transport.run(command)
+        except Exception as error:
+            raise SlurmSubmissionError(
+                "Could not persist the bundle manifest and start sbatch submission"
+            ) from error
+        if result.exit_code != 0:
+            raise SlurmSubmissionError(
+                "Bundle manifest persistence or sbatch submission failed with "
+                f"exit code {result.exit_code}; scheduler diagnostic redacted"
+            )
+        output = result.stdout.strip()
+        match = _PARSABLE_SUBMISSION.fullmatch(output)
+        if match is None:
+            raise SlurmSubmissionError("sbatch returned invalid parsable output")
+        return match.group("job_id")
 
     def submit_bounded_array(self, request: SlurmArrayRequest) -> SchedulerSubmission:
         """Persist one immutable manifest and submit its bounded Slurm array."""
@@ -658,6 +821,82 @@ def render_slurm_array_manifest(request: SlurmArrayRequest) -> str:
             "",
         )
     )
+
+
+def render_slurm_bundle_manifest(
+    request: SchedulerArrayRequest,
+    *,
+    worker_count: int,
+    status_root: PurePath,
+) -> str:
+    """Render bounded workers that continue and journal logical Task outcomes."""
+    if type(request) is not SchedulerArrayRequest:
+        raise TypeError("render_slurm_bundle_manifest requires a SchedulerArrayRequest")
+    if type(worker_count) is not int or not 1 <= worker_count <= len(request.mapping):
+        raise ValueError("worker_count must fit the SchedulerArrayRequest")
+    status = _directive_path(status_root, name="bundle status")
+    branches: list[str] = []
+    for worker_index in range(worker_count):
+        branches.extend(
+            (
+                f"  {worker_index})",
+                f"    status_root={shlex.quote(status)}",
+                '    mkdir -p -- "$status_root"',
+                '    journal="$status_root/${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}.tsv"',
+                '    journal_tmp="${journal}.$$"',
+                '    if [ -e "$journal" ]; then exit 73; fi',
+                '    : > "$journal_tmp"',
+            )
+        )
+        for ordinal in range(worker_index, len(request.mapping), worker_count):
+            unit = request.group.units[ordinal]
+            mapping = request.mapping[ordinal]
+            timeout = _task_timeout_seconds(unit.resources.walltime)
+            command = serialize_remote_command(unit.command)
+            rendered = (
+                command
+                if timeout is None
+                else f"timeout --signal=TERM --kill-after=30s {timeout}s {command}"
+            )
+            branches.extend(
+                (
+                    f"    # task_id={mapping.task_id} seed={mapping.seed}",
+                    "    set +e",
+                    f"    {rendered}",
+                    "    task_status=$?",
+                    "    set -e",
+                    f"    printf '%s\\t%s\\n' {mapping.task_id} \"$task_status\" >> \"$journal_tmp\"",
+                )
+            )
+        branches.extend(
+            (
+                '    chmod 400 "$journal_tmp"',
+                '    mv -- "$journal_tmp" "$journal"',
+                "    ;;",
+            )
+        )
+    return "\n".join(
+        (
+            "#!/bin/sh",
+            "set -eu",
+            'if [ "$#" -ne 1 ]; then exit 64; fi',
+            'if [ "${SLURM_ARRAY_JOB_ID+x}" != x ]; then exit 64; fi',
+            'case "$1" in',
+            *branches,
+            "  *) exit 64 ;;",
+            "esac",
+            "",
+        )
+    )
+
+
+def _task_timeout_seconds(value: timedelta | None) -> int | None:
+    if value is None:
+        return None
+    microseconds = (
+        value.days * 86_400_000_000 + value.seconds * 1_000_000 + value.microseconds
+    )
+    return (microseconds + 999_999) // 1_000_000
 
 
 def render_sbatch_array_script(
