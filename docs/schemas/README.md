@@ -43,6 +43,9 @@ surface introduced for preparation is frozen in
 [`cli-surface-v2.json`](cli-surface-v2.json), while the v1 fixture remains as
 the historical contract.
 
+The version-3 CLI surface adds the non-mutating `doctor` diagnostic. Its JSON
+payload reports typed checks without exposing credential material.
+
 `inspect` deliberately embeds `run-record-v1.json` unchanged beneath `record`.
 Keeping one RunRecord fixture avoids two copies of the durable schema drifting.
 

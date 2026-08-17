@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -27,8 +28,17 @@ def test_console_entry_point_displays_help() -> None:
         "fetch",
         "inspect",
         "cancel",
+        "doctor",
     ):
         assert command in result.stdout
+
+
+def test_doctor_parser_accepts_direct_and_project_target_selection() -> None:
+    direct = build_parser().parse_args(["doctor", "--target", "shoal"])
+    project = build_parser().parse_args(["doctor", "experiment.yaml", "--connect"])
+
+    assert direct.experiment is None and direct.target == "shoal"
+    assert project.experiment == Path("experiment.yaml") and project.connect is True
 
 
 def test_run_parser_accepts_launch_resolution_without_repeated_arguments() -> None:

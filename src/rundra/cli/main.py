@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Never
 
+from rundra.cli.doctor import DoctorValue, doctor_operation
 from rundra.cli.operations import (
     RunValue,
     cancel_operation,
@@ -43,6 +44,7 @@ _COMMANDS = (
     "fetch",
     "inspect",
     "cancel",
+    "doctor",
 )
 
 
@@ -92,6 +94,15 @@ def build_parser() -> argparse.ArgumentParser:
     targets = subparsers.add_parser("targets", help="list configured targets")
     targets.add_argument("--targets-file", type=Path, default=_default_targets_file())
     _add_json_option(targets)
+
+    doctor = subparsers.add_parser("doctor", help="diagnose target access safely")
+    doctor.add_argument("experiment", nargs="?", type=Path)
+    doctor.add_argument("--target")
+    doctor.add_argument("--targets-file", type=Path)
+    doctor.add_argument("--project-file", type=Path)
+    doctor.add_argument("--profile")
+    doctor.add_argument("--connect", action="store_true")
+    _add_json_option(doctor)
 
     run = subparsers.add_parser("run", help="execute one Run synchronously")
     _add_execution_arguments(
@@ -340,6 +351,31 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
     elif arguments.command == "targets":
         result = targets_operation(arguments.targets_file)
+    elif arguments.command == "doctor":
+        if arguments.experiment is None:
+            result = doctor_operation(
+                arguments.targets_file or _default_targets_file(),
+                arguments.target,
+                connect=arguments.connect,
+            )
+        else:
+            resolved_doctor = resolve_run_inputs_operation(
+                arguments.experiment,
+                target=arguments.target,
+                targets_file=arguments.targets_file,
+                project_file=arguments.project_file,
+                profile=arguments.profile,
+                operation="doctor",
+            )
+            if not resolved_doctor.ok:
+                result = resolved_doctor
+            else:
+                assert resolved_doctor.value is not None
+                result = doctor_operation(
+                    resolved_doctor.value.targets_file,
+                    resolved_doctor.value.target,
+                    connect=arguments.connect,
+                )
     elif arguments.command == "run":
         resolved = resolve_run_inputs_operation(
             arguments.experiment,
@@ -449,6 +485,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     if isinstance(result.value, RunValue):
         return result.value.exit_code
+    if isinstance(result.value, DoctorValue) and not result.value.ready:
+        return 1
     return 0
 
 

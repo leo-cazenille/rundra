@@ -10,6 +10,7 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 | `validate` | `EXPERIMENT` | `--json` | Validate experiment YAML without executing. |
 | `plan` | `EXPERIMENT` | `--config`, `--seed`/`--seeds`/`--random-seed`, `--target`, `--targets-file`, `--project-file`, `--profile`, preparation options, `--json` | Resolve and inspect execution without target contact or state changes. |
 | `targets` | none | `--targets-file`, `--json` | Validate and list configured targets. |
+| `doctor` | optional `EXPERIMENT` | `--target`, `--targets-file`, `--project-file`, `--profile`, `--connect`, `--json` | Diagnose static target setup and optionally perform a read-only live SSH probe. |
 | `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--verbose`, `--progress`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
 | `submit` | `EXPERIMENT` | same as `run` | Submit asynchronously when the selected scheduler supports it. |
 
@@ -46,6 +47,9 @@ project defaults, user defaults, then built-ins. Automatic locations are:
 - user launch defaults: `~/.config/rundra/config.yaml`;
 - adjacent project launch defaults: `rundra.yaml`;
 - client RunRecords: `~/.local/share/rundra/runs`.
+
+See [agent target setup](agent-setup.md) for safe sandbox access to user
+configuration, host trust, and SSH-agent authentication.
 
 `plan` deliberately has no `--destination` or `--data-dir` because it creates
 no snapshot, retrieval, or RunRecord. Local `submit` returns

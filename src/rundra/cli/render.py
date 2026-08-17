@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from datetime import timedelta
 from typing import Any
 
+from rundra.cli.doctor import DoctorValue
 from rundra.cli.operations import (
     CancelValue,
     FetchValue,
@@ -73,6 +74,21 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
         document["targets"] = [
             _target_document(value.targets[name]) for name in sorted(value.targets)
         ]
+    elif isinstance(value, DoctorValue):
+        document["doctor"] = {
+            "source": str(value.source),
+            "target": value.target.name,
+            "connected": value.connected,
+            "ready": value.ready,
+            "checks": [
+                {
+                    "name": check.name,
+                    "status": check.status,
+                    "message": check.message,
+                }
+                for check in value.checks
+            ],
+        }
     elif isinstance(value, RunValue):
         document["run"] = _run_value_document(value)
         if value.launch is not None:
@@ -168,6 +184,14 @@ def render_human(result: OperationResult[Any]) -> str:
             f"{value.targets[name].scheduler.kind}"
             for name in sorted(value.targets)
         )
+        return "\n".join(lines)
+    if isinstance(value, DoctorValue):
+        lines = [f"Doctor for target {value.target.name}:"]
+        lines.extend(
+            f"  [{check.status.upper()}] {check.name}: {check.message}"
+            for check in value.checks
+        )
+        lines.append(f"Ready: {'yes' if value.ready else 'no'}")
         return "\n".join(lines)
     if isinstance(value, RunValue):
         seed_line = (
