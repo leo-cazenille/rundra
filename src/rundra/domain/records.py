@@ -10,6 +10,7 @@ from types import MappingProxyType
 from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import Artifact, ExperimentSpec, NativeValue, Run, TaskId
 from rundra.domain.preparation import PreparationRecord
+from rundra.domain.scaling import CompactRun, TaskSpace
 from rundra.domain.states import RetrievalState
 
 
@@ -72,18 +73,25 @@ class RunRecord:
     task_retrieval_states: Mapping[TaskId, RetrievalState] = field(default_factory=dict)
     task_exit_codes: Mapping[TaskId, int] = field(default_factory=dict)
     artifacts: tuple[Artifact, ...] = ()
+    task_space: TaskSpace | None = None
+    execution_strategy: str | None = None
+    retrieval_policy: str | None = None
+    task_state_store: PurePath | None = None
 
     def __post_init__(self) -> None:
         if type(self.format_version) is not int:
             raise TypeError("RunRecord format_version must be an integer")
-        if self.format_version not in {1, 2, 3}:
-            raise ValueError("RunRecord format_version must be 1, 2, or 3")
+        if self.format_version not in {1, 2, 3, 4}:
+            raise ValueError("RunRecord format_version must be 1, 2, 3, or 4")
         if type(self.framework_version) is not str:
             raise TypeError("RunRecord framework_version must be a string")
         if not self.framework_version.strip():
             raise ValueError("RunRecord framework_version must not be blank")
-        if type(self.run) is not Run:
-            raise TypeError("RunRecord run must be a Run")
+        if self.format_version == 4:
+            if type(self.run) is not CompactRun:
+                raise TypeError("RunRecord v4 run must be a CompactRun")
+        elif type(self.run) is not Run:
+            raise TypeError("RunRecord v1-v3 run must be a Run")
         if type(self.experiment) is not ExperimentSpec:
             raise TypeError("RunRecord experiment must be an ExperimentSpec")
         if self.experiment.name != self.run.experiment_name:
@@ -96,6 +104,31 @@ class RunRecord:
             task.parameter_set is None for task in self.run.tasks
         ):
             raise ValueError("RunRecord v3 requires parameterized Tasks")
+        if self.format_version == 4:
+            if type(self.task_space) is not TaskSpace:
+                raise TypeError("RunRecord v4 requires a TaskSpace")
+            if self.execution_strategy not in {"multi-array", "worker-pool"}:
+                raise ValueError("RunRecord v4 execution_strategy is unsupported")
+            if self.retrieval_policy not in {"all", "manifest", "none"}:
+                raise ValueError("RunRecord v4 retrieval_policy is unsupported")
+            if (
+                not isinstance(self.task_state_store, PurePath)
+                or self.task_state_store.is_absolute()
+                or self.task_state_store.name != str(self.task_state_store)
+            ):
+                raise ValueError(
+                    "RunRecord v4 task_state_store must be one relative filename"
+                )
+        elif any(
+            value is not None
+            for value in (
+                self.task_space,
+                self.execution_strategy,
+                self.retrieval_policy,
+                self.task_state_store,
+            )
+        ):
+            raise ValueError("RunRecord v1-v3 cannot contain v4 scaling fields")
         if self.preparation is not None:
             if self.container_digest != self.preparation.image_sha256:
                 raise ValueError(
@@ -171,6 +204,8 @@ class RunRecord:
                 "RunRecord task_array_mapping must contain ArrayTaskMappings"
             )
         if task_array_mapping:
+            if self.format_version == 4:
+                raise ValueError("RunRecord v4 cannot materialize an array mapping")
             if self.run.target.scheduler.kind != "slurm":
                 raise ValueError("RunRecord task_array_mapping requires a Slurm target")
             expected_mapping = tuple(
@@ -269,8 +304,16 @@ class RunRecord:
         if any(type(artifact) is not Artifact for artifact in artifacts):
             raise TypeError("RunRecord artifacts must contain only Artifacts")
         if any(
-            artifact.task_id is not None and artifact.task_id not in task_ids
+            not self._known_task_id(artifact.task_id, task_ids)
             for artifact in artifacts
         ):
             raise ValueError("RunRecord artifacts contain an unknown TaskId")
         object.__setattr__(self, "artifacts", artifacts)
+
+    def _known_task_id(self, task_id: TaskId | None, task_ids: set[TaskId]) -> bool:
+        if task_id is None:
+            return True
+        if self.format_version != 4:
+            return task_id in task_ids
+        assert self.task_space is not None
+        return int(task_id.value.removeprefix("task_")) < self.task_space.task_count

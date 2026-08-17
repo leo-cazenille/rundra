@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
-from rundra.domain.models import TaskId
+from rundra.domain.models import Run, RunId, Target, TaskId
+from rundra.domain.states import ExecutionState, RetrievalState
 
 
 def _integer_at_least(value: object, minimum: int, field_name: str) -> int:
@@ -88,6 +90,30 @@ class TaskSpace:
         if offset >= stop:
             return ()
         return tuple(self.coordinate(ordinal) for ordinal in range(offset, stop))
+
+
+@dataclass(frozen=True, slots=True)
+class CompactRun(Run):
+    """Version-4 Run summary whose Tasks live in a TaskSpace sidecar."""
+
+    def __post_init__(self) -> None:
+        if type(self.id) is not RunId:
+            raise TypeError("CompactRun id must be a RunId")
+        if type(self.experiment_name) is not str or not self.experiment_name.strip():
+            raise ValueError("CompactRun experiment_name must be nonblank")
+        if type(self.target) is not Target:
+            raise TypeError("CompactRun target must be a Target")
+        if tuple(self.tasks):
+            raise ValueError("CompactRun must not materialize Tasks")
+        if not isinstance(self.created_at, datetime):
+            raise TypeError("CompactRun created_at must be a datetime")
+        if self.created_at.utcoffset() is None:
+            raise ValueError("CompactRun creation time must be timezone-aware")
+        if type(self.state) is not ExecutionState:
+            raise TypeError("CompactRun state must be an ExecutionState")
+        if type(self.retrieval_state) is not RetrievalState:
+            raise TypeError("CompactRun retrieval_state must be a RetrievalState")
+        object.__setattr__(self, "tasks", ())
 
 
 @dataclass(frozen=True, slots=True)

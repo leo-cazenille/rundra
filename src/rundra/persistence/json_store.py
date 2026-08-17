@@ -285,6 +285,10 @@ def _immutable_definition(record: RunRecord) -> tuple[object, ...]:
         record.source_root,
         record.experiment_source,
         record.task_array_mapping,
+        record.task_space,
+        record.execution_strategy,
+        record.retrieval_policy,
+        record.task_state_store,
     )
 
 
