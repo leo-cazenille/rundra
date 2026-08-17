@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 import pytest
 
 from rundra.adapters import SlurmScheduler
+from rundra.cli.operations import CancelValue, cancel_operation
 from rundra.domain.models import (
     BackendConfig,
     Command,
@@ -254,6 +255,14 @@ def test_large_bundled_cancel_reaches_scancel_before_task_reconciliation(
     assert cancelled.run.state is ExecutionState.CANCELLED
     assert {task.state for task in cancelled.run.tasks} == {ExecutionState.CANCELLED}
     assert len(cancelled.artifacts) >= 2_000
+
+    result = cancel_operation(
+        str(cancelled.run.id), store, scheduler=service._scheduler
+    )
+
+    assert result.ok and isinstance(result.value, CancelValue)
+    assert result.value.status.state is ExecutionState.CANCELLED
+    assert len(transport.commands) == command_count + 3
 
 
 @pytest.mark.parametrize(

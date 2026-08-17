@@ -2202,6 +2202,7 @@ def _status_value(
     if compact_counts is None:
         for task in record.run.tasks:
             counts[task.state.value] = counts.get(task.state.value, 0) + 1
+    retrieval_states = _task_retrieval_states(record)
     return StatusValue(
         run_id=record.run.id,
         experiment=record.run.experiment_name,
@@ -2216,7 +2217,7 @@ def _status_value(
                 task_id=task.id,
                 seed=task.seed,
                 state=task.state,
-                retrieval_state=_task_retrieval_states(record)[task.id],
+                retrieval_state=retrieval_states[task.id],
                 native_id=record.task_scheduler_ids.get(task.id),
                 native_state=record.task_native_states.get(task.id),
                 exit_code=record.task_exit_codes.get(task.id),
