@@ -499,6 +499,63 @@ def test_slurm_scheduler_persists_manifest_and_submits_bounded_array() -> None:
     assert 'chmod 500 "$manifest_tmp"' in command.argv[2]
 
 
+def test_slurm_single_submission_uses_framework_owned_afterok_dependency() -> None:
+    transport = ScriptedTransport(deque([]))
+    scheduler = SlurmScheduler(
+        transport,
+        sbatch="/opt/slurm/bin/sbatch",
+        log_directory=PurePosixPath("/remote/run/logs"),
+    )
+    transport.results.append(_command_result(Command(("unused",)), 0, "124\n"))
+
+    submission = scheduler.submit_afterok(_group(), SchedulerReference("123"))
+
+    assert submission.reference == SchedulerReference("124")
+    command = transport.run_calls[0]
+    assert command.argv[-1] == "afterok:123"
+    assert '--dependency="$4"' in command.argv[2]
+    assert "#SBATCH --dependency" not in command.argv[4]
+
+
+def test_slurm_array_submission_uses_framework_owned_afterok_dependency() -> None:
+    transport = ScriptedTransport(deque([]))
+    scheduler = SlurmScheduler(
+        transport,
+        log_directory=PurePosixPath("/remote/run/logs"),
+    )
+    request = _array_request(count=2)
+    portable = SchedulerArrayRequest(
+        request.group,
+        request.mapping,
+        request.manifest_path,
+    )
+    transport.results.extend(
+        (
+            _command_result(Command(("unused",)), 0, "MaxArraySize = 1001\n"),
+            _command_result(Command(("unused",)), 0, "125\n"),
+        )
+    )
+
+    submission = scheduler.submit_array_afterok(
+        portable,
+        SchedulerReference("123"),
+    )
+
+    assert submission.reference == SchedulerReference("125")
+    command = transport.run_calls[1]
+    assert command.argv[-1] == "afterok:123"
+    assert '--dependency="$6"' in command.argv[2]
+    assert "#SBATCH --dependency" not in command.argv[6]
+
+
+@pytest.mark.parametrize("native_id", ["123_0", "afterok:123", "abc"])
+def test_slurm_afterok_rejects_non_root_job_ids(native_id: str) -> None:
+    scheduler = SlurmScheduler(ScriptedTransport(deque([])))
+
+    with pytest.raises(SlurmSubmissionError, match="root numeric job ID"):
+        scheduler.submit_afterok(_group(), SchedulerReference(native_id))
+
+
 def test_slurm_array_submission_requires_durable_log_paths() -> None:
     transport = ScriptedTransport(deque([]))
 

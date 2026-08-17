@@ -44,6 +44,21 @@ trap 'rm -f "$script"' EXIT HUP INT TERM
 printf '%s' "$1" > "$script"
 "$2" --parsable "$script"
 """
+_SUBMIT_DEPENDENT_SCRIPT = """\
+set -eu
+script=$(mktemp "${TMPDIR:-/tmp}/rundra-sbatch.XXXXXX")
+trap 'rm -f "$script"' EXIT HUP INT TERM
+printf '%s' "$1" > "$script"
+"$2" --parsable --dependency="$3" "$script"
+"""
+_SUBMIT_DEPENDENT_WITH_LOG_DIR_SCRIPT = """\
+set -eu
+mkdir -p -- "$3"
+script=$(mktemp "${TMPDIR:-/tmp}/rundra-sbatch.XXXXXX")
+trap 'rm -f "$script"' EXIT HUP INT TERM
+printf '%s' "$1" > "$script"
+"$2" --parsable --dependency="$4" "$script"
+"""
 _SUBMIT_ARRAY_SCRIPT = """\
 set -eu
 manifest=$1
@@ -61,6 +76,24 @@ manifest_tmp=
 mkdir -p -- "$4"
 printf '%s' "$3" > "$script"
 "$5" --parsable "$script"
+"""
+_SUBMIT_DEPENDENT_ARRAY_SCRIPT = """\
+set -eu
+manifest=$1
+if [ -e "$manifest" ]; then
+  printf '%s\n' 'Rundra array manifest already exists' >&2
+  exit 73
+fi
+manifest_tmp=$(mktemp "${manifest}.XXXXXX")
+script=$(mktemp "${TMPDIR:-/tmp}/rundra-sbatch.XXXXXX")
+trap 'rm -f "$manifest_tmp" "$script"' EXIT HUP INT TERM
+printf '%s' "$2" > "$manifest_tmp"
+chmod 500 "$manifest_tmp"
+mv -- "$manifest_tmp" "$manifest"
+manifest_tmp=
+mkdir -p -- "$4"
+printf '%s' "$3" > "$script"
+"$5" --parsable --dependency="$6" "$script"
 """
 
 
@@ -190,6 +223,22 @@ class SlurmScheduler:
 
     def submit(self, group: SchedulerGroup) -> SchedulerSubmission:
         """Submit one generated script and retain opaque Slurm identity."""
+        return self._submit(group, dependency=None)
+
+    def submit_afterok(
+        self,
+        group: SchedulerGroup,
+        dependency: SchedulerReference,
+    ) -> SchedulerSubmission:
+        """Submit one Task after a framework-owned successful-job dependency."""
+        return self._submit(group, dependency=_dependency(dependency))
+
+    def _submit(
+        self,
+        group: SchedulerGroup,
+        *,
+        dependency: str | None,
+    ) -> SchedulerSubmission:
         if type(group) is SchedulerGroup and len(group.units) != 1:
             raise SlurmSubmissionError(
                 "M5.3 array submission is not available until per-Task "
@@ -210,6 +259,13 @@ class SlurmScheduler:
         if self._log_directory is not None:
             command_arguments[2] = _SUBMIT_WITH_LOG_DIR_SCRIPT
             command_arguments.append(str(self._log_directory))
+        if dependency is not None:
+            command_arguments[2] = (
+                _SUBMIT_DEPENDENT_WITH_LOG_DIR_SCRIPT
+                if self._log_directory is not None
+                else _SUBMIT_DEPENDENT_SCRIPT
+            )
+            command_arguments.append(dependency)
         command = Command(tuple(command_arguments))
         try:
             result = self._transport.run(command)
@@ -242,8 +298,37 @@ class SlurmScheduler:
         )
         return self.submit_bounded_array(bounded)
 
+    def submit_array_afterok(
+        self,
+        request: SchedulerArrayRequest,
+        dependency: SchedulerReference,
+    ) -> SchedulerSubmission:
+        """Submit a mapped array after a framework-owned successful dependency."""
+        if type(request) is not SchedulerArrayRequest:
+            raise TypeError(
+                "SlurmScheduler.submit_array_afterok requires a SchedulerArrayRequest"
+            )
+        bounded = SlurmArrayRequest(
+            request.group,
+            request.mapping,
+            request.manifest_path,
+            self.array_limit(),
+        )
+        return self._submit_bounded_array(
+            bounded,
+            dependency=_dependency(dependency),
+        )
+
     def submit_bounded_array(self, request: SlurmArrayRequest) -> SchedulerSubmission:
         """Persist one immutable manifest and submit its bounded Slurm array."""
+        return self._submit_bounded_array(request, dependency=None)
+
+    def _submit_bounded_array(
+        self,
+        request: SlurmArrayRequest,
+        *,
+        dependency: str | None,
+    ) -> SchedulerSubmission:
         if type(request) is not SlurmArrayRequest:
             raise TypeError(
                 "SlurmScheduler.submit_bounded_array requires a SlurmArrayRequest"
@@ -261,8 +346,7 @@ class SlurmScheduler:
             stdout_path=stdout_path,
             stderr_path=stderr_path,
         )
-        command = Command(
-            (
+        command_arguments = [
                 "/bin/sh",
                 "-c",
                 _SUBMIT_ARRAY_SCRIPT,
@@ -272,8 +356,11 @@ class SlurmScheduler:
                 script,
                 str(self._log_directory),
                 self._sbatch,
-            )
-        )
+            ]
+        if dependency is not None:
+            command_arguments[2] = _SUBMIT_DEPENDENT_ARRAY_SCRIPT
+            command_arguments.append(dependency)
+        command = Command(tuple(command_arguments))
         try:
             result = self._transport.run(command)
         except Exception as error:
@@ -692,6 +779,16 @@ def _references(
             "Slurm references must be numeric job or job_array-index identities"
         )
     return references
+
+
+def _dependency(reference: SchedulerReference) -> str:
+    if type(reference) is not SchedulerReference:
+        raise TypeError("Slurm dependency must be a SchedulerReference")
+    if re.fullmatch(r"[0-9]+", reference.native_id) is None:
+        raise SlurmSubmissionError(
+            "Slurm afterok dependency must be one root numeric job ID"
+        )
+    return f"afterok:{reference.native_id}"
 
 
 def _parse_squeue(

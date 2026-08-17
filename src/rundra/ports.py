@@ -510,6 +510,23 @@ class ArrayScheduler(Protocol):
 
 
 @runtime_checkable
+class DependencyScheduler(Protocol):
+    """Scheduler extension for framework-owned successful-job dependencies."""
+
+    def submit_afterok(
+        self,
+        group: SchedulerGroup,
+        dependency: SchedulerReference,
+    ) -> SchedulerSubmission: ...
+
+    def submit_array_afterok(
+        self,
+        request: SchedulerArrayRequest,
+        dependency: SchedulerReference,
+    ) -> SchedulerSubmission: ...
+
+
+@runtime_checkable
 class Stager(Protocol):
     def stage(self, request: StageRequest) -> StagedWorkspace: ...
 
