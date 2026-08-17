@@ -88,6 +88,16 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--project-file", type=Path)
     plan.add_argument("--profile")
     plan.add_argument("--source-root", type=Path)
+    plan.add_argument(
+        "--execution-strategy",
+        choices=("auto", "multi-array", "worker-pool"),
+        default="auto",
+    )
+    plan.add_argument(
+        "--retrieval",
+        choices=("all", "manifest", "none"),
+        default="manifest",
+    )
     _add_preparation_arguments(plan)
     _add_json_option(plan)
 
@@ -349,6 +359,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 launch=plan_inputs.launch,
                 preparation=plan_inputs.preparation_plan,
                 sweep=plan_inputs.sweep,
+                execution_strategy=arguments.execution_strategy,
+                retrieval_policy=arguments.retrieval,
             )
     elif arguments.command == "targets":
         result = targets_operation(arguments.targets_file)

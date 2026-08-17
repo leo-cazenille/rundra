@@ -153,9 +153,14 @@ def render_human(result: OperationResult[Any]) -> str:
         plan = value.plan
         seeds = ", ".join(str(unit.seed) for unit in plan.units)
         resources = plan.units[0].resources
+        task_count = (
+            plan.task_space.task_count
+            if plan.task_space is not None
+            else len(plan.units)
+        )
         rendered = (
             f"Plan for {plan.experiment_name} on {plan.target.name}: "
-            f"{len(plan.units)} task(s)\n"
+            f"{task_count} task(s)\n"
             f"{_human_task_dimensions(plan.units, seeds)}\n"
             f"Strategy: {plan.strategy}\n"
             f"Resources: {_human_resources(resources)}\n"
@@ -164,6 +169,14 @@ def render_human(result: OperationResult[Any]) -> str:
             "Safety: validated offline; no target contact, workspace creation, "
             "Run creation, or submission"
         )
+        if plan.version == 4:
+            assert plan.execution_policy is not None
+            rendered += (
+                f"\nScheduling: batches={plan.scheduler_batches}, "
+                f"workers={plan.worker_count or 0}, "
+                f"max_active={plan.execution_policy.max_active_tasks}, "
+                f"retrieval={plan.retrieval_policy}, preview={len(plan.units)}"
+            )
         if plan.array_mapping:
             mapping = ", ".join(
                 f"{item.array_index}={item.task_id}/seed={item.seed}"
@@ -338,6 +351,35 @@ def _plan_document(plan: ExecutionPlan) -> dict[str, Any]:
     }
     if plan.preparation is not None:
         document["preparation"] = _preparation_document(plan.preparation)
+    if plan.version == 4:
+        assert plan.task_space is not None
+        assert plan.execution_policy is not None
+        policy = plan.execution_policy
+        document["task_space"] = {
+            "parameter_set_count": plan.task_space.parameter_set_count,
+            "seeds": {
+                "start": plan.task_space.seeds.start,
+                "stop": plan.task_space.seeds.stop,
+                "step": plan.task_space.seeds.step,
+            },
+            "task_count": plan.task_space.task_count,
+            "preview_count": len(plan.units),
+        }
+        document["scheduling"] = {
+            "scheduler_batches": plan.scheduler_batches,
+            "worker_count": plan.worker_count,
+            "max_active_tasks": policy.max_active_tasks,
+            "max_array_size": policy.max_array_size,
+        }
+        document["retrieval_policy"] = plan.retrieval_policy
+        safety = document["safety"]
+        assert isinstance(safety, dict)
+        safety.update(
+            {
+                "hard_task_limit": policy.hard_task_limit,
+                "confirmation_threshold": policy.confirmation_threshold,
+            }
+        )
     return document
 
 

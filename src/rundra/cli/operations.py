@@ -59,7 +59,13 @@ from rundra.domain.states import (
 )
 from rundra.domain.sweeps import SweepExpansion
 from rundra.orchestration.models import ExecutionPlan, PlanningError
-from rundra.orchestration.planner import create_plan, create_sweep_plan, expand_seeds
+from rundra.orchestration.planner import (
+    compact_seed_range,
+    create_plan,
+    create_scalable_plan,
+    create_sweep_plan,
+    expand_seeds,
+)
 from rundra.orchestration.preparation import (
     PreparationError,
     RemotePreparationSpec,
@@ -648,12 +654,15 @@ def plan_operation(
     launch: LaunchResolutionValue | None = None,
     preparation: PreparationPlan | None = None,
     sweep: SweepExpansion | None = None,
+    execution_strategy: str = "auto",
+    retrieval_policy: str = "manifest",
 ) -> OperationResult[PlanValue]:
     try:
         experiment = load_experiment(experiment_source)
         expansion = sweep or load_sweep_config(config_source)
         config = expansion.configs[0].config
-        targets = load_targets(targets_source)
+        targets_config = load_targets_config(targets_source)
+        targets = targets_config.targets
         if target_name not in targets:
             return OperationResult.failure(
                 "plan",
@@ -669,24 +678,37 @@ def plan_operation(
         unsupported = _unsupported_execution_target(target, experiment)
         if unsupported is not None:
             return OperationResult.failure("plan", unsupported)
-        seed_values = expand_seeds(seed=seed, seeds=seeds)
-        plan = (
-            create_sweep_plan(
+        policy = targets_config.execution.get(target_name)
+        if policy is not None:
+            plan = create_scalable_plan(
                 experiment,
                 expansion.configs,
                 target,
-                seeds=seed_values,
+                seeds=compact_seed_range(seed=seed, seeds=seeds),
+                policy=policy,
+                strategy=execution_strategy,
+                retrieval_policy=retrieval_policy,
                 preparation=preparation,
             )
-            if expansion.is_sweep
-            else create_plan(
-                experiment,
-                config,
-                target,
-                seeds=seed_values,
-                preparation=preparation,
+        else:
+            seed_values = expand_seeds(seed=seed, seeds=seeds)
+            plan = (
+                create_sweep_plan(
+                    experiment,
+                    expansion.configs,
+                    target,
+                    seeds=seed_values,
+                    preparation=preparation,
+                )
+                if expansion.is_sweep
+                else create_plan(
+                    experiment,
+                    config,
+                    target,
+                    seeds=seed_values,
+                    preparation=preparation,
+                )
             )
-        )
         return OperationResult.success("plan", PlanValue(plan, launch))
     except ConfigError as error:
         return OperationResult.failure("plan", _config_error(error))
