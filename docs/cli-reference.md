@@ -109,3 +109,28 @@ the nested execution and retrieval states.
 
 See [running and managing experiments](usage.md) for executable workflows and
 [v0.1 interface stability](stability.md) for compatibility guarantees.
+
+## Target-v4 worker slots
+
+For large single-threaded sweeps, target configuration version 4 can bound the
+number of Slurm jobs independently from the number of processes running inside
+each allocation:
+
+```yaml
+execution:
+  max_active_tasks: 320
+  max_concurrent_jobs: 8
+  worker_pool:
+    activation_threshold: 10000
+    max_workers: 8
+    task_slots_per_worker: 40
+    tasks_per_lease: 100
+    infrastructure_retry_limit: 2
+    requeue_limit: 8
+```
+
+`rundr plan` remains offline and does not probe node topology. For target v4 it
+returns plan format 5 with `worker_count`, `task_slots_per_worker`,
+`concurrent_task_capacity`, `max_lane_depth`, and `worker_resources`. Operators
+must configure slots from known site policy; Rundra does not infer cores or
+oversubscribe an allocation.

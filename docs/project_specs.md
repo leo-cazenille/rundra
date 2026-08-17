@@ -3443,3 +3443,54 @@ Version 0.1 is done when:
 - documentation accurately reflects implemented behavior.
 
 At that point, Rundra should already be useful as a practical deployment and experiment-execution tool, while retaining a credible path toward a broader portable research-execution framework.
+
+## M10.1 intra-allocation concurrency
+
+Targets version 4 extends the target-owned worker-pool policy with the required
+`task_slots_per_worker` field. Target versions 1 through 3 retain their exact
+behavior and document shapes; their materialized workers execute one logical
+Task at a time. A target-v4 scalable `plan` emits schema version 5 and reports
+the bounded worker count, slots per worker, total concurrent Task capacity,
+maximum lane depth, and effective worker allocation resources.
+
+For Slurm, one worker is one array element and one node allocation. Rundra uses
+one `srun` step per worker with scheduler-enforced task and CPU counts. Each
+step task is a deterministic sequential lane. This allows a site to expose
+node-level process concurrency without increasing controller-visible job count
+or oversubscribing CPUs. Multi-slot workers currently support homogeneous,
+single-node, CPU-only logical Task resources.
+
+Lane-local atomic journals distinguish scientific command failures from worker
+infrastructure failures. Scientific failures do not stop a lane. If `srun`
+fails, the worker fails without an implicit retry, and reconciliation preserves
+outcomes from journals completed before the failure. Scheduling details are
+stored in existing RunRecord `scheduler_metadata`; the RunRecord top-level
+schema version does not change.
+
+Example site policy for eight 40-core Shoal nodes:
+
+```yaml
+version: 4
+targets:
+  shoal:
+    transport: {type: ssh, host: fishvision}
+    scheduler: {type: slurm}
+    staging: {type: rsync}
+    container: {type: apptainer}
+    workspace: /cluster/work/rundra
+    execution:
+      hard_task_limit: 100000000
+      confirmation_threshold: 10000
+      max_active_tasks: 320
+      max_concurrent_jobs: 8
+      max_array_size: 1001
+      output_shard_tasks: 1000
+      automatic_retrieval_threshold: 20000
+      worker_pool:
+        activation_threshold: 10000
+        max_workers: 8
+        task_slots_per_worker: 40
+        tasks_per_lease: 100
+        infrastructure_retry_limit: 2
+        requeue_limit: 8
+```
