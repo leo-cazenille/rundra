@@ -712,6 +712,7 @@ def plan_operation(
                 strategy=execution_strategy,
                 retrieval_policy=retrieval_policy,
                 preparation=preparation,
+                version=5 if targets_config.version == 4 else 4,
             )
         else:
             seed_values = expand_seeds(seed=seed, seeds=seeds)
@@ -1425,12 +1426,28 @@ def run_operation(
                 remote_preparation=remote_preparation,
                 remote_source_root=remote_source_root,
                 max_concurrent_jobs=(
+                    targets_config.execution[target_name].max_concurrent_jobs
+                    if target_name in targets_config.execution
+                    else None
+                ),
+                max_workers=(
                     min(
-                        targets_config.execution[target_name].max_concurrent_jobs,
                         targets_config.execution[target_name].worker_pool.max_workers,
+                        targets_config.execution[target_name].max_array_size,
+                        targets_config.execution[target_name].max_active_tasks
+                        // targets_config.execution[
+                            target_name
+                        ].worker_pool.task_slots_per_worker,
                     )
                     if target_name in targets_config.execution
                     else None
+                ),
+                task_slots_per_worker=(
+                    targets_config.execution[
+                        target_name
+                    ].worker_pool.task_slots_per_worker
+                    if target_name in targets_config.execution
+                    else 1
                 ),
             )
         )
@@ -1665,12 +1682,28 @@ def submit_operation(
                 remote_preparation=remote_preparation,
                 remote_source_root=remote_source_root,
                 max_concurrent_jobs=(
+                    targets_config.execution[target_name].max_concurrent_jobs
+                    if target_name in targets_config.execution
+                    else None
+                ),
+                max_workers=(
                     min(
-                        targets_config.execution[target_name].max_concurrent_jobs,
                         targets_config.execution[target_name].worker_pool.max_workers,
+                        targets_config.execution[target_name].max_array_size,
+                        targets_config.execution[target_name].max_active_tasks
+                        // targets_config.execution[
+                            target_name
+                        ].worker_pool.task_slots_per_worker,
                     )
                     if target_name in targets_config.execution
                     else None
+                ),
+                task_slots_per_worker=(
+                    targets_config.execution[
+                        target_name
+                    ].worker_pool.task_slots_per_worker
+                    if target_name in targets_config.execution
+                    else 1
                 ),
             )
         )

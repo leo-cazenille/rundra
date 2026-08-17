@@ -235,6 +235,7 @@ class SlurmScheduler:
         sacct: str = "sacct",
         scancel: str = "scancel",
         scontrol: str = "scontrol",
+        srun: str = "srun",
         timezone: tzinfo | None = None,
         log_directory: PurePath | None = None,
     ) -> None:
@@ -246,6 +247,7 @@ class SlurmScheduler:
             ("sacct", sacct),
             ("scancel", scancel),
             ("scontrol", scontrol),
+            ("srun", srun),
         ):
             if (
                 type(executable) is not str
@@ -275,6 +277,7 @@ class SlurmScheduler:
         self._sacct = sacct
         self._scancel = scancel
         self._scontrol = scontrol
+        self._srun = srun
         self._timezone = timezone
         self._log_directory = log_directory
 
@@ -368,9 +371,13 @@ class SlurmScheduler:
         dependency: str | None,
     ) -> SchedulerSubmission:
         max_array_size = self.array_limit()
-        if (
-            request.max_concurrent_jobs is not None
-            and len(request.mapping) > request.max_concurrent_jobs
+        worker_limits = tuple(
+            limit
+            for limit in (request.max_concurrent_jobs, request.max_workers)
+            if limit is not None
+        )
+        if request.task_slots_per_worker > 1 or (
+            worker_limits and len(request.mapping) > min(worker_limits)
         ):
             return self._submit_bundled_array(
                 request,
@@ -445,18 +452,44 @@ class SlurmScheduler:
             raise SlurmSubmissionError(
                 "Slurm bundle submission requires a configured log directory"
             )
-        assert request.max_concurrent_jobs is not None
-        worker_count = min(
-            request.max_concurrent_jobs,
-            max_array_size,
-            len(request.mapping),
+        limits = tuple(
+            limit
+            for limit in (request.max_concurrent_jobs, request.max_workers)
+            if limit is not None
         )
-        max_assignment = (len(request.mapping) + worker_count - 1) // worker_count
+        if not limits:
+            raise SlurmSubmissionError(
+                "Slurm bundle submission requires an explicit worker limit"
+            )
+        task_slots = request.task_slots_per_worker
+        worker_count = min(
+            *limits,
+            max_array_size,
+            (len(request.mapping) + task_slots - 1) // task_slots,
+        )
+        max_assignment = (len(request.mapping) + worker_count * task_slots - 1) // (
+            worker_count * task_slots
+        )
         resources = request.group.units[0].resources
         if any(unit.resources != resources for unit in request.group.units[1:]):
             raise SlurmScriptError("Slurm bundled Tasks must use uniform resources")
+        if task_slots > 1 and (
+            resources.nodes != 1 or resources.tasks != 1 or resources.gpus_per_task != 0
+        ):
+            raise SlurmScriptError(
+                "Concurrent Slurm workers require one-node, one-task, CPU-only "
+                "logical resources"
+            )
         worker_resources = replace(
             resources,
+            nodes=1,
+            tasks=task_slots,
+            gpus_per_task=0,
+            memory_bytes=(
+                resources.memory_bytes * task_slots
+                if resources.memory_bytes is not None
+                else None
+            ),
             walltime=(
                 resources.walltime * max_assignment
                 if resources.walltime is not None
@@ -470,6 +503,7 @@ class SlurmScheduler:
         manifest = render_slurm_bundle_manifest(
             request,
             worker_count=worker_count,
+            task_slots_per_worker=task_slots,
             status_root=status_root,
         )
         stdout_path, stderr_path = self._log_paths("%A_%a")
@@ -483,6 +517,20 @@ class SlurmScheduler:
             array_stop=worker_count - 1,
         )
         quoted_manifest = shlex.quote(str(manifest_path))
+        quoted_srun = shlex.quote(self._srun)
+        quoted_status_root = shlex.quote(str(status_root))
+        merge_lines = tuple(
+            line
+            for lane in range(task_slots)
+            for line in (
+                (
+                    f'lane="$status_root/${{SLURM_ARRAY_JOB_ID}}_'
+                    f'${{SLURM_ARRAY_TASK_ID}}.lane-{lane}.tsv"'
+                ),
+                '[ -f "$lane" ] || exit 74',
+                'cat -- "$lane" >> "$journal_tmp"',
+            )
+        )
         script = "\n".join(
             (
                 "#!/bin/sh",
@@ -493,7 +541,24 @@ class SlurmScheduler:
                 "  printf '%s\\n' 'missing SLURM_ARRAY_TASK_ID' >&2",
                 "  exit 64",
                 "fi",
-                f'exec /bin/sh {quoted_manifest} "$SLURM_ARRAY_TASK_ID"',
+                f"status_root={quoted_status_root}",
+                'mkdir -p -- "$status_root"',
+                'journal="$status_root/${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}.tsv"',
+                'journal_tmp="${journal}.$$"',
+                'if [ -e "$journal" ]; then exit 73; fi',
+                ': > "$journal_tmp"',
+                "trap 'rm -f \"$journal_tmp\"' EXIT HUP INT TERM",
+                (
+                    f"{quoted_srun} --nodes=1 --ntasks={task_slots} "
+                    f"--ntasks-per-node={task_slots} "
+                    f"--cpus-per-task={resources.cpus_per_task} "
+                    f"--kill-on-bad-exit=1 /bin/sh {quoted_manifest} "
+                    '"$SLURM_ARRAY_TASK_ID"'
+                ),
+                *merge_lines,
+                'chmod 400 "$journal_tmp"',
+                'mv -- "$journal_tmp" "$journal"',
+                "trap - EXIT HUP INT TERM",
                 "",
             )
         )
@@ -877,6 +942,7 @@ def render_slurm_bundle_manifest(
     request: SchedulerArrayRequest,
     *,
     worker_count: int,
+    task_slots_per_worker: int = 1,
     status_root: PurePath,
 ) -> str:
     """Render bounded workers that continue and journal logical Task outcomes."""
@@ -884,57 +950,73 @@ def render_slurm_bundle_manifest(
         raise TypeError("render_slurm_bundle_manifest requires a SchedulerArrayRequest")
     if type(worker_count) is not int or not 1 <= worker_count <= len(request.mapping):
         raise ValueError("worker_count must fit the SchedulerArrayRequest")
+    if type(task_slots_per_worker) is not int or not 1 <= task_slots_per_worker <= len(
+        request.mapping
+    ):
+        raise ValueError("task_slots_per_worker must fit the SchedulerArrayRequest")
     status = _directive_path(status_root, name="bundle status")
     branches: list[str] = []
     for worker_index in range(worker_count):
-        branches.extend(
-            (
-                f"  {worker_index})",
-                f"    status_root={shlex.quote(status)}",
-                '    mkdir -p -- "$status_root"',
-                '    journal="$status_root/${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}.tsv"',
-                '    journal_tmp="${journal}.$$"',
-                '    if [ -e "$journal" ]; then exit 73; fi',
-                '    : > "$journal_tmp"',
-            )
-        )
-        for ordinal in range(worker_index, len(request.mapping), worker_count):
-            unit = request.group.units[ordinal]
-            mapping = request.mapping[ordinal]
-            timeout = _task_timeout_seconds(unit.resources.walltime)
-            command = serialize_remote_command(unit.command)
-            rendered = (
-                command.replace("exec env --", "env --", 1)
-                if timeout is None
-                else command.replace(
-                    "exec env --",
-                    (f"timeout --signal=TERM --kill-after=30s {timeout}s env --"),
-                    1,
-                )
-            )
+        branches.extend((f"  {worker_index})", '    case "$SLURM_PROCID" in'))
+        for lane_index in range(task_slots_per_worker):
             branches.extend(
                 (
-                    f"    # task_id={mapping.task_id} seed={mapping.seed}",
-                    "    set +e",
-                    f"    {rendered}",
-                    "    task_status=$?",
-                    "    set -e",
-                    f'    printf \'%s\\t%s\\n\' {mapping.task_id} "$task_status" >> "$journal_tmp"',
+                    f"      {lane_index})",
+                    f"        status_root={shlex.quote(status)}",
+                    '        mkdir -p -- "$status_root"',
+                    (
+                        '        journal="$status_root/${SLURM_ARRAY_JOB_ID}_'
+                        '${SLURM_ARRAY_TASK_ID}.lane-${SLURM_PROCID}.tsv"'
+                    ),
+                    '        journal_tmp="${journal}.$$"',
+                    '        if [ -e "$journal" ]; then exit 73; fi',
+                    '        : > "$journal_tmp"',
                 )
             )
-        branches.extend(
-            (
-                '    chmod 400 "$journal_tmp"',
-                '    mv -- "$journal_tmp" "$journal"',
-                "    ;;",
+            start = worker_index + lane_index * worker_count
+            stride = worker_count * task_slots_per_worker
+            for ordinal in range(start, len(request.mapping), stride):
+                unit = request.group.units[ordinal]
+                mapping = request.mapping[ordinal]
+                timeout = _task_timeout_seconds(unit.resources.walltime)
+                command = serialize_remote_command(unit.command)
+                rendered = (
+                    command.replace("exec env --", "env --", 1)
+                    if timeout is None
+                    else command.replace(
+                        "exec env --",
+                        (f"timeout --signal=TERM --kill-after=30s {timeout}s env --"),
+                        1,
+                    )
+                )
+                branches.extend(
+                    (
+                        f"        # task_id={mapping.task_id} seed={mapping.seed}",
+                        "        set +e",
+                        f"        {rendered}",
+                        "        task_status=$?",
+                        "        set -e",
+                        (
+                            f"        printf '%s\\t%s\\n' {mapping.task_id} "
+                            '"$task_status" >> "$journal_tmp"'
+                        ),
+                    )
+                )
+            branches.extend(
+                (
+                    '        chmod 400 "$journal_tmp"',
+                    '        mv -- "$journal_tmp" "$journal"',
+                    "        ;;",
+                )
             )
-        )
+        branches.extend(("      *) exit 64 ;;", "    esac", "    ;;"))
     return "\n".join(
         (
             "#!/bin/sh",
             "set -eu",
             'if [ "$#" -ne 1 ]; then exit 64; fi',
             'if [ "${SLURM_ARRAY_JOB_ID+x}" != x ]; then exit 64; fi',
+            'if [ "${SLURM_PROCID+x}" != x ]; then exit 64; fi',
             'case "$1" in',
             *branches,
             "  *) exit 64 ;;",

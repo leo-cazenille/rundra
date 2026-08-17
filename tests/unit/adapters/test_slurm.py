@@ -744,6 +744,56 @@ def test_slurm_scheduler_bundles_tasks_at_concurrent_job_limit() -> None:
     assert "#SBATCH --time=00:06:00" in command.argv[6]
 
 
+def test_slurm_scheduler_runs_concurrent_lanes_in_bounded_workers() -> None:
+    transport = ScriptedTransport(deque([]))
+    scheduler = SlurmScheduler(
+        transport, log_directory=PurePosixPath("/remote/run/logs")
+    )
+    source = _array_request(
+        count=8,
+        resources=ResourceRequest(
+            cpus_per_task=1,
+            memory_bytes=1024**3,
+            walltime=timedelta(minutes=2),
+        ),
+    )
+    portable = SchedulerArrayRequest(
+        source.group,
+        source.mapping,
+        source.manifest_path,
+        max_concurrent_jobs=8,
+        max_workers=2,
+        task_slots_per_worker=2,
+    )
+    transport.results.extend(
+        (
+            _command_result(Command(("unused",)), 0, "MaxArraySize = 1001\n"),
+            _command_result(Command(("unused",)), 0, ""),
+            _command_result(Command(("unused",)), 0, ""),
+            _command_result(Command(("unused",)), 0, "888\n"),
+        )
+    )
+
+    submission = scheduler.submit_array(portable)
+
+    assert submission.task_native_ids == {
+        TaskId.from_ordinal(index): f"888_{index % 2}" for index in range(8)
+    }
+    command = transport.run_calls[-1]
+    encoded = "".join(call.argv[4] for call in transport.run_calls[2:-1])
+    manifest = gzip.decompress(base64.b64decode(encoded)).decode("utf-8")
+    script = command.argv[6]
+    assert manifest.count("# task_id=") == 8
+    assert 'case "$SLURM_PROCID" in' in manifest
+    assert ".lane-${SLURM_PROCID}.tsv" in manifest
+    assert "#SBATCH --array=0-1" in script
+    assert "#SBATCH --ntasks=2" in script
+    assert "#SBATCH --mem=2048M" in script
+    assert "#SBATCH --time=00:04:00" in script
+    assert "srun --nodes=1 --ntasks=2 --ntasks-per-node=2" in script
+    assert script.count("srun ") == 1
+
+
 def test_render_sbatch_script_translates_portable_and_allowed_native_resources() -> (
     None
 ):

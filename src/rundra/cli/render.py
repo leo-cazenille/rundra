@@ -194,7 +194,7 @@ def render_human(result: OperationResult[Any]) -> str:
             "Safety: validated offline; no target contact, workspace creation, "
             "Run creation, or submission"
         )
-        if plan.version == 4:
+        if plan.version in {4, 5}:
             assert plan.execution_policy is not None
             rendered += (
                 f"\nScheduling: batches={plan.scheduler_batches}, "
@@ -202,6 +202,12 @@ def render_human(result: OperationResult[Any]) -> str:
                 f"max_active={plan.execution_policy.max_active_tasks}, "
                 f"retrieval={plan.retrieval_policy}, preview={len(plan.units)}"
             )
+            if plan.version == 5:
+                rendered += (
+                    f", slots_per_worker={plan.task_slots_per_worker}, "
+                    f"task_capacity={plan.concurrent_task_capacity}, "
+                    f"lane_depth={plan.max_lane_depth}"
+                )
         if plan.array_mapping:
             mapping = ", ".join(
                 f"{item.array_index}={item.task_id}/seed={item.seed}"
@@ -389,7 +395,7 @@ def _plan_document(plan: ExecutionPlan) -> dict[str, Any]:
     }
     if plan.preparation is not None:
         document["preparation"] = _preparation_document(plan.preparation)
-    if plan.version == 4:
+    if plan.version in {4, 5}:
         assert plan.task_space is not None
         assert plan.execution_policy is not None
         policy = plan.execution_policy
@@ -403,13 +409,24 @@ def _plan_document(plan: ExecutionPlan) -> dict[str, Any]:
             "task_count": plan.task_space.task_count,
             "preview_count": len(plan.units),
         }
-        document["scheduling"] = {
+        scheduling: dict[str, Any] = {
             "scheduler_batches": plan.scheduler_batches,
             "worker_count": plan.worker_count,
             "max_active_tasks": policy.max_active_tasks,
             "max_concurrent_jobs": policy.max_concurrent_jobs,
             "max_array_size": policy.max_array_size,
         }
+        document["scheduling"] = scheduling
+        if plan.version == 5:
+            assert plan.worker_resources is not None
+            scheduling.update(
+                {
+                    "task_slots_per_worker": plan.task_slots_per_worker,
+                    "concurrent_task_capacity": plan.concurrent_task_capacity,
+                    "max_lane_depth": plan.max_lane_depth,
+                    "worker_resources": _resources_document(plan.worker_resources),
+                }
+            )
         document["retrieval_policy"] = plan.retrieval_policy
         safety = document["safety"]
         assert isinstance(safety, dict)

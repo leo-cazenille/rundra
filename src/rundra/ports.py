@@ -133,6 +133,8 @@ class SchedulerArrayRequest:
     manifest_path: PurePath
     allow_duplicate_seeds: bool = False
     max_concurrent_jobs: int | None = None
+    max_workers: int | None = None
+    task_slots_per_worker: int = 1
 
     def __post_init__(self) -> None:
         if type(self.group) is not SchedulerGroup:
@@ -171,6 +173,19 @@ class SchedulerArrayRequest:
         ):
             raise ValueError(
                 "SchedulerArrayRequest max_concurrent_jobs must be positive or None"
+            )
+        if self.max_workers is not None and (
+            type(self.max_workers) is not int or self.max_workers < 1
+        ):
+            raise ValueError(
+                "SchedulerArrayRequest max_workers must be positive or None"
+            )
+        if (
+            type(self.task_slots_per_worker) is not int
+            or self.task_slots_per_worker < 1
+        ):
+            raise ValueError(
+                "SchedulerArrayRequest task_slots_per_worker must be positive"
             )
         object.__setattr__(self, "mapping", mapping)
 

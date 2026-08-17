@@ -380,6 +380,8 @@ class RunExecutionRequest:
     remote_preparation: RemotePreparationSpec | None = None
     remote_source_root: PurePath | None = None
     max_concurrent_jobs: int | None = None
+    max_workers: int | None = None
+    task_slots_per_worker: int = 1
 
     def __post_init__(self) -> None:
         if type(self.plan) is not ExecutionPlan:
@@ -423,6 +425,15 @@ class RunExecutionRequest:
             type(self.max_concurrent_jobs) is not int or self.max_concurrent_jobs < 1
         ):
             raise ValueError("max_concurrent_jobs must be positive or None")
+        if self.max_workers is not None and (
+            type(self.max_workers) is not int or self.max_workers < 1
+        ):
+            raise ValueError("max_workers must be positive or None")
+        if (
+            type(self.task_slots_per_worker) is not int
+            or self.task_slots_per_worker < 1
+        ):
+            raise ValueError("task_slots_per_worker must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -692,6 +703,8 @@ class OrchestrationService:
                     workspace.metadata / "slurm-array-tasks.sh",
                     allow_duplicate_seeds=request.plan.version == 3,
                     max_concurrent_jobs=request.max_concurrent_jobs,
+                    max_workers=request.max_workers,
+                    task_slots_per_worker=request.task_slots_per_worker,
                 )
                 submission = (
                     cast(DependencyScheduler, self._scheduler).submit_array_afterok(
@@ -738,6 +751,8 @@ class OrchestrationService:
                     {
                         "bundle_status_root": str(workspace.metadata / "bundle-status"),
                         "max_concurrent_jobs": request.max_concurrent_jobs or 0,
+                        "max_workers": request.max_workers or 0,
+                        "task_slots_per_worker": request.task_slots_per_worker,
                     }
                     if bundled
                     else {}
@@ -1198,26 +1213,30 @@ def _apply_bundle_journals(
     if transport is None:
         raise ValueError("Bundled Run reconciliation requires its transport")
     observations = dict(task_observations)
-    successful_references = tuple(
+    terminal_references = tuple(
         dict.fromkeys(
             record.task_scheduler_ids[task_id]
             for task_id, observation in task_observations
-            if observation.state is ExecutionState.SUCCEEDED
+            if observation.state in {ExecutionState.SUCCEEDED, ExecutionState.FAILED}
         )
     )
     journal_codes: dict[TaskId, int] = {}
-    if successful_references:
-        paths = tuple(
-            f"{status_value}/{native_id}.tsv" for native_id in successful_references
-        )
+    if terminal_references:
         result = transport.run(
             Command(
                 (
                     "/bin/sh",
                     "-c",
-                    'for path do if [ -f "$path" ]; then cat -- "$path"; fi; done',
+                    (
+                        'status=$1; shift; for native do aggregate="$status/$native.tsv"; '
+                        'if [ -f "$aggregate" ]; then cat -- "$aggregate"; continue; fi; '
+                        'for path in "$status/$native".lane-*.tsv '
+                        '"$status/$native".lane-*.tsv.*; do '
+                        '[ -f "$path" ] && cat -- "$path"; done; done'
+                    ),
                     "rundra-bundle-status",
-                    *paths,
+                    status_value,
+                    *terminal_references,
                 )
             )
         )
@@ -1243,20 +1262,21 @@ def _apply_bundle_journals(
     native_states = dict(record.task_native_states)
     for task in record.run.tasks:
         observation = observations[task.id]
+        if task.id in journal_codes:
+            code = journal_codes[task.id]
+            state = ExecutionState.SUCCEEDED if code == 0 else ExecutionState.FAILED
+            tasks.append(replace(task, state=state))
+            exit_codes[task.id] = code
+            native_states[task.id] = (
+                "BUNDLED_TASK_SUCCEEDED" if code == 0 else "BUNDLED_TASK_FAILED"
+            )
+            continue
         if observation.state is not ExecutionState.SUCCEEDED:
             tasks.append(task)
             continue
-        code = journal_codes.get(task.id, 125)
-        state = ExecutionState.SUCCEEDED if code == 0 else ExecutionState.FAILED
-        tasks.append(replace(task, state=state))
-        exit_codes[task.id] = code
-        native_states[task.id] = (
-            "BUNDLED_TASK_SUCCEEDED"
-            if code == 0
-            else "BUNDLE_JOURNAL_MISSING"
-            if task.id not in journal_codes
-            else "BUNDLED_TASK_FAILED"
-        )
+        tasks.append(replace(task, state=ExecutionState.FAILED))
+        exit_codes[task.id] = 125
+        native_states[task.id] = "BUNDLE_JOURNAL_MISSING"
     task_tuple = tuple(tasks)
     return replace(
         record,
