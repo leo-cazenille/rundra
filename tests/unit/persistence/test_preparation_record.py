@@ -29,6 +29,8 @@ def test_version_two_preparation_record_round_trips_strictly() -> None:
         resolution_location="local",
         build_cache_key="ef" * 32,
         builder_location="local",
+        builder_status="RUNNING",
+        builder_state="RUNNING",
         build_outputs=(PreparedOutput(PurePosixPath("bin/model"), "12" * 32, True),),
         logs=(PurePosixPath("/cache/build.stdout"),),
     )
@@ -44,8 +46,41 @@ def test_version_two_preparation_record_round_trips_strictly() -> None:
 
     assert document["format_version"] == 2
     assert document["preparation"]["source_digest"] == "cd" * 32
+    assert document["preparation"]["builder_status"] == "RUNNING"
     assert document["experiment"]["container"]["image"] == str(image)
     assert record_from_dict(document) == record
+
+
+def test_version_two_record_without_builder_state_remains_readable() -> None:
+    base = _record()
+    image = PurePosixPath("/cache/images/application.sif")
+    preparation = PreparationRecord(
+        source_identity="git-recipe",
+        source_digest="cd" * 32,
+        source_action="checkout_git_cache",
+        image_uri="library://example/application:v1",
+        image_sha256=_DIGEST,
+        image_path=image,
+        image_action="reuse_image_cache",
+        resolution_location="local",
+    )
+    document = record_to_dict(
+        replace(
+            base,
+            format_version=2,
+            experiment=replace(base.experiment, container=ContainerSpec(image)),
+            container_digest=_DIGEST,
+            preparation=preparation,
+        )
+    )
+    del document["preparation"]["builder_status"]
+    del document["preparation"]["builder_state"]
+
+    restored = record_from_dict(document)
+
+    assert restored.preparation is not None
+    assert restored.preparation.builder_status is None
+    assert restored.preparation.builder_state is None
 
 
 def test_version_one_record_shape_does_not_gain_preparation() -> None:

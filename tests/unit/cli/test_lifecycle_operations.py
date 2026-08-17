@@ -14,6 +14,7 @@ from rundra.cli.operations import (
     InspectValue,
     ListRunsValue,
     LogsValue,
+    PreparationLogsValue,
     RunValue,
     StatusValue,
     fetch_operation,
@@ -27,7 +28,15 @@ from rundra.cli.operations import (
 )
 from rundra.cli.render import result_document
 from rundra.domain.mappings import ArrayTaskMapping
-from rundra.domain.models import Artifact, ArtifactKind, BackendConfig, RunId, TaskId
+from rundra.domain.models import (
+    Artifact,
+    ArtifactKind,
+    BackendConfig,
+    ContainerSpec,
+    RunId,
+    TaskId,
+)
+from rundra.domain.preparation import PreparationRecord
 from rundra.domain.records import RunRecord
 from rundra.domain.states import ExecutionState, RetrievalState
 from rundra.persistence import JsonRunStore, record_from_dict
@@ -223,6 +232,65 @@ def test_logs_are_selected_by_stable_task_without_native_filename_knowledge(
     assert logs.value.stdout == "hello stdout\n"
     assert logs.value.stderr == "hello stderr\n"
     assert result_document(logs)["logs"]["stdout"] == "hello stdout\n"
+
+
+def test_version_two_status_and_preparation_logs_are_exposed_separately(
+    tmp_path: Path,
+) -> None:
+    store, run_id = _stored_record(tmp_path)
+    original = store.list()[0]
+    stdout = tmp_path / "prepare.stdout"
+    stderr = tmp_path / "prepare.stderr"
+    stdout.write_text("build output\n", encoding="utf-8")
+    stderr.write_text("build warning\n", encoding="utf-8")
+    preparation = PreparationRecord(
+        source_identity="working-tree",
+        source_digest="ab" * 32,
+        source_action="snapshot_working_tree",
+        image_uri="library://example/application:v1",
+        image_sha256="cd" * 32,
+        image_path=tmp_path / "application.sif",
+        image_action="reuse_image_cache",
+        resolution_location="local",
+        builder_location="local",
+        builder_status="SUCCEEDED",
+        builder_state="EXITED",
+        logs=(stdout, stderr),
+    )
+    updated = replace(
+        original,
+        format_version=2,
+        experiment=replace(
+            original.experiment, container=ContainerSpec(preparation.image_path)
+        ),
+        container_digest=preparation.image_sha256,
+        preparation=preparation,
+    )
+    store = JsonRunStore(tmp_path / "v2-records")
+    store.create(updated)
+
+    status = status_operation(run_id, store)
+    logs = logs_operation(run_id, store, preparation=True)
+
+    assert status.ok and isinstance(status.value, StatusValue)
+    assert result_document(status)["status"]["preparation"] == {
+        "scheduler_id": None,
+        "state": "SUCCEEDED",
+        "native_state": "EXITED",
+        "location": "local",
+    }
+    assert logs.ok and isinstance(logs.value, PreparationLogsValue)
+    assert result_document(logs)["preparation_logs"]["stdout"] == "build output\n"
+
+
+def test_preparation_logs_are_rejected_for_version_one_run(tmp_path: Path) -> None:
+    store, run_id = _stored_record(tmp_path)
+
+    logs = logs_operation(run_id, store, preparation=True)
+
+    assert not logs.ok
+    assert logs.error is not None
+    assert logs.error.code == "PREPARATION_LOGS_UNAVAILABLE"
 
 
 def test_fetch_is_idempotent_and_preserves_successful_retrieval_state(

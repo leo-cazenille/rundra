@@ -165,6 +165,24 @@ class TaskStatusValue:
 
 
 @dataclass(frozen=True, slots=True)
+class PreparationStatusValue:
+    scheduler_id: str | None
+    state: str | None
+    native_state: str | None
+    location: str
+
+    def __post_init__(self) -> None:
+        for name in ("scheduler_id", "state", "native_state"):
+            value = getattr(self, name)
+            if value is not None and (
+                type(value) is not str or not value.strip() or "\x00" in value
+            ):
+                raise ValueError(f"PreparationStatusValue {name} must be safe or None")
+        if self.location not in {"local", "target"}:
+            raise ValueError("PreparationStatusValue location is unsupported")
+
+
+@dataclass(frozen=True, slots=True)
 class StatusValue:
     run_id: RunId
     experiment: str
@@ -175,6 +193,7 @@ class StatusValue:
     native_state: str | None = None
     scheduler_job_ids: tuple[str, ...] = ()
     task_details: tuple[TaskStatusValue, ...] = ()
+    preparation: PreparationStatusValue | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -204,6 +223,13 @@ class StatusValue:
         if task_details and sum(self.task_counts.values()) != len(task_details):
             raise ValueError("StatusValue task counts must match task_details")
         object.__setattr__(self, "task_details", task_details)
+        if (
+            self.preparation is not None
+            and type(self.preparation) is not PreparationStatusValue
+        ):
+            raise TypeError(
+                "StatusValue preparation must be PreparationStatusValue or None"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,6 +255,16 @@ class InspectValue:
 class LogsValue:
     run_id: RunId
     task_id: TaskId
+    stdout: str
+    stderr: str
+    stdout_path: PurePath
+    stderr_path: PurePath
+
+
+@dataclass(frozen=True, slots=True)
+class PreparationLogsValue:
+    run_id: RunId
+    scheduler_id: str | None
     stdout: str
     stderr: str
     stdout_path: PurePath
@@ -1266,9 +1302,10 @@ def logs_operation(
     store: RunStore,
     *,
     task: str | None = None,
+    preparation: bool = False,
     scheduler: Scheduler | None = None,
     transport: Transport | None = None,
-) -> OperationResult[LogsValue]:
+) -> OperationResult[LogsValue | PreparationLogsValue]:
     record, error = _load_record(run_id, store)
     if error is not None:
         return OperationResult.failure("logs", error)
@@ -1296,6 +1333,46 @@ def logs_operation(
                     {"run_id": str(record.run.id)},
                 ),
             )
+    if preparation:
+        prepared = record.preparation
+        if prepared is None or len(prepared.logs) != 2:
+            return OperationResult.failure(
+                "logs",
+                OperationError(
+                    "PREPARATION_LOGS_UNAVAILABLE",
+                    f"Preparation logs are unavailable for Run {record.run.id}",
+                    {"run_id": str(record.run.id)},
+                ),
+            )
+        stdout_path, stderr_path = prepared.logs
+        try:
+            if record.run.target.transport.kind == "ssh":
+                active_transport = transport or _record_ssh_transport(record)
+                stdout_text = _read_remote_log(active_transport, stdout_path)
+                stderr_text = _read_remote_log(active_transport, stderr_path)
+            else:
+                stdout_text = Path(str(stdout_path)).read_text(encoding="utf-8")
+                stderr_text = Path(str(stderr_path)).read_text(encoding="utf-8")
+        except (OSError, RuntimeError) as error:
+            return OperationResult.failure(
+                "logs",
+                OperationError(
+                    "LOG_READ_FAILED",
+                    f"Could not read preparation logs for Run {record.run.id}: {error}",
+                    {"run_id": str(record.run.id)},
+                ),
+            )
+        return OperationResult.success(
+            "logs",
+            PreparationLogsValue(
+                record.run.id,
+                prepared.builder_scheduler_id,
+                stdout_text,
+                stderr_text,
+                stdout_path,
+                stderr_path,
+            ),
+        )
     task_id = _selected_task_id(record, task)
     if isinstance(task_id, OperationError):
         return OperationResult.failure("logs", task_id)
@@ -1517,6 +1594,17 @@ def _status_value(record: RunRecord) -> StatusValue:
                 exit_code=record.task_exit_codes.get(task.id),
             )
             for task in record.run.tasks
+        ),
+        preparation=(
+            None
+            if record.preparation is None
+            else PreparationStatusValue(
+                scheduler_id=record.preparation.builder_scheduler_id,
+                state=record.preparation.builder_status,
+                native_state=record.preparation.builder_state,
+                location=record.preparation.builder_location
+                or record.preparation.resolution_location,
+            )
         ),
     )
 

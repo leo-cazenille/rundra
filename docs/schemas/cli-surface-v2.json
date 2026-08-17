@@ -81,7 +81,7 @@
     },
     "logs": {
       "positionals": ["run_id"],
-      "options": ["--data-dir", "--json", "--task"]
+      "options": ["--data-dir", "--json", "--preparation", "--task"]
     },
     "fetch": {
       "positionals": ["run_id"],

@@ -13,6 +13,7 @@ from rundra.cli.operations import (
     ListRunsValue,
     LogsValue,
     PlanValue,
+    PreparationLogsValue,
     RunValue,
     StatusValue,
     TargetsValue,
@@ -86,6 +87,15 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
         document["logs"] = {
             "run_id": str(value.run_id),
             "task_id": str(value.task_id),
+            "stdout": value.stdout,
+            "stderr": value.stderr,
+            "stdout_path": str(value.stdout_path),
+            "stderr_path": str(value.stderr_path),
+        }
+    elif isinstance(value, PreparationLogsValue):
+        document["preparation_logs"] = {
+            "run_id": str(value.run_id),
+            "scheduler_id": value.scheduler_id,
             "stdout": value.stdout,
             "stderr": value.stderr,
             "stdout_path": str(value.stdout_path),
@@ -181,6 +191,15 @@ def render_human(result: OperationResult[Any]) -> str:
             f"Run: {value.run_id}\nState: {value.state.value}\n"
             f"Retrieval: {value.retrieval_state.value}\nTasks: {counts}"
         )
+        if value.preparation is not None:
+            preparation_status = value.preparation
+            summary += (
+                "\nPreparation: "
+                f"{preparation_status.state or '-'} "
+                f"native={preparation_status.native_state or '-'} "
+                f"job={preparation_status.scheduler_id or '-'} "
+                f"location={preparation_status.location}"
+            )
         if not value.task_details:
             return summary
         details = "\n".join(
@@ -205,6 +224,12 @@ def render_human(result: OperationResult[Any]) -> str:
     if isinstance(value, LogsValue):
         return (
             f"Run: {value.run_id}\nTask: {value.task_id}\n"
+            f"--- stdout ---\n{value.stdout}"
+            f"--- stderr ---\n{value.stderr}"
+        ).rstrip()
+    if isinstance(value, PreparationLogsValue):
+        return (
+            f"Run: {value.run_id}\nPreparation job: {value.scheduler_id or '-'}\n"
             f"--- stdout ---\n{value.stdout}"
             f"--- stderr ---\n{value.stderr}"
         ).rstrip()
@@ -333,6 +358,16 @@ def _result_format_version(value: object) -> int:
         return value.record.format_version
     if isinstance(value, InspectValue):
         return value.record.format_version
+    if isinstance(value, StatusValue) and value.preparation is not None:
+        return 2
+    if isinstance(value, CancelValue) and value.status.preparation is not None:
+        return 2
+    if isinstance(value, ListRunsValue) and any(
+        run.preparation is not None for run in value.runs
+    ):
+        return 2
+    if isinstance(value, PreparationLogsValue):
+        return 2
     if (
         isinstance(value, ValidationValue)
         and value.project is not None
@@ -477,7 +512,7 @@ def _run_value_document(value: RunValue) -> dict[str, Any]:
 
 
 def _status_document(value: StatusValue) -> dict[str, Any]:
-    return {
+    document: dict[str, Any] = {
         "run_id": str(value.run_id),
         "experiment": value.experiment,
         "target": value.target,
@@ -505,6 +540,14 @@ def _status_document(value: StatusValue) -> dict[str, Any]:
             },
         },
     }
+    if value.preparation is not None:
+        document["preparation"] = {
+            "scheduler_id": value.preparation.scheduler_id,
+            "state": value.preparation.state,
+            "native_state": value.preparation.native_state,
+            "location": value.preparation.location,
+        }
+    return document
 
 
 def _artifact_document(artifact: Artifact) -> dict[str, Any]:

@@ -1438,6 +1438,10 @@ Version-1 JSON retains aggregate counts under `tasks` and adds ordered
 execution and retrieval states, native scheduler identity/state when
 available, and exit code when known.
 
+Version-2 status additionally reports the preparation job's separate scheduler
+identity, portable and native states, and builder location. A failed
+preparation marks the Run failed before scientific work can execute.
+
 ---
 
 ### 21.6 `logs`
@@ -1452,6 +1456,7 @@ Task selection should be possible:
 rundr logs <run-id> --task task_000017
 # zero-based ordinals are also accepted:
 rundr logs <run-id> --task 17
+rundr logs <run-id> --preparation
 ```
 
 Useful options may later include:
@@ -1463,6 +1468,7 @@ Useful options may later include:
 ```
 
 Agents and users should not need to know native scheduler log filenames.
+Preparation logs remain separate from scientific Task logs.
 
 ---
 
@@ -1493,6 +1499,9 @@ rundr cancel <run-id>
 ```
 
 Cancels active scheduler jobs associated with the Run.
+
+For a prepared Run, cancellation covers both the framework-owned preparation
+job and dependent scientific jobs.
 
 Cancellation must be recorded in the RunRecord.
 

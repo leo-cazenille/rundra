@@ -174,6 +174,8 @@ class PreparationRecord:
     build_cache_key: str | None = None
     builder_location: str | None = None
     builder_scheduler_id: str | None = None
+    builder_status: str | None = None
+    builder_state: str | None = None
     build_outputs: tuple[PreparedOutput, ...] = ()
     logs: tuple[PurePath, ...] = ()
 
@@ -191,7 +193,13 @@ class PreparationRecord:
             raise ValueError("PreparationRecord image path must be absolute")
         if self.resolution_location not in {"local", "target"}:
             raise ValueError("PreparationRecord resolution location is unsupported")
-        for name in ("build_cache_key", "builder_location", "builder_scheduler_id"):
+        for name in (
+            "build_cache_key",
+            "builder_location",
+            "builder_scheduler_id",
+            "builder_status",
+            "builder_state",
+        ):
             value = getattr(self, name)
             if value is not None and (
                 type(value) is not str or not value or "\x00" in value
@@ -199,6 +207,15 @@ class PreparationRecord:
                 raise ValueError(f"PreparationRecord {name} must be safe or None")
         if self.build_cache_key is not None:
             _require_sha256(self.build_cache_key, field_name="Build cache key")
+        if self.builder_status is not None and self.builder_status not in {
+            "SUBMITTED",
+            "RUNNING",
+            "SUCCEEDED",
+            "FAILED",
+            "CANCELLED",
+            "UNKNOWN",
+        }:
+            raise ValueError("PreparationRecord builder status is unsupported")
         outputs = tuple(self.build_outputs)
         if any(type(item) is not PreparedOutput for item in outputs):
             raise TypeError("PreparationRecord outputs must be PreparedOutputs")

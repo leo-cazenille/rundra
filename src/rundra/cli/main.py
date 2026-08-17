@@ -123,10 +123,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     logs = subparsers.add_parser("logs", help="read framework-managed Task logs")
     logs.add_argument("run_id")
-    logs.add_argument(
+    log_selection = logs.add_mutually_exclusive_group()
+    log_selection.add_argument(
         "--task",
         metavar="TASK_ID_OR_INDEX",
         help="select one Task by stable ID or zero-based ordinal",
+    )
+    log_selection.add_argument(
+        "--preparation",
+        action="store_true",
+        help="read logs from the framework-owned preparation job",
     )
     _add_store_option(logs)
     _add_json_option(logs)
@@ -380,6 +386,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             arguments.run_id,
             JsonRunStore(arguments.data_dir),
             task=arguments.task,
+            preparation=arguments.preparation,
         )
     elif arguments.command == "fetch":
         result = fetch_operation(

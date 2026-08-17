@@ -120,12 +120,15 @@ class SchedulerLifecycleService:
     def refresh(self, record: RunRecord) -> RunRecord:
         """Query and durably apply every Task scheduler observation."""
         _require_record(record)
-        task_references = _record_task_references(record)
+        current = self._refresh_preparation(record)
+        if current.run.state in _TERMINAL_STATES:
+            return current
+        task_references = _record_task_references(current)
         references = tuple(reference for _, reference in task_references)
         observations = self._scheduler.query(references)
         _validate_observations(observations, references)
         updated = _observed_records(
-            record,
+            current,
             tuple(
                 (task_id, observation)
                 for (task_id, _), observation in zip(
@@ -134,6 +137,41 @@ class SchedulerLifecycleService:
             ),
             self._clock(),
         )
+        self._store.update(updated, expected=current)
+        return updated
+
+    def _refresh_preparation(self, record: RunRecord) -> RunRecord:
+        preparation = record.preparation
+        if (
+            preparation is None
+            or preparation.builder_scheduler_id is None
+            or preparation.builder_status in {"SUCCEEDED", "FAILED", "CANCELLED"}
+        ):
+            return record
+        reference = SchedulerReference(preparation.builder_scheduler_id)
+        observation = _single_observation(
+            self._scheduler.query((reference,)),
+            reference,
+        )
+        updated = replace(
+            record,
+            preparation=replace(
+                preparation,
+                builder_status=observation.state.value,
+                builder_state=observation.native_state,
+            ),
+        )
+        if observation.state in {ExecutionState.FAILED, ExecutionState.CANCELLED}:
+            terminal_state = (
+                ExecutionState.CANCELLED
+                if observation.state is ExecutionState.CANCELLED
+                else ExecutionState.FAILED
+            )
+            updated = replace(
+                _with_execution_state(updated, terminal_state),
+                completed_at=self._clock(),
+                native_state=f"PREPARATION_{terminal_state.value}",
+            )
         self._store.update(updated, expected=record)
         return updated
 
@@ -189,6 +227,7 @@ class SchedulerLifecycleService:
         _require_record(record)
         if record.run.state in _TERMINAL_STATES:
             return record
+        record = self._cancel_preparation(record)
         if len(record.run.tasks) == 1:
             return self._cancel_single(
                 record, timeout=timeout, poll_interval=poll_interval
@@ -225,6 +264,37 @@ class SchedulerLifecycleService:
         )
         self._store.update(updated, expected=current)
         return self.wait(updated, timeout=timeout, poll_interval=poll_interval)
+
+    def _cancel_preparation(self, record: RunRecord) -> RunRecord:
+        preparation = record.preparation
+        if (
+            preparation is None
+            or preparation.builder_scheduler_id is None
+            or preparation.builder_status in {"SUCCEEDED", "FAILED", "CANCELLED"}
+        ):
+            return record
+        reference = SchedulerReference(preparation.builder_scheduler_id)
+        try:
+            observation = _single_observation(
+                self._scheduler.cancel((reference,)),
+                reference,
+            )
+        except Exception as error:
+            raise OrchestrationError(
+                code="SCHEDULER_CANCEL_FAILED",
+                message=f"Run {record.run.id} preparation cancellation failed: {error}",
+                run_id=record.run.id,
+            ) from error
+        updated = replace(
+            record,
+            preparation=replace(
+                preparation,
+                builder_status=observation.state.value,
+                builder_state=observation.native_state,
+            ),
+        )
+        self._store.update(updated, expected=record)
+        return updated
 
     def _cancel_single(
         self,
@@ -460,6 +530,7 @@ class OrchestrationService:
                 preparation=replace(
                     record.preparation,
                     builder_scheduler_id=preparation_reference.native_id,
+                    builder_status=ExecutionState.SUBMITTED.value,
                     logs=(
                         request.plan.target.workspace
                         / ".rundra-scheduler-logs"

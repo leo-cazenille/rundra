@@ -22,6 +22,7 @@ from rundra.domain.models import (
     BackendConfig,
     Command,
     ConfigSnapshot,
+    ContainerSpec,
     ExperimentSpec,
     ResourceRequest,
     Run,
@@ -30,6 +31,7 @@ from rundra.domain.models import (
     Task,
     TaskId,
 )
+from rundra.domain.preparation import PreparationRecord
 from rundra.domain.records import RunRecord
 from rundra.domain.states import ExecutionState
 from rundra.orchestration.service import OrchestrationError, SchedulerLifecycleService
@@ -108,6 +110,41 @@ class ArrayCancellationScheduler:
         return self.cancelled
 
 
+@dataclass
+class PreparedLifecycleScheduler:
+    preparation_observation: SchedulerObservation
+    task_observation: SchedulerObservation
+    queried: list[tuple[SchedulerReference, ...]] = field(default_factory=list)
+    cancelled: list[tuple[SchedulerReference, ...]] = field(default_factory=list)
+
+    def submit(self, group: SchedulerGroup) -> SchedulerSubmission:
+        raise AssertionError("lifecycle reconciliation must not submit")
+
+    def query(
+        self, references: tuple[SchedulerReference, ...]
+    ) -> tuple[SchedulerObservation, ...]:
+        self.queried.append(references)
+        if references == (SchedulerReference("900"),):
+            return (self.preparation_observation,)
+        assert references == (_REFERENCE,)
+        return (self.task_observation,)
+
+    def cancel(
+        self, references: tuple[SchedulerReference, ...]
+    ) -> tuple[SchedulerObservation, ...]:
+        self.cancelled.append(references)
+        if references == (SchedulerReference("900"),):
+            return (
+                SchedulerObservation(
+                    SchedulerReference("900"),
+                    ExecutionState.CANCELLED,
+                    "CANCELLED",
+                ),
+            )
+        assert references == (_REFERENCE,)
+        return (_observation(ExecutionState.CANCELLED, "CANCELLED"),)
+
+
 class LogTransport:
     def __init__(self) -> None:
         self.calls: list[Command] = []
@@ -158,6 +195,35 @@ def _record() -> RunRecord:
         PurePosixPath("/source"),
         scheduler_job_ids=("12345",),
         submitted_at=_CREATED + timedelta(seconds=1),
+    )
+
+
+def _prepared_record() -> RunRecord:
+    record = _record()
+    image = PurePosixPath("/remote/work/cache/images/application.sif")
+    return replace(
+        record,
+        format_version=2,
+        experiment=replace(record.experiment, container=ContainerSpec(image)),
+        container_digest="cd" * 32,
+        preparation=PreparationRecord(
+            source_identity="git-recipe",
+            source_digest="ab" * 32,
+            source_action="checkout_git_cache",
+            image_uri="library://example/application:v1",
+            image_sha256="cd" * 32,
+            image_path=image,
+            image_action="resolve_in_preparation_job",
+            resolution_location="target",
+            build_cache_key="ef" * 32,
+            builder_location="target",
+            builder_scheduler_id="900",
+            builder_status="SUBMITTED",
+            logs=(
+                PurePosixPath("/remote/logs/900.stdout"),
+                PurePosixPath("/remote/logs/900.stderr"),
+            ),
+        ),
     )
 
 
@@ -319,6 +385,61 @@ def test_cancel_reconciles_a_race_and_is_idempotent_after_terminal(tmp_path) -> 
     assert repeated == cancelled
     assert scheduler.cancel_calls == 1
     assert scheduler.query_calls == 1
+
+
+def test_failed_preparation_prevents_scientific_status_progression(tmp_path) -> None:
+    record = _prepared_record()
+    store = JsonRunStore(tmp_path / "records")
+    store.create(record)
+    scheduler = PreparedLifecycleScheduler(
+        SchedulerObservation(
+            SchedulerReference("900"),
+            ExecutionState.FAILED,
+            "FAILED",
+            exit_code=2,
+            finished_at=_CREATED + timedelta(seconds=3),
+        ),
+        _observation(ExecutionState.SUCCEEDED, "COMPLETED", exit_code=0),
+    )
+
+    failed = SchedulerLifecycleService(
+        store=store,
+        scheduler=scheduler,
+        clock=lambda: _CREATED + timedelta(seconds=4),
+    ).refresh(record)
+
+    assert failed.run.state is ExecutionState.FAILED
+    assert failed.native_state == "PREPARATION_FAILED"
+    assert failed.preparation is not None
+    assert failed.preparation.builder_status == "FAILED"
+    assert scheduler.queried == [(SchedulerReference("900"),)]
+
+
+def test_cancel_covers_preparation_and_dependent_scientific_job(tmp_path) -> None:
+    record = _prepared_record()
+    store = JsonRunStore(tmp_path / "records")
+    store.create(record)
+    scheduler = PreparedLifecycleScheduler(
+        SchedulerObservation(
+            SchedulerReference("900"), ExecutionState.RUNNING, "RUNNING"
+        ),
+        _observation(ExecutionState.CANCELLED, "CANCELLED"),
+    )
+
+    cancelled = SchedulerLifecycleService(
+        store=store,
+        scheduler=scheduler,
+        clock=lambda: _CREATED + timedelta(seconds=4),
+        sleeper=lambda delay: None,
+    ).cancel(record, poll_interval=0.01)
+
+    assert cancelled.run.state is ExecutionState.CANCELLED
+    assert cancelled.preparation is not None
+    assert cancelled.preparation.builder_status == "CANCELLED"
+    assert scheduler.cancelled == [
+        (SchedulerReference("900"),),
+        (_REFERENCE,),
+    ]
 
 
 def test_concurrent_status_refreshes_converge_without_record_corruption(

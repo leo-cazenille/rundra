@@ -347,16 +347,16 @@ class SlurmScheduler:
             stderr_path=stderr_path,
         )
         command_arguments = [
-                "/bin/sh",
-                "-c",
-                _SUBMIT_ARRAY_SCRIPT,
-                "rundra-slurm-array-submit",
-                str(request.manifest_path),
-                manifest,
-                script,
-                str(self._log_directory),
-                self._sbatch,
-            ]
+            "/bin/sh",
+            "-c",
+            _SUBMIT_ARRAY_SCRIPT,
+            "rundra-slurm-array-submit",
+            str(request.manifest_path),
+            manifest,
+            script,
+            str(self._log_directory),
+            self._sbatch,
+        ]
         if dependency is not None:
             command_arguments[2] = _SUBMIT_DEPENDENT_ARRAY_SCRIPT
             command_arguments.append(dependency)
