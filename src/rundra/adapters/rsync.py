@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import secrets
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -64,6 +65,8 @@ class RsyncStager:
         *,
         host: str | None = None,
         executable: str = "rsync",
+        ssh_executable: str = "ssh",
+        ssh_config_file: PurePath | None = None,
     ) -> None:
         if not isinstance(transport, Transport):
             raise TypeError("RsyncStager requires a Transport")
@@ -76,6 +79,28 @@ class RsyncStager:
         self._transport = transport
         self._host = None if host is None else _safe_host(host)
         self._executable = executable
+        if (
+            type(ssh_executable) is not str
+            or not ssh_executable.strip()
+            or "\x00" in ssh_executable
+        ):
+            raise ValueError("rsync SSH executable must be nonblank and safe")
+        if ssh_config_file is not None and (
+            not isinstance(ssh_config_file, PurePath)
+            or not ssh_config_file.is_absolute()
+            or ssh_config_file == PurePath("/")
+            or "\x00" in str(ssh_config_file)
+        ):
+            raise ValueError("rsync SSH config file must be an absolute non-root path")
+        ssh_argv = (
+            ssh_executable,
+            *(("-F", str(ssh_config_file)) if ssh_config_file is not None else ()),
+        )
+        self._rsync_prefix = (
+            (self._executable,)
+            if ssh_argv == ("ssh",)
+            else (self._executable, "--rsh", shlex.join(ssh_argv))
+        )
         self._allocator = RemoteWorkspaceAllocator(transport)
 
     def check(self) -> CapabilityCheck:
@@ -111,7 +136,7 @@ class RsyncStager:
         )
 
         source_argv: list[str] = [
-            self._executable,
+            *self._rsync_prefix,
             "--archive",
             "--copy-links",
             "--delete",
@@ -137,7 +162,7 @@ class RsyncStager:
                 stream.flush()
                 os.fsync(stream.fileno())
                 config_argv = (
-                    self._executable,
+                    *self._rsync_prefix,
                     "--archive",
                     "--protect-args",
                     "--",
@@ -166,7 +191,7 @@ class RsyncStager:
                     os.fsync(stream.fileno())
                     self._upload(
                         (
-                            self._executable,
+                            *self._rsync_prefix,
                             "--archive",
                             "--protect-args",
                             "--",
@@ -195,7 +220,7 @@ class RsyncStager:
                     os.fsync(stream.fileno())
                     self._upload(
                         (
-                            self._executable,
+                            *self._rsync_prefix,
                             "--archive",
                             "--protect-args",
                             "--",
@@ -301,7 +326,7 @@ class RsyncStager:
             return "reuse_target_image_cache"
         self._upload(
             (
-                self._executable,
+                *self._rsync_prefix,
                 "--archive",
                 "--protect-args",
                 "--",
@@ -396,7 +421,7 @@ class RsyncStager:
                 )
 
         output_argv: list[str] = [
-            self._executable,
+            *self._rsync_prefix,
             "--archive",
             "--no-links",
             "--protect-args",
@@ -470,7 +495,7 @@ class RsyncStager:
     ) -> None:
         self._retrieve(
             (
-                self._executable,
+                *self._rsync_prefix,
                 "--archive",
                 "--no-links",
                 "--protect-args",

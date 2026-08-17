@@ -83,9 +83,12 @@ def doctor_operation(
         checks.append(_local_workspace_check(Path(target.workspace)))
     else:
         host = str(target.transport.options["host"])
-        checks.extend(_ssh_static_checks(host))
+        executable = str(target.transport.options.get("executable", "ssh"))
+        config_value = target.transport.options.get("config_file")
+        config_file = None if config_value is None else Path(str(config_value))
+        checks.extend(_ssh_static_checks(host, executable, config_file))
         if connect:
-            checks.append(_ssh_connect_check(host))
+            checks.append(_ssh_connect_check(host, executable, config_file))
     return OperationResult.success(
         "doctor", DoctorValue(source, target, tuple(checks), connect)
     )
@@ -104,17 +107,28 @@ def _local_workspace_check(workspace: Path) -> DoctorCheck:
     )
 
 
-def _ssh_static_checks(host: str) -> list[DoctorCheck]:
+def _ssh_static_checks(
+    host: str, executable: str, config_file: Path | None
+) -> list[DoctorCheck]:
     checks: list[DoctorCheck] = []
-    for executable in ("ssh", "rsync"):
-        available = shutil.which(executable) is not None
+    for name, candidate in (("ssh", executable), ("rsync", "rsync")):
+        available = shutil.which(candidate) is not None
         checks.append(
             DoctorCheck(
-                f"executable_{executable}",
+                f"executable_{name}",
                 "pass" if available else "fail",
-                f"{executable} is available"
-                if available
-                else f"{executable} is missing",
+                f"{name} is available" if available else f"{name} is missing",
+            )
+        )
+    if config_file is not None:
+        readable = config_file.is_file() and os.access(config_file, os.R_OK)
+        checks.append(
+            DoctorCheck(
+                "ssh_config_file",
+                "pass" if readable else "fail",
+                "configured OpenSSH file is readable"
+                if readable
+                else "configured OpenSSH file is not readable",
             )
         )
     socket_value = os.environ.get("SSH_AUTH_SOCK")
@@ -144,16 +158,24 @@ def _ssh_static_checks(host: str) -> list[DoctorCheck]:
                 else "SSH_AUTH_SOCK is not an accessible socket",
             )
         )
-    checks.extend(_ssh_configuration_checks(host))
+    checks.extend(_ssh_configuration_checks(host, executable, config_file))
     return checks
 
 
-def _ssh_configuration_checks(host: str) -> list[DoctorCheck]:
-    if shutil.which("ssh") is None:
+def _ssh_configuration_checks(
+    host: str, executable: str, config_file: Path | None
+) -> list[DoctorCheck]:
+    if shutil.which(executable) is None:
         return []
     try:
         completed = subprocess.run(
-            ("ssh", "-G", "--", host),
+            (
+                executable,
+                *(("-F", str(config_file)) if config_file is not None else ()),
+                "-G",
+                "--",
+                host,
+            ),
             check=False,
             capture_output=True,
             text=True,
@@ -187,14 +209,17 @@ def _ssh_configuration_checks(host: str) -> list[DoctorCheck]:
     return checks
 
 
-def _ssh_connect_check(host: str) -> DoctorCheck:
+def _ssh_connect_check(
+    host: str, executable: str, config_file: Path | None
+) -> DoctorCheck:
     tools = ("rsync", "sbatch", "squeue", "scancel", "scontrol", "apptainer")
     script = 'for tool in "$@"; do command -v "$tool" >/dev/null || exit 20; done'
     command = Command(("sh", "-c", script, "rundr-doctor", *tools))
     try:
         completed = subprocess.run(
             (
-                "ssh",
+                executable,
+                *(("-F", str(config_file)) if config_file is not None else ()),
                 "-T",
                 "-o",
                 "BatchMode=yes",

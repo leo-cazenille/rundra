@@ -22,6 +22,8 @@ targets:
     transport:
       type: ssh
       host: fishvision
+      executable: /usr/bin/ssh
+      config_file: /etc/rundra/ssh_config
     scheduler: {type: slurm}
     staging: {type: rsync}
     container: {type: apptainer}
@@ -35,7 +37,11 @@ targets:
     assert tuple(targets) == ("local", "shoal")
     assert targets["local"].workspace == PurePosixPath("~/.local/share/rundra")
     assert targets["shoal"].transport.kind == "ssh"
-    assert targets["shoal"].transport.options == {"host": "fishvision"}
+    assert targets["shoal"].transport.options == {
+        "host": "fishvision",
+        "executable": "/usr/bin/ssh",
+        "config_file": "/etc/rundra/ssh_config",
+    }
     assert targets["shoal"].scheduler.kind == "slurm"
     assert targets["shoal"].workspace == PurePosixPath("/shoalhome/{user}/.rundra")
     with pytest.raises(TypeError):

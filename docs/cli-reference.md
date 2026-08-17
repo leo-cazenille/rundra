@@ -58,6 +58,9 @@ project defaults, user defaults, then built-ins. Automatic locations are:
 
 See [agent target setup](agent-setup.md) for safe sandbox access to user
 configuration, host trust, and SSH-agent authentication.
+SSH targets may set an absolute `transport.config_file` and optional
+`transport.executable`; these are used consistently by execution, retrieval,
+and `doctor`.
 
 `plan` deliberately has no `--destination` or `--data-dir` because it creates
 no snapshot, retrieval, or RunRecord. Local `submit` returns

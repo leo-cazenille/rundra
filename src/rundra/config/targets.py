@@ -212,7 +212,7 @@ def _backend_config(
             )
     check_fields(
         section,
-        allowed=frozenset({"type", "host"})
+        allowed=frozenset({"type", "host", "executable", "config_file"})
         if role == "transport"
         else frozenset({"type"}),
         required=frozenset({"type"}),
@@ -252,11 +252,51 @@ def _backend_config(
                 message="SSH host must be a safe host alias or user@host destination",
             )
         options["host"] = host
-    elif "host" in section:
+        if "executable" in section:
+            executable = expect_string(
+                section["executable"],
+                source=source,
+                path=(*path, "executable"),
+                nonblank=True,
+            )
+            if "\x00" in executable or any(
+                character.isspace() for character in executable
+            ):
+                fail(
+                    source=source,
+                    path=(*path, "executable"),
+                    code="INVALID_VALUE",
+                    message="SSH executable must be one safe argument",
+                )
+            options["executable"] = executable
+        if "config_file" in section:
+            config_file = expect_string(
+                section["config_file"],
+                source=source,
+                path=(*path, "config_file"),
+                nonblank=True,
+            )
+            config_path = PurePath(config_file)
+            if (
+                not config_path.is_absolute()
+                or config_path == PurePath("/")
+                or "\x00" in config_file
+            ):
+                fail(
+                    source=source,
+                    path=(*path, "config_file"),
+                    code="INVALID_VALUE",
+                    message="SSH config_file must be an absolute non-root path",
+                )
+            options["config_file"] = config_file
+    elif any(field in section for field in ("host", "executable", "config_file")):
+        field = next(
+            field for field in ("host", "executable", "config_file") if field in section
+        )
         fail(
             source=source,
-            path=(*path, "host"),
+            path=(*path, field),
             code="UNKNOWN_FIELD",
-            message="Field 'host' is only valid for SSH transport",
+            message=f"Field '{field}' is only valid for SSH transport",
         )
     return BackendConfig(kind=kind, options=options)

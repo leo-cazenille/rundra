@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 from datetime import UTC, datetime
+from pathlib import PurePath
 
 from rundra.adapters._remote_shell import (
     RemoteShellSerializationError,
@@ -33,7 +34,9 @@ class SSHExecutionError(SSHTransportError):
 class SSHTransport:
     """Use the user's OpenSSH client configuration to reach one host alias."""
 
-    def __init__(self, host: str, *, executable: str = "ssh") -> None:
+    def __init__(
+        self, host: str, *, executable: str = "ssh", config_file: PurePath | None = None
+    ) -> None:
         if type(host) is not str:
             raise TypeError("SSH host must be a string")
         if not host.strip():
@@ -46,8 +49,17 @@ class SSHTransport:
             raise ValueError("SSH executable must not be blank")
         if "\x00" in executable:
             raise ValueError("SSH executable must not contain NUL")
+        if config_file is not None and not isinstance(config_file, PurePath):
+            raise TypeError("SSH config_file must be a path or None")
+        if config_file is not None and (
+            not config_file.is_absolute()
+            or config_file == PurePath("/")
+            or "\x00" in str(config_file)
+        ):
+            raise ValueError("SSH config_file must be an absolute non-root path")
         self._host = host
         self._executable = executable
+        self._config_file = config_file
 
     def check(self) -> CapabilityCheck:
         """Confirm that the configured OpenSSH client is discoverable."""
@@ -71,7 +83,14 @@ class SSHTransport:
             remote_command = serialize_remote_command(command)
         except RemoteShellSerializationError as error:
             raise SSHCommandError(str(error)) from error
-        ssh_argv = (self._executable, "-T", "--", self._host, remote_command)
+        ssh_argv = (
+            self._executable,
+            *(("-F", str(self._config_file)) if self._config_file is not None else ()),
+            "-T",
+            "--",
+            self._host,
+            remote_command,
+        )
         started_at = datetime.now(UTC)
         completed: subprocess.CompletedProcess[str] | None = None
         failure_detail: str | None = None

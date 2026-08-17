@@ -2411,7 +2411,11 @@ actually runs commands.
 ## 36. SSH transport
 
 The OpenSSH transport relies on normal user SSH configuration. Its constructor
-accepts one host or host alias and, optionally, an alternate `ssh` executable.
+accepts one host or host alias and, optionally, an alternate `ssh` executable
+and explicit local OpenSSH config file. Target configuration represents these
+as `transport.executable` and `transport.config_file`; the latter must be an
+absolute non-root client path. The same selection is used by SSH transport,
+rsync staging/retrieval, diagnostics, and reconstructed lifecycle operations.
 Capability checking confirms that executable is discoverable without making a
 network connection. Command execution invokes OpenSSH with a local subprocess
 argument array and `shell=False`, disables pseudo-terminal allocation, and
@@ -2427,6 +2431,10 @@ therefore continues to use:
 - SSH agent authentication;
 - standard `~/.ssh/config`;
 - existing jump hosts when supported transparently by SSH.
+
+Rundra passes an explicit config as OpenSSH `-F` and never weakens host-key
+verification. It records only the config path in target provenance, never key
+or credential contents.
 
 Rundra does not disable host-key verification or build a parallel SSH
 configuration system. Authentication material is neither accepted by the

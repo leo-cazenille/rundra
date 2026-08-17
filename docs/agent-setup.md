@@ -11,6 +11,20 @@ Keep the adjacent project `rundra.yaml` non-secret: it may select a target by
 name, while SSH host aliases, workspaces, accounts, partitions, and QOS remain
 user/site configuration.
 
+Sandboxes that expose a dedicated OpenSSH configuration can select it directly
+in the user target file:
+
+```yaml
+transport:
+  type: ssh
+  host: fishvision
+  executable: /usr/bin/ssh
+  config_file: /var/local/codex/shoal/ssh/config
+```
+
+The config path is local to the Rundra client. Rundra passes it consistently to
+OpenSSH and rsync without copying or inspecting private-key contents.
+
 ## Safe sandbox prerequisites
 
 An agent sandbox that launches remote Runs needs:

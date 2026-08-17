@@ -2210,7 +2210,13 @@ def _record_stager(record: RunRecord) -> Stager:
         host = record.run.target.transport.options.get("host")
         if type(host) is not str:
             raise ValueError("Persisted rsync target host is unavailable")
-        return RsyncStager(transport, host=host)
+        executable, config_file = _target_ssh_selection(record.run.target)
+        return RsyncStager(
+            transport,
+            host=host,
+            ssh_executable=executable,
+            ssh_config_file=config_file,
+        )
     raise ValueError(
         f"Persisted staging backend {record.run.target.staging.kind!r} cannot fetch"
     )
@@ -2364,10 +2370,18 @@ def _execution_adapters(
     host = target.transport.options.get("host")
     if type(host) is not str:
         raise ValueError("SSH target host is unavailable")
-    remote_transport = SSHTransport(host)
+    executable, config_file = _target_ssh_selection(target)
+    remote_transport = SSHTransport(
+        host, executable=executable, config_file=config_file
+    )
     return (
         remote_transport,
-        RsyncStager(remote_transport, host=host),
+        RsyncStager(
+            remote_transport,
+            host=host,
+            ssh_executable=executable,
+            ssh_config_file=config_file,
+        ),
         RemoteApptainerRuntime(remote_transport),
         SlurmScheduler(
             remote_transport,
@@ -2388,7 +2402,18 @@ def _record_ssh_transport(record: RunRecord) -> SSHTransport:
     host = record.run.target.transport.options.get("host")
     if type(host) is not str:
         raise ValueError("Persisted SSH target host is unavailable")
-    return SSHTransport(host)
+    executable, config_file = _target_ssh_selection(record.run.target)
+    return SSHTransport(host, executable=executable, config_file=config_file)
+
+
+def _target_ssh_selection(target: Target) -> tuple[str, PurePath | None]:
+    executable = target.transport.options.get("executable", "ssh")
+    config_file = target.transport.options.get("config_file")
+    if type(executable) is not str:
+        raise ValueError("SSH target executable is invalid")
+    if config_file is not None and type(config_file) is not str:
+        raise ValueError("SSH target config_file is invalid")
+    return executable, None if config_file is None else PurePath(config_file)
 
 
 def _read_remote_log(transport: Transport, path: PurePath) -> str:

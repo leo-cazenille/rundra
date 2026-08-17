@@ -121,7 +121,11 @@ def test_ssh_transport_runs_exact_openssh_argv_and_returns_typed_result(
     )
 
     before = datetime.now(UTC)
-    result = SSHTransport("cluster-alias", executable="/usr/bin/ssh").run(command)
+    result = SSHTransport(
+        "cluster-alias",
+        executable="/usr/bin/ssh",
+        config_file=PurePosixPath("/etc/rundra/ssh_config"),
+    ).run(command)
     after = datetime.now(UTC)
 
     assert isinstance(SSHTransport("cluster-alias"), Transport)
@@ -129,6 +133,8 @@ def test_ssh_transport_runs_exact_openssh_argv_and_returns_typed_result(
         (
             (
                 "/usr/bin/ssh",
+                "-F",
+                "/etc/rundra/ssh_config",
                 "-T",
                 "--",
                 "cluster-alias",
