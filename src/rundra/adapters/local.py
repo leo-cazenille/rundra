@@ -31,22 +31,8 @@ from rundra.ports import (
     StageRequest,
     Transport,
 )
+from rundra.sync import with_default_sync_excludes
 
-_DEFAULT_EXCLUDES = (
-    ".git",
-    ".hg",
-    ".svn",
-    ".venv",
-    "venv",
-    "__pycache__",
-    ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
-    ".tox",
-    ".nox",
-    ".rundra",
-    "*.py[cod]",
-)
 _WRITE_BITS = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
 
 
@@ -359,7 +345,7 @@ def _validated_patterns(patterns: tuple[str, ...]) -> tuple[str, ...]:
                 f"Sync exclusion must be a nonempty safe relative exclusion: {pattern!r}"
             )
         normalized.append(value)
-    return tuple((*_DEFAULT_EXCLUDES, *normalized))
+    return with_default_sync_excludes(normalized)
 
 
 def _copy_ignore(

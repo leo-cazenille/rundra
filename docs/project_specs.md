@@ -978,6 +978,13 @@ Python caches, test/type/lint caches, and Rundra's own `.rundra` workspace.
 Experiment `sync.exclude` patterns add to those defaults. Unsafe absolute or
 parent-traversing patterns are rejected.
 
+The concrete default patterns are `.git`, `.hg`, `.svn`, `.venv`, `venv`,
+`__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.tox`, `.nox`,
+`.rundra`, `.agents`, `retrieved`, `tmp`, `downloads`, `*.py[cod]`, `*.sif`,
+and `*.simg`. Local staging, rsync staging, and mutable preparation snapshots
+share this list so excluded content is neither transferred nor included in
+source/build cache identities.
+
 Local fetch treats patterns as relative to `output/`, rejects symlink results
 and destinations inside the Run workspace, and atomically replaces each copied
 destination file. Repeating the same fetch is therefore safe and updates an

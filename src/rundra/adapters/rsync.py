@@ -36,22 +36,7 @@ from rundra.ports import (
     Transport,
 )
 from rundra.security import is_safe_ssh_destination
-
-_DEFAULT_EXCLUDES = (
-    ".git",
-    ".hg",
-    ".svn",
-    ".venv",
-    "venv",
-    "__pycache__",
-    ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
-    ".tox",
-    ".nox",
-    ".rundra",
-    "*.py[cod]",
-)
+from rundra.sync import with_default_sync_excludes
 
 
 class RsyncStagerError(RuntimeError):
@@ -475,7 +460,7 @@ def _validated_exclusions(patterns: tuple[str, ...]) -> tuple[str, ...]:
                 "Sync exclusion must be a nonempty safe relative exclusion"
             )
         normalized.append(value)
-    return (*_DEFAULT_EXCLUDES, *normalized)
+    return with_default_sync_excludes(normalized)
 
 
 def _target_host(options: Mapping[str, NativeValue]) -> str:

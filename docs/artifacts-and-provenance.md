@@ -46,6 +46,13 @@ runtime, output, log, and metadata locations remain writable. Configured and
 default transient exclusions mean the snapshot is not intended as a full
 repository backup.
 
+Default exclusions are `.git`, `.hg`, `.svn`, `.venv`, `venv`, `__pycache__`,
+`.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.tox`, `.nox`, `.rundra`,
+`.agents`, `retrieved`, `tmp`, `downloads`, `*.py[cod]`, `*.sif`, and `*.simg`.
+Experiment `sync.exclude` entries extend this list. The same defaults apply to
+working-tree preparation hashing and staging, preventing excluded large files
+from being uploaded or invalidating prepared build caches.
+
 The `source_snapshot` and `effective_config` artifacts identify these staged
 inputs. Their paths may be local or remote workspace paths and are not a promise
 that the workspace is retained forever.

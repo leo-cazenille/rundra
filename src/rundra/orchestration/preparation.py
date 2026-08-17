@@ -26,6 +26,7 @@ from rundra.domain.preparation import (
     source_recipe_identity,
 )
 from rundra.ports import StagedWorkspace, Transport
+from rundra.sync import with_default_sync_excludes
 
 
 class PreparationError(RuntimeError):
@@ -511,7 +512,11 @@ def _resolve_source(
     with tempfile.TemporaryDirectory(prefix="rundra-source-", dir=cache_root) as raw:
         temporary = Path(raw) / "snapshot"
         if plan.source_mode == "working_tree":
-            _copy_snapshot(source_root, temporary, excludes)
+            _copy_snapshot(
+                source_root,
+                temporary,
+                with_default_sync_excludes(excludes),
+            )
             action = "snapshot_working_tree"
         else:
             _checkout_git(plan, temporary, cache_root)

@@ -65,10 +65,15 @@ def _make_source(root: Path) -> Path:
     (source / "__pycache__").mkdir()
     (source / "build").mkdir()
     (source / "nested").mkdir()
+    for transient in (".agents", "retrieved", "tmp", "downloads"):
+        (source / transient).mkdir()
+        (source / transient / "large.bin").write_bytes(b"transient")
     (source / "main.py").write_text("print('snapshot')\n", encoding="utf-8")
     (source / "nested" / "keep.txt").write_text("keep\n", encoding="utf-8")
     (source / "build" / "drop.txt").write_text("drop\n", encoding="utf-8")
     (source / "notes.tmp").write_text("drop\n", encoding="utf-8")
+    (source / "image.sif").write_bytes(b"container")
+    (source / "legacy.simg").write_bytes(b"container")
     (source / ".git" / "config").write_text("git\n", encoding="utf-8")
     (source / ".venv" / "python").write_text("venv\n", encoding="utf-8")
     (source / "__pycache__" / "main.pyc").write_bytes(b"cache")
@@ -114,6 +119,10 @@ def test_local_stage_copies_isolates_excludes_and_seals_inputs(tmp_path: Path) -
     assert not (workspace.source / "__pycache__").exists()
     assert not (workspace.source / "build").exists()
     assert not (workspace.source / "notes.tmp").exists()
+    for transient in (".agents", "retrieved", "tmp", "downloads"):
+        assert not (workspace.source / transient).exists()
+    assert not (workspace.source / "image.sif").exists()
+    assert not (workspace.source / "legacy.simg").exists()
     assert workspace.config.read_bytes() == b"alpha: 1\r\nno_eof: true"
     assert stat.S_IMODE((workspace.source / "main.py").stat().st_mode) & 0o111
     assert [artifact.kind for artifact in workspace.artifacts] == [

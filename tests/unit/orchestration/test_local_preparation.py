@@ -31,6 +31,7 @@ from rundra.orchestration.preparation import (
     build_remote_preparation_command,
     create_remote_preparation_spec,
     prepare_local,
+    prepare_source_snapshot,
     read_remote_preparation_result,
 )
 from rundra.ports import StagedWorkspace
@@ -200,6 +201,40 @@ def test_working_tree_content_change_invalidates_source_and_build_keys(
 
     assert first.record.source_digest != second.record.source_digest
     assert first.record.build_cache_key != second.record.build_cache_key
+
+
+def test_working_tree_preparation_applies_default_sync_exclusions(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "keep.txt").write_text("included", encoding="utf-8")
+    for transient in (".agents", "retrieved", "tmp", "downloads"):
+        (source / transient).mkdir()
+        (source / transient / "large.bin").write_bytes(b"excluded")
+    (source / "image.sif").write_bytes(b"excluded")
+    (source / "legacy.simg").write_bytes(b"excluded")
+    recipe_image = tmp_path / "expected.sif"
+    recipe_image.write_bytes(b"recipe-image")
+    plan = PreparationPlan(
+        _recipe(recipe_image, build=False),
+        source_mode="working_tree",
+        source_root=source,
+        offline=True,
+    )
+
+    prepared = prepare_source_snapshot(
+        plan,
+        source_root=source,
+        excludes=(),
+        cache_root=tmp_path / "cache",
+    )
+
+    assert (prepared.root / "keep.txt").is_file()
+    for transient in (".agents", "retrieved", "tmp", "downloads"):
+        assert not (prepared.root / transient).exists()
+    assert not (prepared.root / "image.sif").exists()
+    assert not (prepared.root / "legacy.simg").exists()
 
 
 def test_offline_preparation_rejects_an_unverified_image_candidate(
