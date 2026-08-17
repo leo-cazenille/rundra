@@ -20,6 +20,7 @@ from rundra.cli.operations import (
     StatusValue,
     TargetsValue,
     TaskStatusValue,
+    TasksValue,
     ValidationValue,
 )
 from rundra.domain.models import Artifact, Command, ResourceRequest, Target, Task
@@ -129,6 +130,30 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
         }
     elif isinstance(value, InspectValue):
         document["record"] = record_to_dict(value.record)
+    elif isinstance(value, TasksValue):
+        document["tasks"] = {
+            "run_id": str(value.run_id),
+            "total": value.total,
+            "offset": value.offset,
+            "limit": value.limit,
+            "returned": len(value.tasks),
+            "items": [
+                {
+                    "task_id": str(item.coordinate.task_id),
+                    "ordinal": item.coordinate.ordinal,
+                    "parameter_set_ordinal": item.coordinate.parameter_set_ordinal,
+                    "seed_ordinal": item.coordinate.seed_ordinal,
+                    "seed": item.coordinate.seed,
+                    "state": item.execution_state.value,
+                    "retrieval_state": item.retrieval_state.value,
+                    "scheduler_id": item.scheduler_id,
+                    "native_state": item.native_state,
+                    "exit_code": item.exit_code,
+                    "attempt": item.attempt,
+                }
+                for item in value.tasks
+            ],
+        }
     else:
         raise TypeError(f"No public renderer for {type(value).__name__}")
     return document
@@ -285,6 +310,19 @@ def render_human(result: OperationResult[Any]) -> str:
             f"Retrieval: {record.run.retrieval_state.value}\n"
             f"Artifacts: {len(record.artifacts)}"
         )
+    if isinstance(value, TasksValue):
+        header = (
+            f"Run: {value.run_id}\nTasks: offset={value.offset} "
+            f"returned={len(value.tasks)} total={value.total}"
+        )
+        details = "\n".join(
+            f"  {item.coordinate.task_id} seed={item.coordinate.seed} "
+            f"parameter_set={item.coordinate.parameter_set_ordinal} "
+            f"state={item.execution_state.value} "
+            f"retrieval={item.retrieval_state.value}"
+            for item in value.tasks
+        )
+        return header if not details else f"{header}\n{details}"
     raise TypeError(f"No human renderer for {type(value).__name__}")
 
 
@@ -455,6 +493,8 @@ def _result_format_version(value: object) -> int:
         return value.format_version
     if isinstance(value, (LogsValue, FetchValue)):
         return value.format_version
+    if isinstance(value, TasksValue):
+        return 4
     if (
         isinstance(value, ValidationValue)
         and value.project is not None

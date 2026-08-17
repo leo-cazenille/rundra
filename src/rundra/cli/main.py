@@ -21,6 +21,7 @@ from rundra.cli.operations import (
     status_operation,
     submit_operation,
     targets_operation,
+    tasks_operation,
     validate_operation,
 )
 from rundra.cli.progress import (
@@ -29,7 +30,7 @@ from rundra.cli.progress import (
     create_progress_reporter,
 )
 from rundra.cli.render import render_human, render_json
-from rundra.persistence import JsonRunStore
+from rundra.persistence import JsonRunStore, SqliteTaskStore
 from rundra.results import OperationError, OperationResult
 
 _COMMANDS = (
@@ -39,6 +40,7 @@ _COMMANDS = (
     "run",
     "submit",
     "status",
+    "tasks",
     "list",
     "logs",
     "fetch",
@@ -144,6 +146,13 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("run_id")
     _add_store_option(status)
     _add_json_option(status)
+
+    tasks = subparsers.add_parser("tasks", help="page through compact Run Tasks")
+    tasks.add_argument("run_id")
+    tasks.add_argument("--offset", type=int, default=0)
+    tasks.add_argument("--limit", type=int, default=100)
+    _add_store_option(tasks)
+    _add_json_option(tasks)
 
     list_runs = subparsers.add_parser("list", help="list persisted Runs")
     _add_store_option(list_runs)
@@ -470,6 +479,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
     elif arguments.command == "status":
         result = status_operation(arguments.run_id, JsonRunStore(arguments.data_dir))
+    elif arguments.command == "tasks":
+        result = tasks_operation(
+            arguments.run_id,
+            JsonRunStore(arguments.data_dir),
+            SqliteTaskStore(arguments.data_dir),
+            offset=arguments.offset,
+            limit=arguments.limit,
+        )
     elif arguments.command == "list":
         result = list_runs_operation(JsonRunStore(arguments.data_dir))
     elif arguments.command == "logs":

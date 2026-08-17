@@ -89,6 +89,8 @@ from rundra.persistence import (
     RunStore,
     RunStoreConflictError,
     RunStoreError,
+    SqliteTaskStore,
+    TaskState,
 )
 from rundra.ports import (
     ContainerRuntime,
@@ -274,7 +276,7 @@ class StatusValue:
             raise TypeError(
                 "StatusValue preparation must be PreparationStatusValue or None"
             )
-        if self.format_version not in {1, 2, 3}:
+        if self.format_version not in {1, 2, 3, 4}:
             raise ValueError("StatusValue format_version is unsupported")
 
 
@@ -295,6 +297,27 @@ class ListRunsValue:
 @dataclass(frozen=True, slots=True)
 class InspectValue:
     record: RunRecord
+
+
+@dataclass(frozen=True, slots=True)
+class TasksValue:
+    run_id: RunId
+    total: int
+    offset: int
+    limit: int
+    tasks: tuple[TaskState, ...]
+
+    def __post_init__(self) -> None:
+        if type(self.run_id) is not RunId:
+            raise TypeError("TasksValue run_id must be a RunId")
+        if type(self.total) is not int or self.total < 1:
+            raise ValueError("TasksValue total must be positive")
+        if type(self.offset) is not int or self.offset < 0:
+            raise ValueError("TasksValue offset must be non-negative")
+        if type(self.limit) is not int or self.limit < 1:
+            raise ValueError("TasksValue limit must be positive")
+        if any(type(item) is not TaskState for item in self.tasks):
+            raise TypeError("TasksValue tasks must contain TaskState values")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1778,6 +1801,59 @@ def inspect_operation(
         return OperationResult.failure("inspect", error)
     assert record is not None
     return OperationResult.success("inspect", InspectValue(record))
+
+
+def tasks_operation(
+    run_id: str,
+    store: RunStore,
+    task_store: SqliteTaskStore,
+    *,
+    offset: int = 0,
+    limit: int = 100,
+) -> OperationResult[TasksValue]:
+    record, error = _load_record(run_id, store)
+    if error is not None:
+        return OperationResult.failure("tasks", error)
+    assert record is not None
+    if record.format_version != 4 or record.task_state_store is None:
+        return OperationResult.failure(
+            "tasks",
+            OperationError(
+                "TASK_PAGINATION_UNAVAILABLE",
+                f"Run {record.run.id} does not use compact v4 Task state",
+                {"run_id": str(record.run.id)},
+            ),
+        )
+    if record.task_state_store.name != task_store.path(record.run.id).name:
+        return OperationResult.failure(
+            "tasks",
+            OperationError(
+                "TASK_STATE_MISMATCH",
+                f"Run {record.run.id} references another Task state sidecar",
+                {"run_id": str(record.run.id)},
+            ),
+        )
+    try:
+        page = task_store.page(record.run.id, offset=offset, limit=limit)
+    except (RunStoreError, TypeError, ValueError) as task_error:
+        return OperationResult.failure(
+            "tasks",
+            OperationError(
+                "TASK_STATE_ERROR",
+                str(task_error),
+                {"run_id": str(record.run.id)},
+            ),
+        )
+    return OperationResult.success(
+        "tasks",
+        TasksValue(
+            record.run.id,
+            page.total,
+            page.offset,
+            page.limit,
+            page.tasks,
+        ),
+    )
 
 
 def logs_operation(

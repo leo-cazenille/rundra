@@ -10,6 +10,7 @@
     "run": {"positionals": ["experiment"], "options": ["--config", "--data-dir", "--destination", "--json", "--offline", "--prepare-location", "--profile", "--progress", "--project-file", "--random-seed", "--rebuild", "--seed", "--seeds", "--source-root", "--target", "--targets-file", "--verbose"]},
     "submit": {"positionals": ["experiment"], "options": ["--config", "--data-dir", "--destination", "--json", "--offline", "--prepare-location", "--profile", "--progress", "--project-file", "--random-seed", "--rebuild", "--seed", "--seeds", "--source-root", "--target", "--targets-file", "--verbose"]},
     "status": {"positionals": ["run_id"], "options": ["--data-dir", "--json"]},
+    "tasks": {"positionals": ["run_id"], "options": ["--data-dir", "--json", "--limit", "--offset"]},
     "list": {"positionals": [], "options": ["--data-dir", "--json"]},
     "logs": {"positionals": ["run_id"], "options": ["--data-dir", "--json", "--preparation", "--task"]},
     "fetch": {"positionals": ["run_id"], "options": ["--data-dir", "--destination", "--json", "--task"]},
