@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePath, PurePosixPath
 from time import monotonic, sleep
+from typing import cast
 
 from rundra.domain.models import (
     Artifact,
@@ -26,6 +27,10 @@ from rundra.domain.states import (
 )
 from rundra.orchestration.models import SLURM_ARRAY, ExecutionPlan, ExecutionUnit
 from rundra.orchestration.planner import create_plan
+from rundra.orchestration.preparation import (
+    RemotePreparationSpec,
+    build_remote_preparation_command,
+)
 from rundra.persistence.base import RunStore
 from rundra.persistence.errors import RunStoreError
 from rundra.ports import (
@@ -33,6 +38,7 @@ from rundra.ports import (
     BindMount,
     ContainerRequest,
     ContainerRuntime,
+    DependencyScheduler,
     FetchRequest,
     Scheduler,
     SchedulerArrayRequest,
@@ -254,6 +260,7 @@ class RunExecutionRequest:
     experiment_source: PurePath | None = None
     initiator: str | None = None
     preparation: PreparationRecord | None = None
+    remote_preparation: RemotePreparationSpec | None = None
 
     def __post_init__(self) -> None:
         if type(self.plan) is not ExecutionPlan:
@@ -279,6 +286,15 @@ class RunExecutionRequest:
             raise ValueError("Version-1 execution cannot contain preparation")
         if self.plan.version == 2 and type(self.preparation) is not PreparationRecord:
             raise ValueError("Version-2 execution requires a preparation record")
+        if (
+            self.remote_preparation is not None
+            and type(self.remote_preparation) is not RemotePreparationSpec
+        ):
+            raise TypeError(
+                "RunExecutionRequest remote preparation must be a spec or None"
+            )
+        if self.remote_preparation is not None and self.preparation is None:
+            raise ValueError("Remote preparation requires preparation provenance")
 
 
 @dataclass(frozen=True, slots=True)
@@ -405,6 +421,58 @@ class OrchestrationService:
         self.store.update(updated, expected=record)
         record = updated
 
+        preparation_reference = None
+        if request.remote_preparation is not None:
+            build = request.remote_preparation.plan.recipe.build
+            if build is None:
+                self._fail_before_completion(record, "PREPARATION_RESOURCES_REQUIRED")
+                raise OrchestrationError(
+                    code="PREPARATION_RESOURCES_REQUIRED",
+                    message="Remote preparation requires an explicit build resource request",
+                    run_id=run_id,
+                )
+            try:
+                preparation_submission = self._scheduler.submit(
+                    SchedulerGroup(
+                        (
+                            SchedulerUnit(
+                                TaskId.from_ordinal(0),
+                                build_remote_preparation_command(
+                                    request.remote_preparation,
+                                    workspace,
+                                ),
+                                build.resources,
+                            ),
+                        )
+                    )
+                )
+                preparation_reference = preparation_submission.reference
+            except Exception as error:
+                self._fail_before_completion(record, "PREPARATION_SUBMISSION_FAILED")
+                raise OrchestrationError(
+                    code="PREPARATION_SUBMISSION_FAILED",
+                    message=f"Run {run_id} preparation submission failed: {error}",
+                    run_id=run_id,
+                ) from error
+            assert record.preparation is not None
+            updated = replace(
+                record,
+                preparation=replace(
+                    record.preparation,
+                    builder_scheduler_id=preparation_reference.native_id,
+                    logs=(
+                        request.plan.target.workspace
+                        / ".rundra-scheduler-logs"
+                        / f"{preparation_reference.native_id}.stdout",
+                        request.plan.target.workspace
+                        / ".rundra-scheduler-logs"
+                        / f"{preparation_reference.native_id}.stderr",
+                    ),
+                ),
+            )
+            self.store.update(updated, expected=record)
+            record = updated
+
         try:
             scheduled_units = tuple(
                 replace(
@@ -436,20 +504,39 @@ class OrchestrationService:
                     for unit in scheduled_units
                 )
             )
+            if preparation_reference is not None and not isinstance(
+                self._scheduler, DependencyScheduler
+            ):
+                raise TypeError(
+                    "Configured scheduler does not support preparation dependencies"
+                )
             if request.plan.strategy == SLURM_ARRAY:
                 if not isinstance(self._scheduler, ArrayScheduler):
                     raise TypeError(
                         "Configured scheduler does not support mapped arrays"
                     )
-                submission = self._scheduler.submit_array(
-                    SchedulerArrayRequest(
-                        scheduler_group,
-                        request.plan.array_mapping,
-                        workspace.metadata / "slurm-array-tasks.sh",
+                array_request = SchedulerArrayRequest(
+                    scheduler_group,
+                    request.plan.array_mapping,
+                    workspace.metadata / "slurm-array-tasks.sh",
+                )
+                submission = (
+                    cast(DependencyScheduler, self._scheduler).submit_array_afterok(
+                        array_request,
+                        preparation_reference,
                     )
+                    if preparation_reference is not None
+                    else self._scheduler.submit_array(array_request)
                 )
             else:
-                submission = self._scheduler.submit(scheduler_group)
+                submission = (
+                    cast(DependencyScheduler, self._scheduler).submit_afterok(
+                        scheduler_group,
+                        preparation_reference,
+                    )
+                    if preparation_reference is not None
+                    else self._scheduler.submit(scheduler_group)
+                )
             if set(submission.task_native_ids) != {unit.task_id for unit in units}:
                 raise ValueError(
                     "Scheduler submission did not map every planned Task exactly"

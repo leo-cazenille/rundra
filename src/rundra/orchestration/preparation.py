@@ -5,6 +5,7 @@ import fnmatch
 import hashlib
 import os
 import platform
+import shlex
 import shutil
 import stat
 import subprocess
@@ -24,6 +25,7 @@ from rundra.domain.preparation import (
     build_cache_key,
     source_recipe_identity,
 )
+from rundra.ports import StagedWorkspace, Transport
 
 
 class PreparationError(RuntimeError):
@@ -37,6 +39,292 @@ class PreparedApplication:
     source_root: Path
     experiment: ExperimentSpec
     record: PreparationRecord
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedSource:
+    """One immutable source snapshot ready for local or remote staging."""
+
+    root: Path
+    digest: str
+    action: str
+    identity: str
+
+
+@dataclass(frozen=True, slots=True)
+class RemotePreparationSpec:
+    """Resolved inputs for one scheduled target preparation job."""
+
+    plan: PreparationPlan
+    source_digest: str
+    source_action: str
+    source_identity: str
+    platform_fingerprint: str
+    build_key: str | None
+
+
+def prepare_source_snapshot(
+    plan: PreparationPlan,
+    *,
+    source_root: Path,
+    excludes: tuple[str, ...],
+    cache_root: Path | None = None,
+) -> PreparedSource:
+    """Acquire and cache only source, without resolving an image or building."""
+    root = (
+        Path("~/.cache/rundra").expanduser().resolve()
+        if cache_root is None
+        else cache_root.expanduser().resolve()
+    )
+    root.mkdir(parents=True, exist_ok=True)
+    snapshot, digest, action = _resolve_source(
+        plan,
+        source_root=source_root.expanduser().resolve(),
+        cache_root=root,
+        excludes=excludes,
+    )
+    identity = (
+        source_recipe_identity(plan.recipe.source)
+        if plan.source_mode == "git"
+        else f"working-tree:{digest}"
+    )
+    return PreparedSource(snapshot, digest, action, identity)
+
+
+def remote_platform_fingerprint(transport: Transport) -> str:
+    """Read a target platform identity without running application compilation."""
+    if not isinstance(transport, Transport):
+        raise TypeError("remote_platform_fingerprint requires a Transport")
+    result = transport.run(Command(("uname", "-srm")))
+    if result.exit_code != 0 or not result.stdout.strip():
+        raise PreparationError("Could not fingerprint target preparation platform")
+    return hashlib.sha256(result.stdout.strip().encode("utf-8")).hexdigest()
+
+
+def create_remote_preparation_spec(
+    plan: PreparationPlan,
+    source: PreparedSource,
+    target: Target,
+    platform_fingerprint: str,
+) -> RemotePreparationSpec:
+    """Create deterministic target preparation identities before submission."""
+    build = plan.recipe.build
+    key = None
+    if build is not None:
+        scope = target.name if build.cache_scope == "target" else platform_fingerprint
+        key = build_cache_key(
+            source_digest=source.digest,
+            image_digest=plan.recipe.image.sha256,
+            build=build,
+            builder_scope=scope,
+            platform_fingerprint=platform_fingerprint,
+        )
+    return RemotePreparationSpec(
+        plan=plan,
+        source_digest=source.digest,
+        source_action=source.action,
+        source_identity=source.identity,
+        platform_fingerprint=platform_fingerprint,
+        build_key=key,
+    )
+
+
+def remote_preparation_record(
+    spec: RemotePreparationSpec,
+    target: Target,
+) -> PreparationRecord:
+    """Create pre-submission target preparation provenance."""
+    image = (
+        PurePath(str(target.workspace))
+        / "cache"
+        / "images"
+        / (f"{spec.plan.recipe.image.sha256}.sif")
+    )
+    return PreparationRecord(
+        source_identity=spec.source_identity,
+        source_digest=spec.source_digest,
+        source_action=spec.source_action,
+        image_uri=spec.plan.recipe.image.uri,
+        image_sha256=spec.plan.recipe.image.sha256,
+        image_path=image,
+        image_action="resolve_in_preparation_job",
+        resolution_location="target",
+        build_cache_key=spec.build_key,
+        builder_location="target",
+    )
+
+
+def build_remote_preparation_command(
+    spec: RemotePreparationSpec,
+    workspace: StagedWorkspace,
+) -> Command:
+    """Render one bounded target job that verifies, builds, and publishes caches."""
+    plan = spec.plan
+    recipe = plan.recipe
+    target_cache = workspace.root.parent.parent / "cache"
+    image = target_cache / "images" / f"{recipe.image.sha256}.sif"
+    image_lock = target_cache / "locks" / f"image-{recipe.image.sha256}.lock"
+    lines = [
+        "set -eu",
+        "umask 077",
+        f"cache={shlex.quote(str(target_cache))}",
+        f"image={shlex.quote(str(image))}",
+        f"image_lock={shlex.quote(str(image_lock))}",
+        'mkdir -p -- "$cache/images" "$cache/builds" "$cache/locks"',
+        "attempt=0",
+        'while ! mkdir -- "$image_lock" 2>/dev/null; do',
+        "  attempt=$((attempt + 1))",
+        "  [ \"$attempt\" -lt 900 ] || { printf '%s\\n' 'image cache lock timeout' >&2; exit 75; }",
+        "  sleep 1",
+        "done",
+        "trap 'rmdir -- \"$image_lock\" 2>/dev/null || :' EXIT HUP INT TERM",
+        'if [ -f "$image" ]; then',
+        "  actual=$(sha256sum -- \"$image\" | cut -d' ' -f1)",
+        f"  [ \"$actual\" = {shlex.quote(recipe.image.sha256)} ] || {{ printf '%s\\n' 'cached image digest mismatch' >&2; exit 65; }}",
+        "else",
+    ]
+    if plan.offline:
+        lines.append(
+            "  printf '%s\\n' 'verified image unavailable in offline mode' >&2; exit 69"
+        )
+    else:
+        lines.extend(
+            (
+                '  image_tmp=$(mktemp "$cache/images/.pull.XXXXXX")',
+                '  trap \'rm -f -- "$image_tmp"; rmdir -- "$image_lock" 2>/dev/null || :\' EXIT HUP INT TERM',
+                f'  apptainer pull --disable-cache "$image_tmp" {shlex.quote(recipe.image.uri)}',
+                "  actual=$(sha256sum -- \"$image_tmp\" | cut -d' ' -f1)",
+                f"  [ \"$actual\" = {shlex.quote(recipe.image.sha256)} ] || {{ printf '%s\\n' 'pulled image digest mismatch' >&2; exit 65; }}",
+                '  chmod a-w -- "$image_tmp"',
+                '  mv -- "$image_tmp" "$image"',
+            )
+        )
+    lines.extend(("fi", 'rmdir -- "$image_lock"', "trap - EXIT HUP INT TERM"))
+    build = recipe.build
+    if build is not None:
+        assert spec.build_key is not None
+        entry = target_cache / "builds" / spec.build_key
+        lock = target_cache / "locks" / f"build-{spec.build_key}.lock"
+        lines.extend(
+            (
+                f"entry={shlex.quote(str(entry))}",
+                f"build_lock={shlex.quote(str(lock))}",
+                "attempt=0",
+                'while ! mkdir -- "$build_lock" 2>/dev/null; do',
+                "  attempt=$((attempt + 1))",
+                "  [ \"$attempt\" -lt 900 ] || { printf '%s\\n' 'build cache lock timeout' >&2; exit 75; }",
+                "  sleep 1",
+                "done",
+                "trap 'rmdir -- \"$build_lock\" 2>/dev/null || :' EXIT HUP INT TERM",
+                f'if [ ! -f "$entry/.complete" ] || {"true" if plan.rebuild else "false"}; then',
+                '  work=$(mktemp -d "$cache/builds/.work.XXXXXX")',
+                '  publish=$(mktemp -d "$cache/builds/.publish.XXXXXX")',
+                '  trap \'rm -rf -- "$work" "$publish"; rmdir -- "$build_lock" 2>/dev/null || :\' EXIT HUP INT TERM',
+                f'  cp -a -- {shlex.quote(str(workspace.source))}/. "$work"/',
+                '  chmod -R u+w -- "$work"',
+                "  "
+                + shlex.join(
+                    (
+                        "apptainer",
+                        "exec",
+                        "--cleanenv",
+                        "--no-eval",
+                        "--bind",
+                        "$work:/workspace:rw",
+                        "--cwd",
+                        "/workspace",
+                        "$image",
+                        *build.argv,
+                    )
+                )
+                .replace("'$work:/workspace:rw'", '"$work:/workspace:rw"')
+                .replace("'$image'", '"$image"'),
+            )
+        )
+        for output in build.outputs:
+            rendered = shlex.quote(str(output.path))
+            lines.append(f'  output="$work"/{rendered}')
+            lines.append(
+                "  [ -f \"$output\" ] || { printf '%s\\n' 'declared output missing' >&2; exit 66; }"
+            )
+            if output.executable:
+                lines.append(
+                    "  [ -x \"$output\" ] || { printf '%s\\n' 'declared output not executable' >&2; exit 66; }"
+                )
+        lines.extend(
+            (
+                '  mkdir -p -- "$publish/source"',
+                '  cp -a -- "$work"/. "$publish"/source/',
+                '  : > "$publish/.complete"',
+                '  chmod -R a-w -- "$publish"',
+                '  chmod a-w -- "$publish/.complete"',
+                '  rm -rf -- "$entry"',
+                '  mv -- "$publish" "$entry"',
+                '  rm -rf -- "$work"',
+                "fi",
+                f"run_source_tmp={shlex.quote(str(workspace.root / '.prepared-source'))}",
+                'if [ -e "$run_source_tmp" ]; then chmod -R u+w -- "$run_source_tmp"; fi',
+                'rm -rf -- "$run_source_tmp"',
+                'cp -a -- "$entry/source" "$run_source_tmp"',
+                'chmod -R a-w -- "$run_source_tmp"',
+                f"chmod -R u+w -- {shlex.quote(str(workspace.source))}",
+                f"rm -rf -- {shlex.quote(str(workspace.source))}",
+                f'mv -- "$run_source_tmp" {shlex.quote(str(workspace.source))}',
+                'rmdir -- "$build_lock"',
+                "trap - EXIT HUP INT TERM",
+            )
+        )
+        lines.extend(
+            (
+                f"manifest_tmp={shlex.quote(str(workspace.metadata / '.preparation-outputs.tmp'))}",
+                f"manifest={shlex.quote(str(workspace.metadata / 'preparation-outputs.tsv'))}",
+                'rm -f -- "$manifest_tmp"',
+            )
+        )
+        for output in build.outputs:
+            rendered = shlex.quote(str(output.path))
+            executable = "1" if output.executable else "0"
+            lines.extend(
+                (
+                    f"output={shlex.quote(str(workspace.source))}/{rendered}",
+                    "digest=$(sha256sum -- \"$output\" | cut -d' ' -f1)",
+                    f'printf \'%s\\t%s\\t%s\\n\' "$digest" {executable} {rendered} >> "$manifest_tmp"',
+                )
+            )
+        lines.extend(
+            (
+                'chmod a-w -- "$manifest_tmp"',
+                'mv -- "$manifest_tmp" "$manifest"',
+            )
+        )
+    return Command(("/bin/sh", "-c", "\n".join(lines)))
+
+
+def read_remote_prepared_outputs(
+    transport: Transport,
+    workspace: StagedWorkspace,
+) -> tuple[PreparedOutput, ...] | None:
+    """Read a completed target preparation manifest without scheduler parsing."""
+    result = transport.run(
+        Command(("cat", "--", str(workspace.metadata / "preparation-outputs.tsv")))
+    )
+    if result.exit_code != 0:
+        return None
+    outputs: list[PreparedOutput] = []
+    for index, line in enumerate(result.stdout.splitlines()):
+        fields = line.split("\t")
+        if len(fields) != 3 or fields[1] not in {"0", "1"}:
+            raise PreparationError(
+                f"Target preparation output manifest line {index + 1} is invalid"
+            )
+        outputs.append(
+            PreparedOutput(
+                path=PurePath(fields[2]),
+                sha256=fields[0],
+                executable=fields[1] == "1",
+            )
+        )
+    return tuple(outputs)
 
 
 def prepare_local(

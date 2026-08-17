@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import subprocess
 from datetime import timedelta
 from pathlib import Path, PurePath
 
@@ -23,7 +24,14 @@ from rundra.domain.preparation import (
     PreparationPlan,
     PreparationSourceGit,
 )
-from rundra.orchestration.preparation import PreparationError, prepare_local
+from rundra.orchestration.preparation import (
+    PreparationError,
+    PreparedSource,
+    build_remote_preparation_command,
+    create_remote_preparation_spec,
+    prepare_local,
+)
+from rundra.ports import StagedWorkspace
 
 
 def _target(tmp_path: Path) -> Target:
@@ -215,6 +223,76 @@ def test_offline_preparation_rejects_an_unverified_image_candidate(
             source_root=source,
             cache_root=tmp_path / "cache",
         )
+
+
+def test_remote_preparation_script_builds_and_reuses_target_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "remote" / "runs" / "run_0" / "source"
+    source.mkdir(parents=True)
+    (source / "input.txt").write_text("source", encoding="utf-8")
+    image_candidate = tmp_path / "application.sif"
+    image_candidate.write_bytes(b"immutable-sif")
+    recipe = _recipe(image_candidate, build=True)
+    plan = PreparationPlan(
+        recipe,
+        source_mode="working_tree",
+        source_root=tmp_path,
+        offline=True,
+    )
+    target = _target(tmp_path)
+    target = Target(
+        name=target.name,
+        transport=target.transport,
+        scheduler=target.scheduler,
+        staging=target.staging,
+        container=target.container,
+        workspace=tmp_path / "remote",
+    )
+    prepared_source = PreparedSource(source, "34" * 32, "snapshot", "working-tree")
+    spec = create_remote_preparation_spec(
+        plan,
+        prepared_source,
+        target,
+        "56" * 32,
+    )
+    run_root = source.parent
+    workspace = StagedWorkspace(
+        root=run_root,
+        source=source,
+        inputs=run_root / "input",
+        config=run_root / "input/config.yaml",
+        runtime=run_root / "runtime",
+        outputs=run_root / "output",
+        logs=run_root / "logs",
+        metadata=run_root / "metadata",
+    )
+    workspace.metadata.mkdir()
+    image = target.workspace / "cache/images" / f"{recipe.image.sha256}.sif"
+    image.parent.mkdir(parents=True)
+    image.write_bytes(image_candidate.read_bytes())
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _fake_apptainer(fake_bin).rename(fake_bin / "apptainer")
+    monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ['PATH']}")
+    command = build_remote_preparation_command(spec, workspace)
+
+    cold = subprocess.run(
+        command.argv, check=False, capture_output=True, text=True, timeout=10
+    )
+    warm = subprocess.run(
+        command.argv, check=False, capture_output=True, text=True, timeout=10
+    )
+
+    assert (cold.returncode, cold.stderr) == (0, "")
+    assert (warm.returncode, warm.stderr) == (0, "")
+    assert (workspace.source / "bin/model").read_text(encoding="utf-8") == "built"
+    assert spec.build_key is not None
+    entry = target.workspace / "cache/builds" / spec.build_key
+    assert (entry / ".complete").is_file()
+    assert (entry / "source/bin/model").is_file()
+    assert stat_mode(entry) & 0o222 == 0
 
 
 def stat_mode(path: Path) -> int:

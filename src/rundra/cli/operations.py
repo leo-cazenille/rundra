@@ -45,6 +45,7 @@ from rundra.domain.preparation import (
     PREPARE_LOCATIONS,
     PreparationConfig,
     PreparationPlan,
+    PreparationRecord,
 )
 from rundra.domain.records import RunRecord
 from rundra.domain.states import (
@@ -54,7 +55,16 @@ from rundra.domain.states import (
 )
 from rundra.orchestration.models import ExecutionPlan, PlanningError
 from rundra.orchestration.planner import create_plan, expand_seeds
-from rundra.orchestration.preparation import PreparationError, prepare_local
+from rundra.orchestration.preparation import (
+    PreparationError,
+    RemotePreparationSpec,
+    create_remote_preparation_spec,
+    prepare_local,
+    prepare_source_snapshot,
+    read_remote_prepared_outputs,
+    remote_platform_fingerprint,
+    remote_preparation_record,
+)
 from rundra.orchestration.service import (
     OrchestrationError,
     OrchestrationService,
@@ -873,6 +883,33 @@ def resolve_run_inputs_operation(
     )
 
 
+def _remote_preparation_inputs(
+    plan: PreparationPlan,
+    experiment: ExperimentSpec,
+    target: Target,
+    source_root: Path,
+    transport: Transport,
+) -> tuple[Path, ExperimentSpec, PreparationRecord, RemotePreparationSpec]:
+    if plan.recipe.build is None:
+        raise PreparationError(
+            "Remote preparation requires an explicit build recipe and resources"
+        )
+    source = prepare_source_snapshot(
+        plan,
+        source_root=source_root,
+        excludes=experiment.sync_excludes,
+    )
+    fingerprint = remote_platform_fingerprint(transport)
+    spec = create_remote_preparation_spec(plan, source, target, fingerprint)
+    record = remote_preparation_record(spec, target)
+    assert experiment.container is not None
+    effective_experiment = replace(
+        experiment,
+        container=replace(experiment.container, image=record.image_path),
+    )
+    return source.root, effective_experiment, record, spec
+
+
 def run_operation(
     experiment_source: Path,
     config_source: Path,
@@ -909,26 +946,42 @@ def run_operation(
         effective_experiment = experiment
         effective_source_root = source_root
         preparation_record = None
+        remote_preparation = None
+        transport, stager, runtime, scheduler = _execution_adapters(target)
         if preparation is not None:
-            if target.transport.kind != "local" or target.scheduler.kind != "local":
-                return OperationResult.failure(
-                    "run",
-                    OperationError(
-                        "REMOTE_PREPARATION_UNAVAILABLE",
-                        "Scheduled target preparation is not implemented yet",
-                        {"target": target.name},
-                    ),
+            if target.transport.kind == "local" and target.scheduler.kind == "local":
+                prepared = prepare_local(
+                    preparation,
+                    experiment,
+                    target,
+                    project_root=experiment_source.expanduser().resolve().parent,
+                    source_root=source_root,
                 )
-            prepared = prepare_local(
-                preparation,
-                experiment,
-                target,
-                project_root=experiment_source.expanduser().resolve().parent,
-                source_root=source_root,
-            )
-            effective_experiment = prepared.experiment
-            effective_source_root = prepared.source_root
-            preparation_record = prepared.record
+                effective_experiment = prepared.experiment
+                effective_source_root = prepared.source_root
+                preparation_record = prepared.record
+            else:
+                if preparation.requested_location == "local":
+                    return OperationResult.failure(
+                        "run",
+                        OperationError(
+                            "PREPARATION_LOCATION_UNSUPPORTED",
+                            "Remote targets cannot use local compiled-output preparation",
+                            {"target": target.name},
+                        ),
+                    )
+                (
+                    effective_source_root,
+                    effective_experiment,
+                    preparation_record,
+                    remote_preparation,
+                ) = _remote_preparation_inputs(
+                    preparation,
+                    experiment,
+                    target,
+                    source_root,
+                    transport,
+                )
         plan = create_plan(
             effective_experiment,
             config,
@@ -936,7 +989,6 @@ def run_operation(
             seeds=_execution_seed_values(seed=seed, seeds=seeds),
             preparation=preparation,
         )
-        transport, stager, runtime, scheduler = _execution_adapters(target)
         service = OrchestrationService(
             store=store,
             stager=stager,
@@ -954,9 +1006,21 @@ def run_operation(
                 fetch_destination=destination,
                 experiment_source=experiment_source,
                 preparation=preparation_record,
+                remote_preparation=remote_preparation,
             )
         )
-        return OperationResult.success("run", RunValue(result.record, launch))
+        record = result.record
+        if remote_preparation is not None:
+            outputs = read_remote_prepared_outputs(transport, result.workspace)
+            if outputs is not None:
+                assert record.preparation is not None
+                updated = replace(
+                    record,
+                    preparation=replace(record.preparation, build_outputs=outputs),
+                )
+                store.update(updated, expected=record)
+                record = updated
+        return OperationResult.success("run", RunValue(record, launch))
     except ConfigError as error:
         return OperationResult.failure("run", _config_error(error))
     except PlanningError as error:
@@ -1008,27 +1072,54 @@ def submit_operation(
         target = targets[target_name]
         if preparation is not None:
             _validate_preparation_compatibility(experiment, preparation.recipe)
-            return OperationResult.failure(
-                "submit",
-                OperationError(
-                    "REMOTE_PREPARATION_UNAVAILABLE",
-                    "Scheduled target preparation is not implemented yet",
-                    {"target": target.name},
-                ),
-            )
         unsupported = _unsupported_execution_target(
             target, experiment, asynchronous=True
         )
         if unsupported is not None:
             return OperationResult.failure("submit", unsupported)
+        effective_experiment = experiment
+        effective_source_root = source_root
+        preparation_record = None
+        remote_preparation = None
+        transport, stager, runtime, scheduler = _execution_adapters(target)
+        if preparation is not None:
+            if target.transport.kind != "ssh" or target.scheduler.kind != "slurm":
+                return OperationResult.failure(
+                    "submit",
+                    OperationError(
+                        "ASYNC_UNAVAILABLE",
+                        "Prepared submit requires an SSH/Slurm target",
+                        {"target": target.name},
+                    ),
+                )
+            if preparation.requested_location == "local":
+                return OperationResult.failure(
+                    "submit",
+                    OperationError(
+                        "PREPARATION_LOCATION_UNSUPPORTED",
+                        "Remote targets cannot use local compiled-output preparation",
+                        {"target": target.name},
+                    ),
+                )
+            (
+                effective_source_root,
+                effective_experiment,
+                preparation_record,
+                remote_preparation,
+            ) = _remote_preparation_inputs(
+                preparation,
+                experiment,
+                target,
+                source_root,
+                transport,
+            )
         plan = create_plan(
-            experiment,
+            effective_experiment,
             config,
             target,
             seeds=_execution_seed_values(seed=seed, seeds=seeds),
             preparation=preparation,
         )
-        transport, stager, runtime, scheduler = _execution_adapters(target)
         service = OrchestrationService(
             store=store,
             stager=stager,
@@ -1041,10 +1132,12 @@ def submit_operation(
         result = service.submit_one(
             RunExecutionRequest(
                 plan=plan,
-                experiment=experiment,
-                source_root=source_root,
+                experiment=effective_experiment,
+                source_root=effective_source_root,
                 fetch_destination=destination,
                 experiment_source=experiment_source,
+                preparation=preparation_record,
+                remote_preparation=remote_preparation,
             )
         )
         return OperationResult.success("submit", RunValue(result.record, launch))
@@ -1062,6 +1155,10 @@ def submit_operation(
     except RunStoreError as error:
         return OperationResult.failure(
             "submit", OperationError("RUN_STORE_ERROR", str(error))
+        )
+    except PreparationError as error:
+        return OperationResult.failure(
+            "submit", OperationError("PREPARATION_FAILED", str(error))
         )
 
 

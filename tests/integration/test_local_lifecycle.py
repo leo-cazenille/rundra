@@ -4,6 +4,7 @@ import os
 import stat
 import sys
 from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path, PurePath, PurePosixPath
 
 import pytest
@@ -20,8 +21,18 @@ from rundra.domain.models import (
     RunId,
     Target,
 )
+from rundra.domain.preparation import (
+    PreparationBuild,
+    PreparationConfig,
+    PreparationImage,
+    PreparationOutput,
+    PreparationPlan,
+    PreparationRecord,
+    PreparationSourceGit,
+)
 from rundra.domain.states import ExecutionState, RetrievalState
 from rundra.orchestration.planner import create_plan
+from rundra.orchestration.preparation import RemotePreparationSpec
 from rundra.orchestration.service import (
     OrchestrationError,
     OrchestrationService,
@@ -33,6 +44,7 @@ from rundra.ports import (
     ContainerRequest,
     FetchRequest,
     FetchResult,
+    SchedulerArrayRequest,
     SchedulerGroup,
     SchedulerObservation,
     SchedulerReference,
@@ -118,6 +130,48 @@ class QueryFailScheduler:
         self, references: tuple[SchedulerReference, ...]
     ) -> tuple[SchedulerObservation, ...]:
         raise AssertionError("cancel must not be called")
+
+
+class DependencyLocalScheduler:
+    def __init__(self, transport: LocalTransport) -> None:
+        self.delegate = LocalScheduler(
+            transport,
+            reference_factory=lambda: "local-science-reference",
+        )
+        self.preparation_groups: list[SchedulerGroup] = []
+        self.dependencies: list[SchedulerReference] = []
+
+    def submit(self, group: SchedulerGroup) -> SchedulerSubmission:
+        self.preparation_groups.append(group)
+        return SchedulerSubmission(
+            SchedulerReference("900"),
+            {group.units[0].task_id: "900"},
+        )
+
+    def submit_afterok(
+        self,
+        group: SchedulerGroup,
+        dependency: SchedulerReference,
+    ) -> SchedulerSubmission:
+        self.dependencies.append(dependency)
+        return self.delegate.submit(group)
+
+    def submit_array_afterok(
+        self,
+        request: SchedulerArrayRequest,
+        dependency: SchedulerReference,
+    ) -> SchedulerSubmission:
+        raise AssertionError("array submission is not expected")
+
+    def query(
+        self, references: tuple[SchedulerReference, ...]
+    ) -> tuple[SchedulerObservation, ...]:
+        return self.delegate.query(references)
+
+    def cancel(
+        self, references: tuple[SchedulerReference, ...]
+    ) -> tuple[SchedulerObservation, ...]:
+        return self.delegate.cancel(references)
 
 
 def _target(workspace: Path) -> Target:
@@ -268,6 +322,105 @@ def test_one_task_local_lifecycle_persists_success_logs_manifest_and_fetch(
     stderr = result.workspace.logs / "task_000000.stderr"
     assert stdout.read_text(encoding="utf-8") == "stdout seed=17\n"
     assert stderr.read_text(encoding="utf-8") == "stderr exit=0\n"
+
+
+def test_preparation_job_is_submitted_before_dependent_scientific_work(
+    tmp_path: Path,
+) -> None:
+    source, config = _source(tmp_path)
+    target = _target(tmp_path / "workspace")
+    image = target.workspace / "cache/images" / f"{'ab' * 32}.sif"
+    experiment = replace(
+        _experiment(exit_code=0),
+        container=ContainerSpec(image),
+    )
+    build = PreparationBuild(
+        argv=("make", "model"),
+        outputs=(PreparationOutput(PurePosixPath("main.py")),),
+        cache_scope="target",
+        resources=ResourceRequest(
+            memory_bytes=1024**2,
+            walltime=timedelta(minutes=1),
+        ),
+    )
+    preparation = PreparationPlan(
+        PreparationConfig(
+            source=PreparationSourceGit(
+                "https://example.test/project.git",
+                "01" * 20,
+            ),
+            image=PreparationImage(
+                PurePosixPath("image.sif"),
+                "library://example/image:v1",
+                "ab" * 32,
+            ),
+            build=build,
+        ),
+        source_mode="working_tree",
+        source_root=source,
+        offline=True,
+    )
+    remote = RemotePreparationSpec(
+        preparation,
+        source_digest="cd" * 32,
+        source_action="snapshot_working_tree",
+        source_identity="working-tree",
+        platform_fingerprint="ef" * 32,
+        build_key="12" * 32,
+    )
+    provenance = PreparationRecord(
+        source_identity=remote.source_identity,
+        source_digest=remote.source_digest,
+        source_action=remote.source_action,
+        image_uri=preparation.recipe.image.uri,
+        image_sha256=preparation.recipe.image.sha256,
+        image_path=image,
+        image_action="resolve_in_preparation_job",
+        resolution_location="target",
+        build_cache_key=remote.build_key,
+        builder_location="target",
+    )
+    plan = create_plan(
+        experiment,
+        config,
+        target,
+        seeds=(17,),
+        preparation=preparation,
+    )
+    request = RunExecutionRequest(
+        plan=plan,
+        experiment=experiment,
+        source_root=source,
+        fetch_destination=tmp_path / "retrieved",
+        preparation=provenance,
+        remote_preparation=remote,
+    )
+    transport = LocalTransport()
+    scheduler = DependencyLocalScheduler(transport)
+    runtime = HostMappedRuntime()
+    service = OrchestrationService(
+        store=JsonRunStore(tmp_path / "records"),
+        stager=LocalStager(),
+        runtime=runtime,
+        scheduler=scheduler,
+        transport=transport,
+        run_id_factory=lambda: _RUN_ID,
+        framework_version="0.1.0.dev0",
+    )
+
+    result = service.execute_one(request)
+
+    assert scheduler.dependencies == [SchedulerReference("900")]
+    assert len(scheduler.preparation_groups) == 1
+    assert scheduler.preparation_groups[0].units[0].resources == build.resources
+    assert result.record.scheduler_job_ids == ("local-science-reference",)
+    assert result.record.preparation is not None
+    assert result.record.preparation.builder_scheduler_id == "900"
+    assert result.record.preparation.logs == (
+        target.workspace / ".rundra-scheduler-logs/900.stdout",
+        target.workspace / ".rundra-scheduler-logs/900.stderr",
+    )
+    record = result.record
     assert [artifact.kind for artifact in record.artifacts] == [
         ArtifactKind.SOURCE_SNAPSHOT,
         ArtifactKind.EFFECTIVE_CONFIG,
