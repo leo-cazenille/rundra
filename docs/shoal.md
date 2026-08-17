@@ -4,6 +4,14 @@ Shoal is Rundra's first real-cluster validation target. Its known path is a
 local client through the `fishvision` SSH host, then Slurm and Apptainer on the
 compute nodes, with `/shoalhome` intended as the shared workspace root.
 
+`fishvision` is a controller, not an execution host. Rundra may use it for
+capability and filesystem probes, staging and retrieval, and Slurm
+submission/status/cancellation commands only. Analysis scripts, source builds,
+container execution, tests, simulations, and all other computation must run
+locally on `bigfish` or inside a Slurm allocation on `shoal1` through `shoal8`.
+Do not use direct SSH to a compute node as a substitute for a scheduler
+allocation.
+
 The checked target example is
 [`examples/shoal/targets.yaml`](../examples/shoal/targets.yaml). Copy it to an
 untracked location and replace `YOUR_USERNAME` with your Shoal username:

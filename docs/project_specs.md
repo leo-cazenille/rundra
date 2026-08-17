@@ -2127,6 +2127,14 @@ remote laptop/workstation
  experiment processes
 ```
 
+`fishvision` is strictly a transport and scheduler-control boundary. Framework
+operations there are limited to capability/filesystem probes, staging,
+retrieval, and Slurm submission, observation, and cancellation. Rundra must
+never launch application commands, analysis, compilation, tests, simulations,
+or containers directly on `fishvision`. Such work runs locally on `bigfish` or
+inside a Slurm allocation on `shoal1` through `shoal8`; direct SSH execution on
+a compute node is not a replacement for scheduler allocation.
+
 `/shoalhome` is the intended shared workspace root for fishvision and the
 compute nodes. During the M4.2 login-side preflight on 2026-08-15, both `stat`
 and `findmnt` identified it as `zfs`, not NFSv4. The bounded M4.3 CPU and M4.4

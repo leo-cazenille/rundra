@@ -235,5 +235,12 @@ For SSH access to the shoal cluster, use:
 
 Allowed hosts are fishvision and shoal1 through shoal8.
 
+Treat `fishvision` strictly as an SSH gateway and Slurm controller. Commands on
+`fishvision` may perform capability probes, staging and retrieval, and Slurm
+submission/status/cancellation. Never run analysis scripts, builds, containers,
+tests, simulations, or other computation directly on `fishvision`. Run local
+computation on `bigfish`; run cluster computation only inside a Slurm allocation
+on `shoal1` through `shoal8`.
+
 Do not alter SSH configuration, keys, known_hosts, or authorized_keys.
 Do not use SSH port forwarding or agent forwarding.

@@ -89,7 +89,10 @@ retrieval tree.
 
 Ordinary use does not require a manual checkout, image pull, or compilation.
 To diagnose registry or compiler failures independently, use the exact recipe
-identities and command:
+identities and command on `bigfish` or inside a bounded Slurm allocation on a
+Shoal compute node. Never run these commands, the MSD analyzer, Apptainer, or
+other computation directly on `fishvision`; it is only the SSH gateway and
+Slurm controller.
 
 ```bash
 git clone https://github.com/Adacoma/pogosim.git /tmp/pogosim
