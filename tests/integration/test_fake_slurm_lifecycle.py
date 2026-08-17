@@ -190,9 +190,7 @@ def test_bundled_array_reconciles_atomic_task_journals(tmp_path: Path) -> None:
             "task_000003\t0",
         )
     )
-    transport.outcomes.extend(
-        ((0, "", ""), (0, accounting, ""), (0, journals, ""))
-    )
+    transport.outcomes.extend(((0, "", ""), (0, accounting, ""), (0, journals, "")))
 
     refreshed = SchedulerLifecycleService(
         store=store,

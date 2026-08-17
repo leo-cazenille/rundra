@@ -865,7 +865,7 @@ def render_slurm_bundle_manifest(
                     f"    {rendered}",
                     "    task_status=$?",
                     "    set -e",
-                    f"    printf '%s\\t%s\\n' {mapping.task_id} \"$task_status\" >> \"$journal_tmp\"",
+                    f'    printf \'%s\\t%s\\n\' {mapping.task_id} "$task_status" >> "$journal_tmp"',
                 )
             )
         branches.extend(

@@ -46,9 +46,19 @@ Target configuration version 3 enables constant-memory version-4 planning.
 target-bounded strategy, while `--retrieval all|manifest|none` records the
 intended output policy. Version-4 plan JSON reports the exact TaskSpace count,
 a maximum ten-Task preview, scheduler batch or worker counts, target limits,
-and confirmation threshold. Planning remains network-free. Worker-pool launch
-through `run` and `submit` is not yet exposed; its worker, sparse-state, and
-shard components remain internal until orchestration is complete.
+and confirmation threshold. Planning remains network-free.
+
+The optional target-v3 execution field `max_concurrent_jobs` defaults to 256.
+It limits submitted Slurm jobs and array elements, not only simultaneously
+running elements. Materialized `run` and `submit` operations above this limit
+use a bounded worker array whose elements execute logical Tasks sequentially,
+with isolated outputs, per-Task timeouts, and atomic exit journals. Compact
+TaskSpace launch, requeue recovery, and shard retrieval remain future work.
+
+```yaml
+execution:
+  max_concurrent_jobs: 128
+```
 
 Prepared project-v2 operations accept `--prepare-location auto|local|target`,
 `--rebuild`, and `--offline`. `plan` additionally accepts `--source-root` to

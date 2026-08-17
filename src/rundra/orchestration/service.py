@@ -120,7 +120,9 @@ class SchedulerLifecycleService:
         if progress is not None and not callable(progress):
             raise TypeError("SchedulerLifecycleService progress must be callable")
         if transport is not None and not isinstance(transport, Transport):
-            raise TypeError("SchedulerLifecycleService transport must implement Transport")
+            raise TypeError(
+                "SchedulerLifecycleService transport must implement Transport"
+            )
         self._store = store
         self._scheduler = scheduler
         self._clock = clock or (lambda: datetime.now(UTC))
@@ -144,8 +146,7 @@ class SchedulerLifecycleService:
             observation.reference: observation for observation in observations
         }
         task_observations = tuple(
-            (task_id, by_reference[reference])
-            for task_id, reference in task_references
+            (task_id, by_reference[reference]) for task_id, reference in task_references
         )
         updated = _observed_records(
             current,
@@ -422,8 +423,7 @@ class RunExecutionRequest:
         ):
             raise ValueError("Remote source root must be an absolute path or None")
         if self.max_concurrent_jobs is not None and (
-            type(self.max_concurrent_jobs) is not int
-            or self.max_concurrent_jobs < 1
+            type(self.max_concurrent_jobs) is not int or self.max_concurrent_jobs < 1
         ):
             raise ValueError("max_concurrent_jobs must be positive or None")
 
@@ -739,9 +739,7 @@ class OrchestrationService:
                 **record.scheduler_metadata,
                 **(
                     {
-                        "bundle_status_root": str(
-                            workspace.metadata / "bundle-status"
-                        ),
+                        "bundle_status_root": str(workspace.metadata / "bundle-status"),
                         "max_concurrent_jobs": request.max_concurrent_jobs or 0,
                     }
                     if bundled

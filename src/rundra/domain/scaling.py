@@ -167,7 +167,5 @@ class ExecutionPolicy:
             raise ValueError("confirmation_threshold must not exceed hard_task_limit")
         if self.max_active_tasks > self.hard_task_limit:
             raise ValueError("max_active_tasks must not exceed hard_task_limit")
-        if self.max_concurrent_jobs > self.hard_task_limit:
-            raise ValueError("max_concurrent_jobs must not exceed hard_task_limit")
         if self.worker_pool.activation_threshold > self.hard_task_limit:
             raise ValueError("worker_pool activation_threshold exceeds hard_task_limit")

@@ -167,8 +167,7 @@ class SchedulerArrayRequest:
                 "SchedulerArrayRequest manifest_path must be absolute and safe"
             )
         if self.max_concurrent_jobs is not None and (
-            type(self.max_concurrent_jobs) is not int
-            or self.max_concurrent_jobs < 1
+            type(self.max_concurrent_jobs) is not int or self.max_concurrent_jobs < 1
         ):
             raise ValueError(
                 "SchedulerArrayRequest max_concurrent_jobs must be positive or None"
