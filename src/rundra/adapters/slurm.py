@@ -904,12 +904,12 @@ def render_slurm_bundle_manifest(
             timeout = _task_timeout_seconds(unit.resources.walltime)
             command = serialize_remote_command(unit.command)
             rendered = (
-                command
+                command.replace("exec env --", "env --", 1)
                 if timeout is None
                 else command.replace(
                     "exec env --",
                     (
-                        "exec timeout --signal=TERM --kill-after=30s "
+                        "timeout --signal=TERM --kill-after=30s "
                         f"{timeout}s env --"
                     ),
                     1,

@@ -736,8 +736,9 @@ def test_slurm_scheduler_bundles_tasks_at_concurrent_job_limit() -> None:
     encoded = "".join(call.argv[4] for call in transport.run_calls[2:-1])
     manifest = gzip.decompress(base64.b64decode(encoded)).decode("utf-8")
     assert "bundle-status" in manifest
-    assert "exec timeout --signal=TERM --kill-after=30s 120s env --" in manifest
+    assert "timeout --signal=TERM --kill-after=30s 120s env --" in manifest
     assert "120s exec env --" not in manifest
+    assert "exec timeout" not in manifest
     assert manifest.count("# task_id=") == 5
     assert "#SBATCH --array=0-1" in command.argv[6]
     assert "#SBATCH --time=00:06:00" in command.argv[6]
