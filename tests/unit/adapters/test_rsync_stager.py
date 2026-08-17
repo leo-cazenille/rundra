@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import shutil
 import subprocess
 from collections import deque
@@ -203,6 +204,69 @@ def test_rsync_stager_reports_capability_and_upload_failures_without_data_leaks(
     with pytest.raises(RsyncUploadError) as captured:
         RsyncStager(RecordingTransport(deque([0, 0, 0]))).stage(request)
     assert "SECRET_VALUE_FROM_ARGV" not in str(captured.value)
+
+
+def test_verified_file_publication_is_atomic_and_reuses_target_digest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "application.sif"
+    source.write_bytes(b"immutable image")
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    destination = PurePosixPath(f"/remote/cache/images/{digest}.sif")
+
+    class CacheTransport:
+        def __init__(self) -> None:
+            self.calls: list[Command] = []
+            self.files: set[str] = set()
+
+        def check(self) -> CapabilityCheck:
+            return CapabilityCheck("ssh")
+
+        def run(self, command: Command) -> CommandResult:
+            self.calls.append(command)
+            now = datetime(2026, 1, 1, tzinfo=UTC)
+            argv = command.argv
+            exit_code = 0
+            stdout = ""
+            if argv[:2] == ("test", "-f"):
+                exit_code = 0 if argv[-1] in self.files else 1
+            elif argv[:2] == ("test", "-L"):
+                exit_code = 1
+            elif argv[0] == "sha256sum":
+                stdout = f"{digest}  {argv[-1]}\n"
+            elif argv[0] == "mv":
+                self.files.discard(argv[-2])
+                self.files.add(argv[-1])
+            elif argv[0] == "rm":
+                self.files.discard(argv[-1])
+            return CommandResult(command, exit_code, stdout, "", now, now)
+
+    transport = CacheTransport()
+    transfers: list[tuple[str, ...]] = []
+    monkeypatch.setattr(shutil, "which", lambda executable: "/usr/bin/rsync")
+
+    def transfer(
+        argv: tuple[str, ...], **options: object
+    ) -> subprocess.CompletedProcess[str]:
+        del options
+        transfers.append(argv)
+        transport.files.add(argv[-1].split(":", 1)[1])
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", transfer)
+    stager = RsyncStager(transport, host="cluster-alias")
+
+    cold = stager.publish_verified_file(source, destination, digest)
+    warm = stager.publish_verified_file(source, destination, digest)
+
+    assert cold == "transfer_image_to_target"
+    assert warm == "reuse_target_image_cache"
+    assert len(transfers) == 1
+    assert transfers[0][0:4] == ("rsync", "--archive", "--protect-args", "--")
+    assert str(destination) in transport.files
+    assert any(call.argv[0] == "chmod" for call in transport.calls)
+    assert any(call.argv[0] == "mv" for call in transport.calls)
 
 
 def test_rsync_stager_does_not_seal_after_interrupted_upload(

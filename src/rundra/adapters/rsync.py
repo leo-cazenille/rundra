@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import os
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -197,6 +199,113 @@ class RsyncStager:
             ),
         )
 
+    def publish_verified_file(
+        self,
+        source: Path,
+        destination: PurePath,
+        sha256: str,
+    ) -> str:
+        """Publish one verified immutable file into a remote content cache."""
+        if self._host is None:
+            raise RsyncUploadError("Verified file publication requires a host")
+        if not isinstance(source, Path) or source.is_symlink() or not source.is_file():
+            raise RsyncUploadError("Verified file source must be a regular file")
+        if (
+            not isinstance(destination, PurePath)
+            or not destination.is_absolute()
+            or destination == PurePath("/")
+            or "\x00" in str(destination)
+        ):
+            raise RsyncUploadError(
+                "Verified file destination must be absolute and safe"
+            )
+        if (
+            type(sha256) is not str
+            or len(sha256) != 64
+            or any(character not in "0123456789abcdef" for character in sha256)
+        ):
+            raise RsyncUploadError("Verified file SHA-256 is invalid")
+        if _file_sha256(source) != sha256:
+            raise RsyncUploadError("Verified file source digest does not match")
+        self.check()
+        parent = destination.parent
+        temporary = parent / f".{destination.name}.tmp-{secrets.token_hex(8)}"
+        lock = parent / f".{destination.name}.lock"
+        _require_remote_success(
+            self._transport,
+            Command(("mkdir", "-p", "--", str(parent))),
+            "create remote cache directory",
+        )
+        existing = _remote_file_digest(self._transport, destination)
+        if existing is not None:
+            if existing != sha256:
+                raise RsyncUploadError(
+                    "Existing target cache entry has the wrong digest"
+                )
+            return "reuse_target_image_cache"
+        self._upload(
+            (
+                self._executable,
+                "--archive",
+                "--protect-args",
+                "--",
+                str(source),
+                _remote_destination(self._host, temporary, directory=False),
+            ),
+            kind="verified file",
+            run_id="preparation",
+        )
+        acquired = False
+        try:
+            _require_remote_success(
+                self._transport,
+                Command(
+                    (
+                        "/bin/sh",
+                        "-c",
+                        'attempt=0; while ! mkdir -- "$1" 2>/dev/null; do '
+                        'attempt=$((attempt + 1)); [ "$attempt" -lt 900 ] || '
+                        "exit 75; sleep 1; done",
+                        "rundra-cache-lock",
+                        str(lock),
+                    )
+                ),
+                "acquire remote cache lock",
+            )
+            acquired = True
+            existing = _remote_file_digest(self._transport, destination)
+            if existing is not None:
+                if existing != sha256:
+                    raise RsyncUploadError(
+                        "Existing target cache entry has the wrong digest"
+                    )
+                _require_remote_success(
+                    self._transport,
+                    Command(("rm", "-f", "--", str(temporary))),
+                    "remove redundant remote transfer",
+                )
+                return "reuse_target_image_cache"
+            transferred = _remote_file_digest(self._transport, temporary)
+            if transferred != sha256:
+                raise RsyncUploadError("Transferred target file digest does not match")
+            _require_remote_success(
+                self._transport,
+                Command(("chmod", "a-w", "--", str(temporary))),
+                "seal remote cache file",
+            )
+            _require_remote_success(
+                self._transport,
+                Command(("mv", "--", str(temporary), str(destination))),
+                "publish remote cache file",
+            )
+            return "transfer_image_to_target"
+        finally:
+            if acquired:
+                try:
+                    self._transport.run(Command(("rmdir", "--", str(lock))))
+                except Exception:
+                    pass
+
     def fetch(self, request: FetchRequest) -> FetchResult:
         """Idempotently retrieve remote output, logs, and metadata."""
         if type(request) is not FetchRequest:
@@ -380,6 +489,46 @@ def _safe_host(value: str) -> str:
     if not is_safe_ssh_destination(value):
         raise RsyncStagerError("SSH target host cannot be represented safely for rsync")
     return value
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _remote_file_digest(transport: Transport, path: PurePath) -> str | None:
+    try:
+        link = transport.run(Command(("test", "-L", str(path))))
+        if link.exit_code == 0:
+            raise RsyncUploadError("Target cache path is a symbolic link")
+        regular = transport.run(Command(("test", "-f", str(path))))
+        if regular.exit_code != 0:
+            return None
+        result = transport.run(Command(("sha256sum", "--", str(path))))
+    except Exception as error:
+        raise RsyncUploadError("Could not inspect target cache file") from error
+    if result.exit_code != 0:
+        raise RsyncUploadError("Could not hash target cache file")
+    digest = result.stdout.strip().split(maxsplit=1)[0]
+    if len(digest) != 64:
+        raise RsyncUploadError("Target cache file returned an invalid digest")
+    return digest
+
+
+def _require_remote_success(
+    transport: Transport,
+    command: Command,
+    operation: str,
+) -> None:
+    try:
+        result = transport.run(command)
+    except Exception as error:
+        raise RsyncUploadError(f"Could not {operation}") from error
+    if result.exit_code != 0:
+        raise RsyncUploadError(f"Could not {operation}")
 
 
 def _remote_destination(host: str, path: PurePath, *, directory: bool) -> str:

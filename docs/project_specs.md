@@ -1328,6 +1328,10 @@ hashes that tree after normal sync exclusions and never compiles in the
 developer's original tree. Without that explicit option, the pinned Git source
 is used. `--prepare-location auto|local|target`, `--rebuild`, and `--offline`
 control location, compiled-output reuse, and network access respectively.
+For an SSH/Slurm target, forced `local` preparation compiles only in the local
+isolated cache, publishes the verified SIF atomically into the target content
+cache with rsync, and stages the prepared source; no compilation runs on the
+SSH login process.
 
 Version-2 planning remains pure. It reports source and image identities, build
 argv/outputs/resources, cache scope, requested location, possible actions, and

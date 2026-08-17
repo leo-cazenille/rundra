@@ -15,6 +15,7 @@ from rundra.adapters import (
     NativeRuntime,
     RemoteApptainerRuntime,
     RsyncStager,
+    RsyncUploadError,
     SlurmScheduler,
     SlurmScriptError,
     SSHTransport,
@@ -969,6 +970,62 @@ def _remote_preparation_inputs(
     return source.root, effective_experiment, record, spec
 
 
+def _local_remote_preparation_inputs(
+    plan: PreparationPlan,
+    experiment: ExperimentSpec,
+    target: Target,
+    source_root: Path,
+    project_root: Path,
+    stager: Stager,
+    local_storage: PreparationStorageConfig,
+    target_storage: PreparationStorageConfig,
+) -> tuple[Path, ExperimentSpec, PreparationRecord]:
+    if not isinstance(stager, RsyncStager):
+        raise PreparationError("Local-to-target preparation requires rsync staging")
+    prepared = prepare_local(
+        plan,
+        experiment,
+        target,
+        project_root=project_root,
+        source_root=source_root,
+        cache_root=(
+            None
+            if local_storage.cache_root is None
+            else Path(str(local_storage.cache_root))
+        ),
+        image_search_paths=tuple(
+            Path(str(path)) for path in local_storage.image_search_paths
+        ),
+    )
+    target_cache = (
+        target.workspace / "cache"
+        if target_storage.cache_root is None
+        else target_storage.cache_root
+    )
+    target_image = target_cache / "images" / f"{plan.recipe.image.sha256}.sif"
+    try:
+        image_action = stager.publish_verified_file(
+            Path(str(prepared.record.image_path)),
+            target_image,
+            plan.recipe.image.sha256,
+        )
+    except RsyncUploadError as error:
+        raise PreparationError(str(error)) from error
+    assert prepared.experiment.container is not None
+    effective_experiment = replace(
+        prepared.experiment,
+        container=replace(prepared.experiment.container, image=target_image),
+    )
+    record = replace(
+        prepared.record,
+        image_path=target_image,
+        image_action=image_action,
+        resolution_location="local",
+        builder_location="local",
+    )
+    return prepared.source_root, effective_experiment, record
+
+
 def run_operation(
     experiment_source: Path,
     config_source: Path,
@@ -1040,28 +1097,35 @@ def run_operation(
                 preparation_record = prepared.record
             else:
                 if preparation.requested_location == "local":
-                    return OperationResult.failure(
-                        "run",
-                        OperationError(
-                            "PREPARATION_LOCATION_UNSUPPORTED",
-                            "Remote targets cannot use local compiled-output preparation",
-                            {"target": target.name},
-                        ),
+                    (
+                        effective_source_root,
+                        effective_experiment,
+                        preparation_record,
+                    ) = _local_remote_preparation_inputs(
+                        preparation,
+                        experiment,
+                        target,
+                        source_root,
+                        experiment_source.expanduser().resolve().parent,
+                        stager,
+                        preparation_storage,
+                        target_storage,
                     )
-                (
-                    effective_source_root,
-                    effective_experiment,
-                    preparation_record,
-                    remote_preparation,
-                ) = _remote_preparation_inputs(
-                    preparation,
-                    experiment,
-                    target,
-                    source_root,
-                    transport,
-                    preparation_storage,
-                    target_storage,
-                )
+                else:
+                    (
+                        effective_source_root,
+                        effective_experiment,
+                        preparation_record,
+                        remote_preparation,
+                    ) = _remote_preparation_inputs(
+                        preparation,
+                        experiment,
+                        target,
+                        source_root,
+                        transport,
+                        preparation_storage,
+                        target_storage,
+                    )
         plan = create_plan(
             effective_experiment,
             config,
@@ -1185,28 +1249,35 @@ def submit_operation(
                     ),
                 )
             if preparation.requested_location == "local":
-                return OperationResult.failure(
-                    "submit",
-                    OperationError(
-                        "PREPARATION_LOCATION_UNSUPPORTED",
-                        "Remote targets cannot use local compiled-output preparation",
-                        {"target": target.name},
-                    ),
+                (
+                    effective_source_root,
+                    effective_experiment,
+                    preparation_record,
+                ) = _local_remote_preparation_inputs(
+                    preparation,
+                    experiment,
+                    target,
+                    source_root,
+                    experiment_source.expanduser().resolve().parent,
+                    stager,
+                    preparation_storage,
+                    target_storage,
                 )
-            (
-                effective_source_root,
-                effective_experiment,
-                preparation_record,
-                remote_preparation,
-            ) = _remote_preparation_inputs(
-                preparation,
-                experiment,
-                target,
-                source_root,
-                transport,
-                preparation_storage,
-                target_storage,
-            )
+            else:
+                (
+                    effective_source_root,
+                    effective_experiment,
+                    preparation_record,
+                    remote_preparation,
+                ) = _remote_preparation_inputs(
+                    preparation,
+                    experiment,
+                    target,
+                    source_root,
+                    transport,
+                    preparation_storage,
+                    target_storage,
+                )
         plan = create_plan(
             effective_experiment,
             config,
