@@ -1306,6 +1306,48 @@ preflight, allocate a Run ID or RunRecord, create a local or remote workspace,
 stage data, or submit work. The JSON `validation` and `safety` objects state
 these guarantees explicitly; the human renderer reports the same boundary.
 
+#### Project-managed preparation (schema version 2)
+
+An adjacent project `rundra.yaml` may use version 2 to add an immutable
+preparation recipe while the portable experiment remains schema version 1.
+Version-1 project documents retain their existing plan and RunRecord contracts.
+
+A version-2 recipe identifies a source using a full Git commit, identifies one
+prebuilt SIF using a logical filename, URI, and pinned SHA-256, and may define a
+shell-free application build argv with declared outputs and explicit CPU,
+memory, and walltime bounds. Relative image and output paths must not escape
+their roots. Credentials are forbidden in fields and source URLs.
+
+The experiment's relative `container.image` must equal the recipe's logical
+image filename. Preparation resolves that name to a verified absolute SIF path;
+the effective experiment and version-2 RunRecord preserve the absolute path and
+set `container_digest` to the verified SIF digest.
+
+`--source-root` selects mutable-working-tree preparation. Rundra snapshots and
+hashes that tree after normal sync exclusions and never compiles in the
+developer's original tree. Without that explicit option, the pinned Git source
+is used. `--prepare-location auto|local|target`, `--rebuild`, and `--offline`
+control location, compiled-output reuse, and network access respectively.
+
+Version-2 planning remains pure. It reports source and image identities, build
+argv/outputs/resources, cache scope, requested location, possible actions, and
+safety effects. It does not probe candidates or caches and never claims a cache
+hit. Content and cache resolution occurs only during `run` or `submit`.
+
+Local preparation uses content-addressed immutable source, image, and prepared
+source caches. Candidate images are accepted only after SHA-256 verification;
+cache publication uses per-key locks, temporary paths, and atomic rename.
+Builds run inside the verified SIF against a writable copy of the source
+snapshot. Declared outputs and executable bits are verified before the prepared
+source is sealed and published.
+
+The target preparation design extends this lifecycle with one bounded Slurm
+job on a remote cache miss. Compilation must not run in an SSH login process,
+and experiment jobs use a framework-owned `afterok` dependency. Preparation
+state and scheduler identity remain separate from scientific Task identities.
+The implementation status and remaining adapter work are tracked in
+`docs/m7-execution-plan.md`.
+
 ---
 
 ### 21.3 `run`

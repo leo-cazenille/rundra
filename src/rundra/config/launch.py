@@ -8,15 +8,19 @@ from types import MappingProxyType
 from rundra.config._schema import (
     ConfigPath,
     check_fields,
+    expect_integer,
     expect_mapping,
     expect_string,
     fail,
     require_version_one,
 )
 from rundra.config._yaml import read_yaml_document
+from rundra.config.preparation import parse_preparation
+from rundra.domain.preparation import PreparationConfig
 from rundra.security import is_credential_field
 
-_PROJECT_FIELDS = frozenset({"version", "default_profile", "defaults", "profiles"})
+_PROJECT_V1_FIELDS = frozenset({"version", "default_profile", "defaults", "profiles"})
+_PROJECT_V2_FIELDS = _PROJECT_V1_FIELDS | {"preparation"}
 _LAUNCH_VALUE_FIELDS = frozenset(
     {"config", "seed", "target", "source_root", "destination"}
 )
@@ -76,17 +80,20 @@ class LaunchValues:
 
 @dataclass(frozen=True, slots=True)
 class ProjectLaunchConfig:
-    """Strict version-1 project launch defaults and named profiles."""
+    """Strict versioned project launch defaults and preparation recipe."""
 
     version: int
     source: Path
     defaults: LaunchValues
     profiles: Mapping[str, LaunchValues]
     default_profile: str | None = None
+    preparation: PreparationConfig | None = None
 
     def __post_init__(self) -> None:
-        if type(self.version) is not int or self.version != 1:
-            raise ValueError("ProjectLaunchConfig version must be 1")
+        if type(self.version) is not int:
+            raise ValueError("ProjectLaunchConfig version must be an int")
+        if self.version not in (1, 2):
+            raise ValueError("ProjectLaunchConfig version must be 1 or 2")
         if not isinstance(self.source, Path) or not self.source.is_absolute():
             raise ValueError("ProjectLaunchConfig source must be an absolute Path")
         if type(self.defaults) is not LaunchValues:
@@ -107,6 +114,10 @@ class ProjectLaunchConfig:
                 or self.default_profile not in profiles
             ):
                 raise ValueError("ProjectLaunchConfig default profile is invalid")
+        if self.version == 1 and self.preparation is not None:
+            raise ValueError("ProjectLaunchConfig v1 cannot define preparation")
+        if self.version == 2 and type(self.preparation) is not PreparationConfig:
+            raise ValueError("ProjectLaunchConfig v2 requires preparation")
         object.__setattr__(self, "profiles", MappingProxyType(profiles))
 
     @property
@@ -174,14 +185,40 @@ def load_project_launch(source: Path) -> ProjectLaunchConfig:
         read_yaml_document(normalized_source), source=normalized_source, path=()
     )
     _reject_credential_fields(document, normalized_source, ())
+    if "version" not in document:
+        fail(
+            source=normalized_source,
+            path=("version",),
+            code="MISSING_FIELD",
+            message="Required field 'version' is missing",
+        )
+    version = expect_integer(
+        document["version"],
+        source=normalized_source,
+        path=("version",),
+        minimum=1,
+    )
+    if version not in {1, 2}:
+        fail(
+            source=normalized_source,
+            path=("version",),
+            code="UNSUPPORTED_VERSION",
+            message=(
+                "Unsupported project config version; supported versions are 1 and 2"
+            ),
+        )
     check_fields(
         document,
-        allowed=_PROJECT_FIELDS,
-        required=frozenset({"version"}),
+        allowed=_PROJECT_V1_FIELDS if version == 1 else _PROJECT_V2_FIELDS,
+        required=(
+            frozenset({"version"})
+            if version == 1
+            else frozenset({"version", "preparation"})
+        ),
         source=normalized_source,
         path=(),
     )
-    version = require_version_one(document["version"], source=normalized_source)
+    version_number = version
     defaults = (
         _launch_values(document["defaults"], normalized_source, ("defaults",))
         if "defaults" in document
@@ -202,7 +239,7 @@ def load_project_launch(source: Path) -> ProjectLaunchConfig:
             profiles[name] = _launch_values(
                 raw_profile, normalized_source, ("profiles", name)
             )
-    if defaults == LaunchValues() and not profiles:
+    if version_number == 1 and defaults == LaunchValues() and not profiles:
         fail(
             source=normalized_source,
             path=(),
@@ -224,12 +261,21 @@ def load_project_launch(source: Path) -> ProjectLaunchConfig:
                 code="UNKNOWN_PROFILE",
                 message=f"Default profile '{default_profile}' is not defined",
             )
+    preparation = (
+        parse_preparation(
+            document["preparation"],
+            source=normalized_source,
+        )
+        if version_number == 2
+        else None
+    )
     return ProjectLaunchConfig(
-        version=version,
+        version=version_number,
         source=normalized_source,
         defaults=defaults,
         profiles=profiles,
         default_profile=default_profile,
+        preparation=preparation,
     )
 
 

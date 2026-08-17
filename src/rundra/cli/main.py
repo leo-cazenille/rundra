@@ -80,6 +80,8 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--targets-file", type=Path)
     plan.add_argument("--project-file", type=Path)
     plan.add_argument("--profile")
+    plan.add_argument("--source-root", type=Path)
+    _add_preparation_arguments(plan)
     _add_json_option(plan)
 
     targets = subparsers.add_parser("targets", help="list configured targets")
@@ -94,6 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--destination", type=Path)
     run.add_argument("--project-file", type=Path)
     run.add_argument("--profile")
+    _add_preparation_arguments(run)
     _add_store_option(run, use_default=False)
     _add_json_option(run)
 
@@ -105,6 +108,7 @@ def build_parser() -> argparse.ArgumentParser:
     submit.add_argument("--destination", type=Path)
     submit.add_argument("--project-file", type=Path)
     submit.add_argument("--profile")
+    _add_preparation_arguments(submit)
     _add_store_option(submit, use_default=False)
     _add_json_option(submit)
 
@@ -203,6 +207,25 @@ def _add_execution_arguments(
     )
 
 
+def _add_preparation_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--prepare-location",
+        choices=("auto", "local", "target"),
+        default="auto",
+        help="select where preparation may run",
+    )
+    parser.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="bypass only the compiled-output cache",
+    )
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="prohibit Git fetches and image pulls",
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the rundr command-line interface."""
     raw_arguments = tuple(sys.argv[1:] if argv is None else argv)
@@ -253,6 +276,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             project_file=arguments.project_file,
             profile=arguments.profile,
             random_seed=arguments.random_seed,
+            source_root=arguments.source_root,
+            prepare_location=arguments.prepare_location,
+            rebuild=arguments.rebuild,
+            offline=arguments.offline,
         )
         if not resolved_plan.ok:
             result = resolved_plan
@@ -267,6 +294,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 seed=plan_inputs.seed,
                 seeds=plan_inputs.seeds,
                 launch=plan_inputs.launch,
+                preparation=plan_inputs.preparation_plan,
             )
     elif arguments.command == "targets":
         result = targets_operation(arguments.targets_file)
@@ -284,6 +312,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             project_file=arguments.project_file,
             profile=arguments.profile,
             random_seed=arguments.random_seed,
+            prepare_location=arguments.prepare_location,
+            rebuild=arguments.rebuild,
+            offline=arguments.offline,
         )
         if not resolved.ok:
             result = resolved
@@ -301,6 +332,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 seed=run_inputs.seed,
                 seeds=run_inputs.seeds if len(run_inputs.seeds) > 1 else None,
                 launch=run_inputs.launch,
+                preparation=run_inputs.preparation_plan,
             )
     elif arguments.command == "submit":
         resolved = resolve_run_inputs_operation(
@@ -317,6 +349,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             profile=arguments.profile,
             random_seed=arguments.random_seed,
             operation="submit",
+            prepare_location=arguments.prepare_location,
+            rebuild=arguments.rebuild,
+            offline=arguments.offline,
         )
         if not resolved.ok:
             result = resolved
@@ -334,6 +369,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 seed=submit_inputs.seed,
                 seeds=submit_inputs.seeds if len(submit_inputs.seeds) > 1 else None,
                 launch=submit_inputs.launch,
+                preparation=submit_inputs.preparation_plan,
             )
     elif arguments.command == "status":
         result = status_operation(arguments.run_id, JsonRunStore(arguments.data_dir))

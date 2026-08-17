@@ -19,6 +19,7 @@ from rundra.cli.operations import (
     ValidationValue,
 )
 from rundra.domain.models import Artifact, Command, ResourceRequest, Target
+from rundra.domain.preparation import PreparationPlan, source_recipe_identity
 from rundra.orchestration.models import ExecutionPlan
 from rundra.persistence import record_to_dict
 from rundra.results import OperationResult
@@ -37,8 +38,9 @@ def render_json(result: OperationResult[Any]) -> str:
 
 
 def result_document(result: OperationResult[Any]) -> dict[str, Any]:
+    value = result.value
     document: dict[str, Any] = {
-        "format_version": _FORMAT_VERSION,
+        "format_version": _result_format_version(value),
         "ok": result.ok,
         "operation": result.operation,
     }
@@ -49,13 +51,18 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
             "details": dict(result.error.details),
         }
         return document
-    value = result.value
     if isinstance(value, ValidationValue):
         document["experiment"] = {
             "name": value.experiment.name,
             "schema_version": value.experiment.version,
             "source": str(value.source),
         }
+        if value.project is not None and value.project.version == 2:
+            document["project"] = {
+                "schema_version": 2,
+                "source": str(value.project.source),
+                "preparation": "validated",
+            }
     elif isinstance(value, PlanValue):
         document["plan"] = _plan_document(value.plan)
         if value.launch is not None:
@@ -107,10 +114,13 @@ def render_human(result: OperationResult[Any]) -> str:
         return f"Error [{result.error.code}]: {prefix}{result.error.message}"
     value = result.value
     if isinstance(value, ValidationValue):
-        return (
+        rendered = (
             f"Valid experiment: {value.experiment.name} "
             f"(schema v{value.experiment.version})"
         )
+        if value.project is not None and value.project.version == 2:
+            rendered += "; project preparation v2 validated"
+        return rendered
     if isinstance(value, PlanValue):
         plan = value.plan
         seeds = ", ".join(str(unit.seed) for unit in plan.units)
@@ -131,6 +141,15 @@ def render_human(result: OperationResult[Any]) -> str:
                 for item in plan.array_mapping
             )
             rendered = f"{rendered}\nArray mapping: {mapping}"
+        if plan.preparation is not None:
+            preparation = plan.preparation
+            rendered += (
+                "\nPreparation: "
+                f"{preparation.source_mode}, image sha256:"
+                f"{preparation.recipe.image.sha256}, "
+                f"location={preparation.requested_location}, "
+                f"offline={preparation.offline}, rebuild={preparation.rebuild}"
+            )
         return _with_launch(rendered, value.launch)
     if isinstance(value, TargetsValue):
         lines = ["Configured targets:"]
@@ -209,7 +228,7 @@ def render_human(result: OperationResult[Any]) -> str:
 
 def _plan_document(plan: ExecutionPlan) -> dict[str, Any]:
     resources = plan.units[0].resources
-    return {
+    document = {
         "version": plan.version,
         "experiment": plan.experiment_name,
         "target": _target_document(plan.target),
@@ -255,6 +274,72 @@ def _plan_document(plan: ExecutionPlan) -> dict[str, Any]:
             for unit in plan.units
         ],
     }
+    if plan.preparation is not None:
+        document["preparation"] = _preparation_document(plan.preparation)
+    return document
+
+
+def _preparation_document(plan: PreparationPlan) -> dict[str, Any]:
+    recipe = plan.recipe
+    build = recipe.build
+    return {
+        "source": {
+            "mode": plan.source_mode,
+            "root": None if plan.source_root is None else str(plan.source_root),
+            "git": {
+                "url": recipe.source.url,
+                "revision": recipe.source.revision,
+                "recipe_identity": source_recipe_identity(recipe.source),
+            },
+        },
+        "image": {
+            "name": str(recipe.image.name),
+            "uri": recipe.image.uri,
+            "sha256": recipe.image.sha256,
+        },
+        "build": (
+            None
+            if build is None
+            else {
+                "argv": list(build.argv),
+                "outputs": [
+                    {"path": str(item.path), "executable": item.executable}
+                    for item in build.outputs
+                ],
+                "cache_scope": build.cache_scope,
+                "resources": _resources_document(build.resources),
+            }
+        ),
+        "strategy": {
+            "requested_location": plan.requested_location,
+            "offline": plan.offline,
+            "rebuild": plan.rebuild,
+            "possible_actions": list(plan.possible_actions),
+            "cache_hits_known": False,
+        },
+        "safety": {
+            "contacts_target": False,
+            "fetches_git": False,
+            "pulls_image": False,
+            "builds": False,
+        },
+    }
+
+
+def _result_format_version(value: object) -> int:
+    if isinstance(value, PlanValue):
+        return value.plan.version
+    if isinstance(value, RunValue):
+        return value.record.format_version
+    if isinstance(value, InspectValue):
+        return value.record.format_version
+    if (
+        isinstance(value, ValidationValue)
+        and value.project is not None
+        and value.project.version == 2
+    ):
+        return 2
+    return _FORMAT_VERSION
 
 
 def _staging_document(plan: ExecutionPlan) -> dict[str, Any]:

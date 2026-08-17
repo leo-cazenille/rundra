@@ -9,6 +9,7 @@ from types import MappingProxyType
 
 from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import Artifact, ExperimentSpec, NativeValue, Run, TaskId
+from rundra.domain.preparation import PreparationRecord
 from rundra.domain.states import RetrievalState
 
 
@@ -57,6 +58,7 @@ class RunRecord:
     git_dirty: bool | None = None
     git_diff: str | None = None
     container_digest: str | None = None
+    preparation: PreparationRecord | None = None
     scheduler_job_ids: tuple[str, ...] = ()
     allocated_nodes: tuple[str, ...] = ()
     submitted_at: datetime | None = None
@@ -74,8 +76,8 @@ class RunRecord:
     def __post_init__(self) -> None:
         if type(self.format_version) is not int:
             raise TypeError("RunRecord format_version must be an integer")
-        if self.format_version != 1:
-            raise ValueError("RunRecord format_version must be 1")
+        if self.format_version not in {1, 2}:
+            raise ValueError("RunRecord format_version must be 1 or 2")
         if type(self.framework_version) is not str:
             raise TypeError("RunRecord framework_version must be a string")
         if not self.framework_version.strip():
@@ -86,6 +88,22 @@ class RunRecord:
             raise TypeError("RunRecord experiment must be an ExperimentSpec")
         if self.experiment.name != self.run.experiment_name:
             raise ValueError("RunRecord experiment must match its Run")
+        if self.format_version == 1 and self.preparation is not None:
+            raise ValueError("RunRecord v1 cannot contain preparation")
+        if self.format_version == 2 and type(self.preparation) is not PreparationRecord:
+            raise ValueError("RunRecord v2 requires preparation")
+        if self.preparation is not None:
+            if self.container_digest != self.preparation.image_sha256:
+                raise ValueError(
+                    "RunRecord container and preparation digests must match"
+                )
+            if (
+                self.experiment.container is None
+                or self.experiment.container.image != self.preparation.image_path
+            ):
+                raise ValueError(
+                    "RunRecord experiment must use the prepared image path"
+                )
         if not isinstance(self.source_root, PurePath):
             raise TypeError("RunRecord source_root must be a PurePath")
         if self.experiment_source is not None and not isinstance(

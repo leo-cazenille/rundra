@@ -25,6 +25,7 @@ from rundra.config.experiments import load_config_snapshot, load_experiment
 from rundra.config.launch import (
     LaunchResolutionError,
     LaunchValues,
+    ProjectLaunchConfig,
     ResolvedLaunch,
     discover_project_launch,
     discover_user_launch,
@@ -40,6 +41,11 @@ from rundra.domain.models import (
     Target,
     TaskId,
 )
+from rundra.domain.preparation import (
+    PREPARE_LOCATIONS,
+    PreparationConfig,
+    PreparationPlan,
+)
 from rundra.domain.records import RunRecord
 from rundra.domain.states import (
     ExecutionState,
@@ -48,6 +54,7 @@ from rundra.domain.states import (
 )
 from rundra.orchestration.models import ExecutionPlan, PlanningError
 from rundra.orchestration.planner import create_plan, expand_seeds
+from rundra.orchestration.preparation import PreparationError, prepare_local
 from rundra.orchestration.service import (
     OrchestrationError,
     OrchestrationService,
@@ -76,6 +83,7 @@ from rundra.results import OperationError, OperationResult
 class ValidationValue:
     source: Path
     experiment: ExperimentSpec
+    project: ProjectLaunchConfig | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -282,6 +290,11 @@ class ResolvedRunInputs:
     destination: Path
     data_dir: Path
     resolution: ResolvedLaunch
+    preparation: PreparationConfig | None = None
+    mutable_source: bool = False
+    prepare_location: str = "auto"
+    rebuild: bool = False
+    offline: bool = False
 
     def __post_init__(self) -> None:
         for name in (
@@ -304,6 +317,23 @@ class ResolvedRunInputs:
             raise ValueError("ResolvedRunInputs target must be nonblank")
         if type(self.resolution) is not ResolvedLaunch:
             raise TypeError("ResolvedRunInputs resolution must be ResolvedLaunch")
+        _validate_preparation_inputs(
+            self.preparation,
+            self.mutable_source,
+            self.prepare_location,
+            self.rebuild,
+            self.offline,
+        )
+
+    @property
+    def preparation_plan(self) -> PreparationPlan | None:
+        return _preparation_plan(
+            self.preparation,
+            source_root=self.source_root if self.mutable_source else None,
+            location=self.prepare_location,
+            rebuild=self.rebuild,
+            offline=self.offline,
+        )
 
     @property
     def launch(self) -> LaunchResolutionValue:
@@ -348,6 +378,11 @@ class ResolvedPlanInputs:
     seed: int | None
     seeds: str | None
     resolution: ResolvedLaunch
+    preparation: PreparationConfig | None = None
+    source_root: Path | None = None
+    prepare_location: str = "auto"
+    rebuild: bool = False
+    offline: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.config, Path) or not isinstance(self.targets_file, Path):
@@ -362,6 +397,25 @@ class ResolvedPlanInputs:
             raise ValueError("ResolvedPlanInputs requires exactly one seed form")
         if type(self.resolution) is not ResolvedLaunch:
             raise TypeError("ResolvedPlanInputs resolution must be ResolvedLaunch")
+        if self.source_root is not None and not isinstance(self.source_root, Path):
+            raise TypeError("ResolvedPlanInputs source_root must be a Path or None")
+        _validate_preparation_inputs(
+            self.preparation,
+            self.source_root is not None,
+            self.prepare_location,
+            self.rebuild,
+            self.offline,
+        )
+
+    @property
+    def preparation_plan(self) -> PreparationPlan | None:
+        return _preparation_plan(
+            self.preparation,
+            source_root=self.source_root,
+            location=self.prepare_location,
+            rebuild=self.rebuild,
+            offline=self.offline,
+        )
 
     @property
     def launch(self) -> LaunchResolutionValue:
@@ -380,13 +434,92 @@ class ResolvedPlanInputs:
         )
 
 
+def _validate_preparation_inputs(
+    preparation: PreparationConfig | None,
+    mutable_source: bool,
+    location: str,
+    rebuild: bool,
+    offline: bool,
+) -> None:
+    if preparation is not None and type(preparation) is not PreparationConfig:
+        raise TypeError("preparation must be PreparationConfig or None")
+    if type(mutable_source) is not bool:
+        raise TypeError("mutable_source must be a boolean")
+    if location not in PREPARE_LOCATIONS:
+        raise ValueError("prepare_location must be auto, local, or target")
+    if type(rebuild) is not bool or type(offline) is not bool:
+        raise TypeError("preparation flags must be booleans")
+
+
+def _preparation_plan(
+    recipe: PreparationConfig | None,
+    *,
+    source_root: Path | None,
+    location: str,
+    rebuild: bool,
+    offline: bool,
+) -> PreparationPlan | None:
+    if recipe is None:
+        return None
+    actions = [
+        "snapshot_working_tree" if source_root is not None else "reuse_source_snapshot",
+        "use_verified_image_candidate",
+        "reuse_image_cache",
+    ]
+    if source_root is None and not offline:
+        actions.append("fetch_git_commit")
+    if not offline:
+        actions.extend(("transfer_verified_image", "pull_image"))
+    if recipe.build is not None:
+        if not rebuild:
+            actions.append("reuse_build_cache")
+        actions.append("build_application")
+    return PreparationPlan(
+        recipe=recipe,
+        source_mode="working_tree" if source_root is not None else "git",
+        source_root=source_root,
+        requested_location=location,
+        rebuild=rebuild,
+        offline=offline,
+        possible_actions=tuple(actions),
+    )
+
+
+def _validate_preparation_compatibility(
+    experiment: ExperimentSpec, preparation: PreparationConfig
+) -> None:
+    if experiment.container is None:
+        raise PlanningError(
+            code="PREPARATION_CONTAINER_REQUIRED",
+            message="Project preparation requires an experiment container",
+        )
+    image = experiment.container.image
+    if image.is_absolute() or image != preparation.image.name:
+        raise PlanningError(
+            code="PREPARATION_IMAGE_MISMATCH",
+            message="Experiment container.image must equal the preparation image name",
+            details={
+                "actual": str(image),
+                "expected": str(preparation.image.name),
+            },
+        )
+
+
 def validate_operation(source: Path) -> OperationResult[ValidationValue]:
     try:
+        experiment = load_experiment(source)
+        project = discover_project_launch(source)
+        if project is not None and project.preparation is not None:
+            _validate_preparation_compatibility(experiment, project.preparation)
         return OperationResult.success(
-            "validate", ValidationValue(source, load_experiment(source))
+            "validate", ValidationValue(source, experiment, project)
         )
     except ConfigError as error:
         return OperationResult.failure("validate", _config_error(error))
+    except PlanningError as error:
+        return OperationResult.failure(
+            "validate", OperationError(error.code, error.message, error.details)
+        )
 
 
 def plan_operation(
@@ -398,6 +531,7 @@ def plan_operation(
     seed: object = None,
     seeds: object = None,
     launch: LaunchResolutionValue | None = None,
+    preparation: PreparationPlan | None = None,
 ) -> OperationResult[PlanValue]:
     try:
         experiment = load_experiment(experiment_source)
@@ -413,6 +547,8 @@ def plan_operation(
                 ),
             )
         target = targets[target_name]
+        if preparation is not None:
+            _validate_preparation_compatibility(experiment, preparation.recipe)
         unsupported = _unsupported_execution_target(target, experiment)
         if unsupported is not None:
             return OperationResult.failure("plan", unsupported)
@@ -421,6 +557,7 @@ def plan_operation(
             config,
             target,
             seeds=expand_seeds(seed=seed, seeds=seeds),
+            preparation=preparation,
         )
         return OperationResult.success("plan", PlanValue(plan, launch))
     except ConfigError as error:
@@ -453,6 +590,10 @@ def resolve_plan_inputs_operation(
     user_config_source: Path | None = None,
     random_seed: bool = False,
     seed_factory: Callable[[], int] | None = None,
+    source_root: Path | None = None,
+    prepare_location: str = "auto",
+    rebuild: bool = False,
+    offline: bool = False,
 ) -> OperationResult[ResolvedPlanInputs]:
     """Resolve plan inputs without submitting, staging, or mutating a workspace."""
     if type(random_seed) is not bool:
@@ -469,18 +610,24 @@ def resolve_plan_inputs_operation(
             ),
         )
     try:
+        discovered_project = discover_project_launch(
+            experiment_source, project_file=project_file
+        )
         fully_explicit = (
             all(value is not None for value in (config, target, targets_file))
             and requested_seed_forms == 1
         )
-        use_defaults = (
-            not fully_explicit or project_file is not None or profile is not None
-        )
         project = (
-            discover_project_launch(experiment_source, project_file=project_file)
-            if use_defaults
+            discovered_project
+            if (
+                not fully_explicit
+                or project_file is not None
+                or profile is not None
+                or (discovered_project is not None and discovered_project.version == 2)
+            )
             else None
         )
+        use_defaults = not fully_explicit or project is not None or profile is not None
         user = discover_user_launch(user_config_source) if use_defaults else None
         resolved = resolve_launch(
             cli=LaunchValues(
@@ -560,6 +707,11 @@ def resolve_plan_inputs_operation(
             seed=resolved_seed,
             seeds=seeds,
             resolution=resolved,
+            preparation=project.preparation if project is not None else None,
+            source_root=source_root,
+            prepare_location=prepare_location,
+            rebuild=rebuild,
+            offline=offline,
         ),
     )
 
@@ -581,6 +733,9 @@ def resolve_run_inputs_operation(
     random_seed: bool = False,
     seed_factory: Callable[[], int] | None = None,
     operation: str = "run",
+    prepare_location: str = "auto",
+    rebuild: bool = False,
+    offline: bool = False,
 ) -> OperationResult[ResolvedRunInputs]:
     """Resolve run or submit inputs without planning or executing work."""
     if type(random_seed) is not bool:
@@ -596,6 +751,9 @@ def resolve_run_inputs_operation(
             targets_file=targets_file,
             data_dir=data_dir,
         )
+        discovered_project = discover_project_launch(
+            experiment_source, project_file=project_file
+        )
         fully_explicit = all(
             getattr(cli_values, field) is not None
             for field in (
@@ -607,14 +765,17 @@ def resolve_run_inputs_operation(
                 "data_dir",
             )
         ) and (cli_values.seed is not None or explicit_seeds is not None or random_seed)
-        use_defaults = (
-            not fully_explicit or project_file is not None or profile is not None
-        )
         project = (
-            discover_project_launch(experiment_source, project_file=project_file)
-            if use_defaults
+            discovered_project
+            if (
+                not fully_explicit
+                or project_file is not None
+                or profile is not None
+                or (discovered_project is not None and discovered_project.version == 2)
+            )
             else None
         )
+        use_defaults = not fully_explicit or project is not None or profile is not None
         user = discover_user_launch(user_config_source) if use_defaults else None
         builtins = LaunchValues(
             source_root=(project.project_root if project is not None else Path.cwd()),
@@ -703,6 +864,11 @@ def resolve_run_inputs_operation(
             destination=values.destination,
             data_dir=values.data_dir,
             resolution=resolved,
+            preparation=project.preparation if project is not None else None,
+            mutable_source=source_root is not None,
+            prepare_location=prepare_location,
+            rebuild=rebuild,
+            offline=offline,
         ),
     )
 
@@ -719,6 +885,7 @@ def run_operation(
     seed: object = None,
     seeds: object = None,
     launch: LaunchResolutionValue | None = None,
+    preparation: PreparationPlan | None = None,
 ) -> OperationResult[RunValue]:
     try:
         experiment = load_experiment(experiment_source)
@@ -734,14 +901,40 @@ def run_operation(
                 ),
             )
         target = targets[target_name]
+        if preparation is not None:
+            _validate_preparation_compatibility(experiment, preparation.recipe)
         unsupported = _unsupported_execution_target(target, experiment)
         if unsupported is not None:
             return OperationResult.failure("run", unsupported)
+        effective_experiment = experiment
+        effective_source_root = source_root
+        preparation_record = None
+        if preparation is not None:
+            if target.transport.kind != "local" or target.scheduler.kind != "local":
+                return OperationResult.failure(
+                    "run",
+                    OperationError(
+                        "REMOTE_PREPARATION_UNAVAILABLE",
+                        "Scheduled target preparation is not implemented yet",
+                        {"target": target.name},
+                    ),
+                )
+            prepared = prepare_local(
+                preparation,
+                experiment,
+                target,
+                project_root=experiment_source.expanduser().resolve().parent,
+                source_root=source_root,
+            )
+            effective_experiment = prepared.experiment
+            effective_source_root = prepared.source_root
+            preparation_record = prepared.record
         plan = create_plan(
-            experiment,
+            effective_experiment,
             config,
             target,
             seeds=_execution_seed_values(seed=seed, seeds=seeds),
+            preparation=preparation,
         )
         transport, stager, runtime, scheduler = _execution_adapters(target)
         service = OrchestrationService(
@@ -756,10 +949,11 @@ def run_operation(
         result = service.execute_one(
             RunExecutionRequest(
                 plan=plan,
-                experiment=experiment,
-                source_root=source_root,
+                experiment=effective_experiment,
+                source_root=effective_source_root,
                 fetch_destination=destination,
                 experiment_source=experiment_source,
+                preparation=preparation_record,
             )
         )
         return OperationResult.success("run", RunValue(result.record, launch))
@@ -778,6 +972,10 @@ def run_operation(
         return OperationResult.failure(
             "run", OperationError("RUN_STORE_ERROR", str(error))
         )
+    except PreparationError as error:
+        return OperationResult.failure(
+            "run", OperationError("PREPARATION_FAILED", str(error))
+        )
 
 
 def submit_operation(
@@ -792,6 +990,7 @@ def submit_operation(
     seed: object = None,
     seeds: object = None,
     launch: LaunchResolutionValue | None = None,
+    preparation: PreparationPlan | None = None,
 ) -> OperationResult[RunValue]:
     try:
         experiment = load_experiment(experiment_source)
@@ -807,6 +1006,16 @@ def submit_operation(
                 ),
             )
         target = targets[target_name]
+        if preparation is not None:
+            _validate_preparation_compatibility(experiment, preparation.recipe)
+            return OperationResult.failure(
+                "submit",
+                OperationError(
+                    "REMOTE_PREPARATION_UNAVAILABLE",
+                    "Scheduled target preparation is not implemented yet",
+                    {"target": target.name},
+                ),
+            )
         unsupported = _unsupported_execution_target(
             target, experiment, asynchronous=True
         )
@@ -817,6 +1026,7 @@ def submit_operation(
             config,
             target,
             seeds=_execution_seed_values(seed=seed, seeds=seeds),
+            preparation=preparation,
         )
         transport, stager, runtime, scheduler = _execution_adapters(target)
         service = OrchestrationService(

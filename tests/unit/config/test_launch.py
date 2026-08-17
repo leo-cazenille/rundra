@@ -81,8 +81,8 @@ def test_project_launch_discovery_is_adjacent_or_explicit(tmp_path: Path) -> Non
     [
         (
             "version: 2\ndefaults: {target: local}\n",
-            "UNSUPPORTED_VERSION",
-            ("version",),
+            "MISSING_FIELD",
+            ("preparation",),
         ),
         ("version: 1\nunknown: true\n", "UNKNOWN_FIELD", ("unknown",)),
         ("version: 1\ntoken: no\n", "FORBIDDEN_FIELD", ("token",)),

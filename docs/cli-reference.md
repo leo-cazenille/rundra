@@ -8,7 +8,7 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 | Command | Positional | Options | Semantics |
 |---|---|---|---|
 | `validate` | `EXPERIMENT` | `--json` | Validate experiment YAML without executing. |
-| `plan` | `EXPERIMENT` | `--config`, `--seed`/`--seeds`/`--random-seed`, `--target`, `--targets-file`, `--project-file`, `--profile`, `--json` | Resolve and inspect execution without target contact or state changes. |
+| `plan` | `EXPERIMENT` | `--config`, `--seed`/`--seeds`/`--random-seed`, `--target`, `--targets-file`, `--project-file`, `--profile`, preparation options, `--json` | Resolve and inspect execution without target contact or state changes. |
 | `targets` | none | `--targets-file`, `--json` | Validate and list configured targets. |
 | `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
 | `submit` | `EXPERIMENT` | same as `run` | Submit asynchronously when the selected scheduler supports it. |
@@ -26,6 +26,12 @@ default exists. `--task` accepts a stable `task_NNNNNN` ID or zero-based
 ordinal. Without a selector, `fetch` addresses all Tasks and `logs` requires a
 single-Task Run.
 
+Prepared project-v2 operations accept `--prepare-location auto|local|target`,
+`--rebuild`, and `--offline`. `plan` additionally accepts `--source-root` to
+describe mutable-working-tree mode; it snapshots nothing and does not probe
+caches. On `run` and `submit`, an explicit `--source-root` selects that mode,
+while omission uses the recipe's pinned Git commit.
+
 Launch values resolve in this order: explicit CLI, selected project profile,
 project defaults, user defaults, then built-ins. Automatic locations are:
 
@@ -34,17 +40,18 @@ project defaults, user defaults, then built-ins. Automatic locations are:
 - adjacent project launch defaults: `rundra.yaml`;
 - client RunRecords: `~/.local/share/rundra/runs`.
 
-`plan` deliberately has no `--source-root`, `--destination`, or `--data-dir`
-because it creates no snapshot, retrieval, or RunRecord. Local `submit` returns
+`plan` deliberately has no `--destination` or `--data-dir` because it creates
+no snapshot, retrieval, or RunRecord. Local `submit` returns
 `ASYNC_UNAVAILABLE`; SSH/Slurm submission persists scheduler identities before
 returning so later processes can operate by Run ID.
 
 ## Machine output and exits
 
-All programmatically useful commands support the checked
-[`format_version: 1` contracts](schemas/README.md). JSON goes to stdout with an
-empty stderr. Human errors go to stderr. Both renderers consume the same
-operation result.
+All programmatically useful commands support the checked versioned
+[JSON contracts](schemas/README.md). Unprepared projects continue emitting
+`format_version: 1`; prepared plans and RunRecords emit `format_version: 2`.
+JSON goes to stdout with an empty stderr. Human errors go to stderr. Both
+renderers consume the same operation result.
 
 | Exit | Meaning |
 |---|---|

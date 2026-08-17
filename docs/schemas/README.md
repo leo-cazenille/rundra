@@ -1,6 +1,6 @@
 # Versioned JSON contracts
 
-These checked examples define Rundra's public version-1 machine-readable
+These checked examples define Rundra's public versioned machine-readable
 interfaces. They are concrete contract fixtures, not JSON Schema documents.
 Contract tests construct or execute the corresponding operation and compare the
 parsed result with each file.
@@ -10,10 +10,11 @@ M6.7 freezes these version-1 structures for the v0.1 release. The checked
 positional, and option names; their semantics are in the
 [CLI reference](../cli-reference.md).
 
-Every CLI document has `format_version: 1`, an `operation` name, and an `ok`
-flag. A successful document contains an operation-specific value. A failed
-document contains `error.code`, `error.message`, and `error.details` instead.
-Use the fields, not object-key order or human output, as the interface.
+Every CLI document has a `format_version`, an `operation` name, and an `ok`
+flag. Unprepared operations retain version 1; prepared plans and Runs use
+version 2. A successful document contains an operation-specific value. A
+failed document contains `error.code`, `error.message`, and `error.details`
+instead. Use the fields, not object-key order or human output, as the interface.
 
 ## Contract inventory
 
@@ -33,7 +34,14 @@ Use the fields, not object-key order or human output, as the interface.
 | `inspect` | composed and contract-tested | `record` equal to the RunRecord below |
 | operation failure | [`error-v1.json`](error-v1.json) | structured `error` |
 | CLI usage failure | [`cli-usage-error-v1.json`](cli-usage-error-v1.json) | `CLI_USAGE_ERROR` |
-| persisted state | [`run-record-v1.json`](run-record-v1.json) | one complete RunRecord |
+| persisted state | [`run-record-v1.json`](run-record-v1.json) | one complete unprepared RunRecord |
+
+Project-managed preparation uses format version 2. Version-2 plans and
+RunRecords add preparation source, image, build, cache, output-hash, and log
+metadata; version-1 documents do not gain optional fields. The CLI option
+surface introduced for preparation is frozen in
+[`cli-surface-v2.json`](cli-surface-v2.json), while the v1 fixture remains as
+the historical contract.
 
 `inspect` deliberately embeds `run-record-v1.json` unchanged beneath `record`.
 Keeping one RunRecord fixture avoids two copies of the durable schema drifting.

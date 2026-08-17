@@ -23,13 +23,14 @@ from rundra.domain.models import (
     Task,
     TaskId,
 )
+from rundra.domain.preparation import PreparationRecord, PreparedOutput
 from rundra.domain.records import RunRecord
 from rundra.domain.states import ExecutionState, RetrievalState
 from rundra.persistence.errors import RunRecordFormatError
 
 type JsonObject = dict[str, object]
 
-_RECORD_FIELDS = frozenset(
+_RECORD_FIELDS_V1 = frozenset(
     {
         "format_version",
         "framework_version",
@@ -58,13 +59,14 @@ _RECORD_FIELDS = frozenset(
         "artifacts",
     }
 )
+_RECORD_FIELDS_V2 = _RECORD_FIELDS_V1 | {"preparation"}
 
 
 def record_to_dict(record: RunRecord) -> JsonObject:
-    """Convert a RunRecord into its deterministic version-1 JSON value."""
+    """Convert a supported RunRecord into deterministic versioned JSON."""
     if type(record) is not RunRecord:
         raise TypeError("record_to_dict requires a RunRecord")
-    return {
+    document: JsonObject = {
         "format_version": record.format_version,
         "framework_version": record.framework_version,
         "run": _run_to_dict(record.run),
@@ -108,21 +110,29 @@ def record_to_dict(record: RunRecord) -> JsonObject:
         },
         "artifacts": [_artifact_to_dict(artifact) for artifact in record.artifacts],
     }
+    if record.format_version == 2:
+        assert record.preparation is not None
+        document["preparation"] = _preparation_to_dict(record.preparation)
+    return document
 
 
 def record_from_dict(value: object) -> RunRecord:
-    """Parse a strict version-1 RunRecord JSON value."""
+    """Parse a strict supported RunRecord JSON value."""
     document = _object(value, path="record")
     version = document.get("format_version")
     if type(version) is not int:
         raise RunRecordFormatError("record.format_version must be an integer")
-    if version != 1:
+    if version not in {1, 2}:
         raise RunRecordFormatError(f"unsupported format_version {version}")
     document.setdefault("task_array_mapping", [])
     document.setdefault("task_scheduler_ids", {})
     document.setdefault("task_native_states", {})
     document.setdefault("task_retrieval_states", {})
-    _exact_fields(document, _RECORD_FIELDS, path="record")
+    _exact_fields(
+        document,
+        _RECORD_FIELDS_V1 if version == 1 else _RECORD_FIELDS_V2,
+        path="record",
+    )
     run = _parse_run(document["run"], path="run")
     try:
         return RunRecord(
@@ -143,6 +153,9 @@ def record_from_dict(value: object) -> RunRecord:
             git_diff=_optional_string(document["git_diff"], path="git_diff"),
             container_digest=_optional_string(
                 document["container_digest"], path="container_digest"
+            ),
+            preparation=(
+                _parse_preparation(document["preparation"]) if version == 2 else None
             ),
             scheduler_job_ids=_string_tuple(
                 document["scheduler_job_ids"], path="scheduler_job_ids"
@@ -190,6 +203,116 @@ def _path_or_none(value: object) -> str | None:
 
 def _datetime_or_none(value: datetime | None) -> str | None:
     return None if value is None else value.isoformat()
+
+
+def _preparation_to_dict(value: PreparationRecord) -> JsonObject:
+    return {
+        "source_identity": value.source_identity,
+        "source_digest": value.source_digest,
+        "source_action": value.source_action,
+        "image_uri": value.image_uri,
+        "image_sha256": value.image_sha256,
+        "image_path": str(value.image_path),
+        "image_action": value.image_action,
+        "resolution_location": value.resolution_location,
+        "build_cache_key": value.build_cache_key,
+        "builder_location": value.builder_location,
+        "builder_scheduler_id": value.builder_scheduler_id,
+        "build_outputs": [
+            {
+                "path": str(output.path),
+                "sha256": output.sha256,
+                "executable": output.executable,
+            }
+            for output in value.build_outputs
+        ],
+        "logs": [str(path) for path in value.logs],
+    }
+
+
+def _parse_preparation(value: object) -> PreparationRecord:
+    path = "preparation"
+    document = _object(value, path=path)
+    _exact_fields(
+        document,
+        frozenset(
+            {
+                "source_identity",
+                "source_digest",
+                "source_action",
+                "image_uri",
+                "image_sha256",
+                "image_path",
+                "image_action",
+                "resolution_location",
+                "build_cache_key",
+                "builder_location",
+                "builder_scheduler_id",
+                "build_outputs",
+                "logs",
+            }
+        ),
+        path=path,
+    )
+    outputs: list[PreparedOutput] = []
+    for index, raw_output in enumerate(
+        _sequence(document["build_outputs"], path=f"{path}.build_outputs")
+    ):
+        output_path = f"{path}.build_outputs[{index}]"
+        output = _object(raw_output, path=output_path)
+        _exact_fields(
+            output,
+            frozenset({"path", "sha256", "executable"}),
+            path=output_path,
+        )
+        outputs.append(
+            PreparedOutput(
+                path=_path(output["path"], path=f"{output_path}.path"),
+                sha256=_string(output["sha256"], path=f"{output_path}.sha256"),
+                executable=_boolean(
+                    output["executable"], path=f"{output_path}.executable"
+                ),
+            )
+        )
+    try:
+        return PreparationRecord(
+            source_identity=_string(
+                document["source_identity"], path=f"{path}.source_identity"
+            ),
+            source_digest=_string(
+                document["source_digest"], path=f"{path}.source_digest"
+            ),
+            source_action=_string(
+                document["source_action"], path=f"{path}.source_action"
+            ),
+            image_uri=_string(document["image_uri"], path=f"{path}.image_uri"),
+            image_sha256=_string(document["image_sha256"], path=f"{path}.image_sha256"),
+            image_path=_path(document["image_path"], path=f"{path}.image_path"),
+            image_action=_string(document["image_action"], path=f"{path}.image_action"),
+            resolution_location=_string(
+                document["resolution_location"],
+                path=f"{path}.resolution_location",
+            ),
+            build_cache_key=_optional_string(
+                document["build_cache_key"], path=f"{path}.build_cache_key"
+            ),
+            builder_location=_optional_string(
+                document["builder_location"], path=f"{path}.builder_location"
+            ),
+            builder_scheduler_id=_optional_string(
+                document["builder_scheduler_id"],
+                path=f"{path}.builder_scheduler_id",
+            ),
+            build_outputs=tuple(outputs),
+            logs=tuple(
+                _path(item, path=f"{path}.logs[{index}]")
+                for index, item in enumerate(
+                    _sequence(document["logs"], path=f"{path}.logs")
+                )
+            ),
+        )
+    except (TypeError, ValueError) as error:
+        raise RunRecordFormatError(f"{path}: {error}") from error
 
 
 def _task_string_mapping(value: Mapping[TaskId, str]) -> JsonObject:

@@ -1,0 +1,99 @@
+{
+  "format_version": 2,
+  "program": "rundr",
+  "global_options": [
+    "--json"
+  ],
+  "commands": {
+    "validate": {
+      "positionals": ["experiment"],
+      "options": ["--json"]
+    },
+    "plan": {
+      "positionals": ["experiment"],
+      "options": [
+        "--config",
+        "--json",
+        "--offline",
+        "--prepare-location",
+        "--profile",
+        "--project-file",
+        "--random-seed",
+        "--rebuild",
+        "--seed",
+        "--seeds",
+        "--source-root",
+        "--target",
+        "--targets-file"
+      ]
+    },
+    "targets": {
+      "positionals": [],
+      "options": ["--json", "--targets-file"]
+    },
+    "run": {
+      "positionals": ["experiment"],
+      "options": [
+        "--config",
+        "--data-dir",
+        "--destination",
+        "--json",
+        "--offline",
+        "--prepare-location",
+        "--profile",
+        "--project-file",
+        "--random-seed",
+        "--rebuild",
+        "--seed",
+        "--seeds",
+        "--source-root",
+        "--target",
+        "--targets-file"
+      ]
+    },
+    "submit": {
+      "positionals": ["experiment"],
+      "options": [
+        "--config",
+        "--data-dir",
+        "--destination",
+        "--json",
+        "--offline",
+        "--prepare-location",
+        "--profile",
+        "--project-file",
+        "--random-seed",
+        "--rebuild",
+        "--seed",
+        "--seeds",
+        "--source-root",
+        "--target",
+        "--targets-file"
+      ]
+    },
+    "status": {
+      "positionals": ["run_id"],
+      "options": ["--data-dir", "--json"]
+    },
+    "list": {
+      "positionals": [],
+      "options": ["--data-dir", "--json"]
+    },
+    "logs": {
+      "positionals": ["run_id"],
+      "options": ["--data-dir", "--json", "--task"]
+    },
+    "fetch": {
+      "positionals": ["run_id"],
+      "options": ["--data-dir", "--destination", "--json", "--task"]
+    },
+    "inspect": {
+      "positionals": ["run_id"],
+      "options": ["--data-dir", "--json"]
+    },
+    "cancel": {
+      "positionals": ["run_id"],
+      "options": ["--data-dir", "--json"]
+    }
+  }
+}

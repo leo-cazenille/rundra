@@ -14,6 +14,7 @@ from rundra.domain.models import (
     Task,
     TaskId,
 )
+from rundra.domain.preparation import PreparationPlan
 from rundra.orchestration.models import (
     ONE_UNIT_PER_TASK,
     SLURM_ARRAY,
@@ -71,6 +72,7 @@ def create_plan(
     target: Target,
     *,
     seeds: Sequence[object],
+    preparation: PreparationPlan | None = None,
 ) -> ExecutionPlan:
     """Create a deterministic plan without creating a Run or calling adapters."""
     normalized_seeds = _validate_seed_set(seeds)
@@ -87,7 +89,7 @@ def create_plan(
     )
     uses_array = target.scheduler.kind == "slurm" and len(units) > 1
     return ExecutionPlan(
-        version=1,
+        version=2 if preparation is not None else 1,
         experiment_name=spec.name,
         target=target,
         units=units,
@@ -101,6 +103,7 @@ def create_plan(
             else ()
         ),
         strategy=SLURM_ARRAY if uses_array else ONE_UNIT_PER_TASK,
+        preparation=preparation,
     )
 
 

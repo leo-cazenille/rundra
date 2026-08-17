@@ -17,6 +17,7 @@ from rundra.domain.models import (
     Task,
     TaskId,
 )
+from rundra.domain.preparation import PreparationRecord
 from rundra.domain.records import RunRecord
 from rundra.domain.states import (
     ExecutionState,
@@ -252,6 +253,7 @@ class RunExecutionRequest:
     fetch_destination: PurePath
     experiment_source: PurePath | None = None
     initiator: str | None = None
+    preparation: PreparationRecord | None = None
 
     def __post_init__(self) -> None:
         if type(self.plan) is not ExecutionPlan:
@@ -273,6 +275,10 @@ class RunExecutionRequest:
             raise ValueError(
                 "RunExecutionRequest initiator must be a nonblank string or None"
             )
+        if self.plan.version == 1 and self.preparation is not None:
+            raise ValueError("Version-1 execution cannot contain preparation")
+        if self.plan.version == 2 and type(self.preparation) is not PreparationRecord:
+            raise ValueError("Version-2 execution requires a preparation record")
 
 
 @dataclass(frozen=True, slots=True)
@@ -593,6 +599,7 @@ class OrchestrationService:
             units[0].config,
             request.plan.target,
             seeds=tuple(unit.seed for unit in units),
+            preparation=request.plan.preparation,
         )
         if request.plan != expected_plan:
             raise OrchestrationError(
@@ -625,7 +632,7 @@ class OrchestrationService:
             created_at=self._clock(),
         )
         return RunRecord(
-            format_version=1,
+            format_version=request.plan.version,
             framework_version=self._framework_version,
             run=run,
             experiment=request.experiment,
@@ -636,6 +643,12 @@ class OrchestrationService:
             git_branch=provenance.branch,
             git_dirty=provenance.dirty,
             git_diff=provenance.diff,
+            container_digest=(
+                request.preparation.image_sha256
+                if request.preparation is not None
+                else None
+            ),
+            preparation=request.preparation,
             task_array_mapping=request.plan.array_mapping,
             task_retrieval_states={
                 unit.task_id: RetrievalState.NOT_REQUESTED

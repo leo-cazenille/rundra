@@ -329,9 +329,9 @@ def test_run_record_round_trips_absent_optional_provenance_without_fabrication()
 
 def test_run_record_rejects_unknown_versions_and_fields() -> None:
     document = record_to_dict(_record())
-    document["format_version"] = 2
+    document["format_version"] = 999
 
-    with pytest.raises(RunRecordFormatError, match="unsupported format_version 2"):
+    with pytest.raises(RunRecordFormatError, match="unsupported format_version 999"):
         record_from_dict(document)
 
     document = record_to_dict(_record())

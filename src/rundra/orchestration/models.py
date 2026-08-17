@@ -12,6 +12,7 @@ from rundra.domain.models import (
     Target,
     TaskId,
 )
+from rundra.domain.preparation import PreparationPlan
 
 ONE_UNIT_PER_TASK = "one_unit_per_task"
 SLURM_ARRAY = "slurm_array"
@@ -85,11 +86,18 @@ class ExecutionPlan:
     groups: tuple[ExecutionGroup, ...]
     array_mapping: tuple[ArrayTaskMapping, ...]
     strategy: str = ONE_UNIT_PER_TASK
+    preparation: PreparationPlan | None = None
     staging_backend: str = field(init=False)
 
     def __post_init__(self) -> None:
         if type(self.version) is not int or self.version < 1:
             raise ValueError("ExecutionPlan version must be a positive integer")
+        if self.version == 1 and self.preparation is not None:
+            raise ValueError("ExecutionPlan v1 cannot contain preparation")
+        if self.version == 2 and type(self.preparation) is not PreparationPlan:
+            raise ValueError("ExecutionPlan v2 requires preparation")
+        if self.version not in {1, 2}:
+            raise ValueError("ExecutionPlan version is unsupported")
         if type(self.experiment_name) is not str or not self.experiment_name.strip():
             raise ValueError("ExecutionPlan experiment_name must be nonblank")
         if type(self.target) is not Target:
