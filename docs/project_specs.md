@@ -727,6 +727,28 @@ limit is explicit and site-owned: `hard_task_limit`, `confirmation_threshold`,
 `infrastructure_retry_limit`, and `requeue_limit`. Project configuration and
 launch options may select behavior within these limits but cannot raise them.
 
+Version 4 adds `task_slots_per_worker` to the worker-pool policy. Version 5 adds
+an explicit shared-POSIX staging backend for clients that mount the target
+filesystem directly:
+
+```yaml
+version: 5
+targets:
+  shoal:
+    transport: {type: ssh, host: fishvision}
+    scheduler: {type: slurm}
+    staging: {type: shared, root: /shoalhome}
+    container: {type: apptainer}
+    workspace: /shoalhome/USER/.rundra
+    execution: # same required bounded version-4 policy
+      # ...
+```
+
+The shared root must be absolute and non-root. Rundra resolves staged source,
+workspace, and retrieval destinations beneath it and rejects symlink escapes.
+Scheduling and container commands still use the configured SSH and Slurm
+adapters; only file movement is performed directly through the shared mount.
+
 Large parameter/seed products use an inclusive arithmetic seed range and a
 constant-size TaskSpace. Ordinals are parameter-major and seed-minor; the Task
 at ordinal `p * seed_count + s` has parameter-set ordinal `p`, seed ordinal `s`,

@@ -16,6 +16,7 @@ from rundra.adapters import (
     RemoteApptainerRuntime,
     RsyncStager,
     RsyncUploadError,
+    SharedStager,
     SlurmScheduler,
     SlurmScriptError,
     SSHTransport,
@@ -1182,8 +1183,10 @@ def _local_remote_preparation_inputs(
     local_storage: PreparationStorageConfig,
     target_storage: PreparationStorageConfig,
 ) -> tuple[Path, ExperimentSpec, PreparationRecord]:
-    if not isinstance(stager, RsyncStager):
-        raise PreparationError("Local-to-target preparation requires rsync staging")
+    if not isinstance(stager, (RsyncStager, SharedStager)):
+        raise PreparationError(
+            "Local-to-target preparation requires rsync or shared staging"
+        )
     prepared = prepare_local(
         plan,
         experiment,
@@ -2466,6 +2469,11 @@ def _record_stager(record: RunRecord) -> Stager:
             ssh_executable=executable,
             ssh_config_file=config_file,
         )
+    if record.run.target.staging.kind == "shared":
+        root = record.run.target.staging.options.get("root")
+        if type(root) is not str:
+            raise ValueError("Persisted shared staging root is unavailable")
+        return SharedStager(PurePath(root))
     raise ValueError(
         f"Persisted staging backend {record.run.target.staging.kind!r} cannot fetch"
     )
@@ -2557,7 +2565,10 @@ def _unsupported_execution_target(
                 "Apptainer target requires an experiment container image",
                 {"target": target.name},
             )
-    elif actual == ("ssh", "slurm", "rsync", "apptainer"):
+    elif actual in {
+        ("ssh", "slurm", "rsync", "apptainer"),
+        ("ssh", "slurm", "shared", "apptainer"),
+    }:
         if experiment.container is None:
             return OperationError(
                 "CONTAINER_REQUIRED",
@@ -2623,14 +2634,22 @@ def _execution_adapters(
     remote_transport = SSHTransport(
         host, executable=executable, config_file=config_file
     )
-    return (
-        remote_transport,
-        RsyncStager(
+    stager: Stager
+    if target.staging.kind == "shared":
+        root = target.staging.options.get("root")
+        if type(root) is not str:
+            raise ValueError("Shared staging root is unavailable")
+        stager = SharedStager(PurePath(root))
+    else:
+        stager = RsyncStager(
             remote_transport,
             host=host,
             ssh_executable=executable,
             ssh_config_file=config_file,
-        ),
+        )
+    return (
+        remote_transport,
+        stager,
         RemoteApptainerRuntime(remote_transport),
         SlurmScheduler(
             remote_transport,

@@ -30,10 +30,11 @@ _TARGET_V1_FIELDS = frozenset(
 _TARGET_V2_FIELDS = _TARGET_V1_FIELDS | {"preparation"}
 _TARGET_V3_FIELDS = _TARGET_V2_FIELDS | {"execution"}
 _TARGET_V4_FIELDS = _TARGET_V3_FIELDS
+_TARGET_V5_FIELDS = _TARGET_V4_FIELDS
 _BACKENDS_BY_ROLE = {
     "transport": frozenset({"local", "ssh"}),
     "scheduler": frozenset({"local", "slurm"}),
-    "staging": frozenset({"local", "rsync"}),
+    "staging": frozenset({"local", "rsync", "shared"}),
     "container": frozenset({"apptainer", "native"}),
 }
 _SUPPORTED_BACKEND_STACKS = frozenset(
@@ -41,6 +42,7 @@ _SUPPORTED_BACKEND_STACKS = frozenset(
         ("local", "local", "local", "apptainer"),
         ("local", "local", "local", "native"),
         ("ssh", "slurm", "rsync", "apptainer"),
+        ("ssh", "slurm", "shared", "apptainer"),
     }
 )
 
@@ -53,8 +55,8 @@ class TargetsConfig:
     execution: Mapping[str, ExecutionPolicy] = dataclass_field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.version not in {1, 2, 3, 4}:
-            raise ValueError("TargetsConfig version must be 1, 2, 3, or 4")
+        if self.version not in {1, 2, 3, 4, 5}:
+            raise ValueError("TargetsConfig version must be 1, 2, 3, 4, or 5")
         object.__setattr__(self, "targets", MappingProxyType(dict(self.targets)))
         object.__setattr__(
             self, "preparation", MappingProxyType(dict(self.preparation))
@@ -80,13 +82,13 @@ def load_targets_config(source: Path) -> TargetsConfig:
     version = expect_integer(
         document["version"], source=source, path=("version",), minimum=1
     )
-    if version not in {1, 2, 3, 4}:
+    if version not in {1, 2, 3, 4, 5}:
         fail(
             source=source,
             path=("version",),
             code="UNSUPPORTED_VERSION",
             message=(
-                "Unsupported targets version; supported versions are 1, 2, 3, and 4"
+                "Unsupported targets version; supported versions are 1 through 5"
             ),
         )
     raw_targets = expect_mapping(document["targets"], source=source, path=("targets",))
@@ -105,7 +107,11 @@ def load_targets_config(source: Path) -> TargetsConfig:
                 else (
                     _TARGET_V2_FIELDS
                     if version == 2
-                    else (_TARGET_V3_FIELDS if version == 3 else _TARGET_V4_FIELDS)
+                    else (
+                        _TARGET_V3_FIELDS
+                        if version == 3
+                        else (_TARGET_V4_FIELDS if version == 4 else _TARGET_V5_FIELDS)
+                    )
                 )
             ),
             required=(
@@ -124,10 +130,18 @@ def load_targets_config(source: Path) -> TargetsConfig:
         )
         target = Target(
             name=name,
-            transport=_backend_config(section["transport"], "transport", source, path),
-            scheduler=_backend_config(section["scheduler"], "scheduler", source, path),
-            staging=_backend_config(section["staging"], "staging", source, path),
-            container=_backend_config(section["container"], "container", source, path),
+            transport=_backend_config(
+                section["transport"], "transport", source, path, version=version
+            ),
+            scheduler=_backend_config(
+                section["scheduler"], "scheduler", source, path, version=version
+            ),
+            staging=_backend_config(
+                section["staging"], "staging", source, path, version=version
+            ),
+            container=_backend_config(
+                section["container"], "container", source, path, version=version
+            ),
             workspace=workspace,
         )
         backend_stack = (
@@ -143,7 +157,7 @@ def load_targets_config(source: Path) -> TargetsConfig:
                 code="INVALID_BACKEND_COMBINATION",
                 message=(
                     "Target backends must use an all-local stack or the supported "
-                    "SSH/Slurm/rsync/Apptainer stack"
+                    "SSH/Slurm with rsync or shared staging and Apptainer"
                 ),
             )
         if target.transport.kind == "ssh" and (
@@ -205,7 +219,7 @@ def _execution_policy(
             "requeue_limit",
         }
     )
-    if version == 4:
+    if version >= 4:
         worker_fields |= {"task_slots_per_worker"}
     check_fields(
         worker,
@@ -268,7 +282,7 @@ def _execution_policy(
                         path=(*worker_path, "task_slots_per_worker"),
                         minimum=1,
                     )
-                    if version == 4
+                    if version >= 4
                     else 1
                 ),
             ),
@@ -347,6 +361,8 @@ def _backend_config(
     role: str,
     source: Path,
     target_path: tuple[str, str],
+    *,
+    version: int,
 ) -> BackendConfig:
     path = (*target_path, role)
     section = expect_mapping(value, source=source, path=path)
@@ -360,9 +376,15 @@ def _backend_config(
             )
     check_fields(
         section,
-        allowed=frozenset({"type", "host", "executable", "config_file"})
-        if role == "transport"
-        else frozenset({"type"}),
+        allowed=(
+            frozenset({"type", "host", "executable", "config_file"})
+            if role == "transport"
+            else (
+                frozenset({"type", "root"})
+                if role == "staging" and version >= 5
+                else frozenset({"type"})
+            )
+        ),
         required=frozenset({"type"}),
         source=source,
         path=path,
@@ -376,6 +398,13 @@ def _backend_config(
             path=(*path, "type"),
             code="UNKNOWN_BACKEND",
             message=f"Backend '{kind}' is not supported for {role}",
+        )
+    if role == "staging" and kind == "shared" and version < 5:
+        fail(
+            source=source,
+            path=(*path, "type"),
+            code="UNKNOWN_BACKEND",
+            message="Shared staging requires targets version 5",
         )
     options: dict[str, NativeValue] = {}
     if role == "transport" and kind == "ssh":
@@ -437,9 +466,31 @@ def _backend_config(
                     message="SSH config_file must be an absolute non-root path",
                 )
             options["config_file"] = config_file
-    elif any(field in section for field in ("host", "executable", "config_file")):
+    elif role == "staging" and kind == "shared":
+        if "root" not in section:
+            fail(
+                source=source,
+                path=(*path, "root"),
+                code="MISSING_FIELD",
+                message="Shared staging requires field 'root'",
+            )
+        root = expect_string(
+            section["root"], source=source, path=(*path, "root"), nonblank=True
+        )
+        root_path = PurePath(root)
+        if not root_path.is_absolute() or root_path == PurePath("/") or "\x00" in root:
+            fail(
+                source=source,
+                path=(*path, "root"),
+                code="INVALID_VALUE",
+                message="Shared root must be an absolute non-root path",
+            )
+        options["root"] = root
+    elif any(field in section for field in ("host", "executable", "config_file", "root")):
         field = next(
-            field for field in ("host", "executable", "config_file") if field in section
+            field
+            for field in ("host", "executable", "config_file", "root")
+            if field in section
         )
         fail(
             source=source,

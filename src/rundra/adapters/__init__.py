@@ -30,6 +30,7 @@ from rundra.adapters.rsync import (
     RsyncUnavailableError,
     RsyncUploadError,
 )
+from rundra.adapters.shared import SharedStager, SharedStagerError
 from rundra.adapters.slurm import (
     SlurmArrayRequest,
     SlurmCancellationError,
@@ -78,6 +79,8 @@ __all__ = [
     "SSHTransport",
     "SSHTransportError",
     "SSHUnavailableError",
+    "SharedStager",
+    "SharedStagerError",
     "SlurmArrayRequest",
     "SlurmCancellationError",
     "SlurmQueryError",

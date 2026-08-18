@@ -181,7 +181,7 @@ targets:
 @pytest.mark.parametrize(
     "content, code, path",
     [
-        ("version: 5\ntargets: {}\n", "UNSUPPORTED_VERSION", ("version",)),
+        ("version: 6\ntargets: {}\n", "UNSUPPORTED_VERSION", ("version",)),
         ("version: 1\n", "MISSING_FIELD", ("targets",)),
         (
             "version: 1\ntargets: []\n",
@@ -437,3 +437,43 @@ targets:
     assert policy.max_concurrent_jobs == 8
     assert policy.worker_pool.max_workers == 8
     assert policy.worker_pool.task_slots_per_worker == 40
+
+
+def test_targets_v5_loads_explicit_shared_staging_root(tmp_path: Path) -> None:
+    from rundra.config.targets import load_targets_config
+
+    source = tmp_path / "targets.yaml"
+    source.write_text(
+        """\
+version: 5
+targets:
+  shoal:
+    transport: {type: ssh, host: fishvision}
+    scheduler: {type: slurm}
+    staging: {type: shared, root: /shoalhome}
+    container: {type: apptainer}
+    workspace: /shoalhome/tester/.rundra
+    execution:
+      hard_task_limit: 1000
+      confirmation_threshold: 100
+      max_active_tasks: 40
+      max_concurrent_jobs: 8
+      max_array_size: 1001
+      output_shard_tasks: 100
+      automatic_retrieval_threshold: 20
+      worker_pool:
+        activation_threshold: 100
+        max_workers: 8
+        task_slots_per_worker: 5
+        tasks_per_lease: 10
+        infrastructure_retry_limit: 1
+        requeue_limit: 2
+""",
+        encoding="utf-8",
+    )
+
+    config = load_targets_config(source)
+
+    assert config.version == 5
+    assert config.targets["shoal"].staging.kind == "shared"
+    assert config.targets["shoal"].staging.options == {"root": "/shoalhome"}
