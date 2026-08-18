@@ -14,6 +14,7 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 | `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--verbose`, `--progress`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
 | `wait` | `RUN_ID` | `--timeout`, `--poll-interval`, `--data-dir`, `--verbose`, `--progress`, `--json` | Reconcile until terminal or a renewable timeout. |
 | `agent-guide` | none | `--write PATH`, `--check PATH`, `--json` | Print, install, or check portable agent instructions. |
+| `help` | optional `COMMAND` | none | List commands and the common workflow, or show one command's detailed arguments and options. |
 | `submit` | `EXPERIMENT` | same as `run` | Submit asynchronously when the selected scheduler supports it. |
 
 `--verbose` prints lifecycle details and `--progress` displays a TQDM phase
@@ -26,7 +27,7 @@ allocated-node counts.
 | `tasks` | `RUN_ID` | `--offset`, `--limit`, `--data-dir`, `--json` | Return one bounded page from a compact version-4 TaskSpace sidecar. |
 | `list` | none | `--data-dir`, `--json` | List persisted Runs in deterministic order. |
 | `logs` | `RUN_ID` | `--task`, `--data-dir`, `--json` | Read one Task's framework-managed stdout/stderr. |
-| `fetch` | `RUN_ID` | required `--destination`; repeatable `--task`; `--data-dir`, `--json` | Idempotently retrieve all or selected Task artifacts. |
+| `fetch` | `RUN_ID` | optional `--destination`; repeatable `--task`; `--verbose`, `--progress`, `--data-dir`, `--json` | Idempotently retrieve all or selected Task artifacts. Defaults to `retrieved/<config-stem>` and reports task-scaled retrieval progress when requested. |
 | `inspect` | `RUN_ID` | `--data-dir`, `--json` | Return the complete persisted RunRecord. |
 | `cancel` | `RUN_ID` | `--data-dir`, `--json` | Reconcile and cancel only active scheduler work; repeat safely. |
 

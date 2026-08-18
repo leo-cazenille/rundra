@@ -191,13 +191,19 @@ def test_persisted_status_list_and_inspect_share_typed_record_values(
 
 def test_wait_returns_terminal_status_without_fetching(tmp_path: Path) -> None:
     store, run_id = _stored_record(tmp_path)
+    progress_events: list[object] = []
 
-    waited = wait_operation(run_id, store, timeout=0)
+    waited = wait_operation(
+        run_id, store, timeout=0, progress=progress_events.append
+    )
 
     assert waited.ok and isinstance(waited.value, WaitValue)
     assert waited.value.terminal is True
     assert waited.value.timed_out is False
     assert result_document(waited)["wait"]["status"]["state"] == "SUCCEEDED"
+    assert getattr(progress_events[-1], "completed") == getattr(
+        progress_events[-1], "total"
+    )
 
 
 def test_wait_timeout_is_a_successful_renewable_result(tmp_path: Path) -> None:
@@ -369,8 +375,11 @@ def test_fetch_is_idempotent_and_preserves_successful_retrieval_state(
 ) -> None:
     store, run_id = _stored_record(tmp_path)
     destination = tmp_path / "retrieved"
+    progress_events: list[object] = []
 
-    first = fetch_operation(run_id, store, destination)
+    first = fetch_operation(
+        run_id, store, destination, progress=progress_events.append
+    )
     second = fetch_operation(run_id, store, destination)
 
     assert first.ok and isinstance(first.value, FetchValue)
@@ -383,6 +392,9 @@ def test_fetch_is_idempotent_and_preserves_successful_retrieval_state(
         store.load(first.value.run_id).run.retrieval_state is RetrievalState.SUCCEEDED
     )
     assert result_document(second)["fetch"]["artifacts"][0]["kind"] == "raw_result"
+    assert getattr(progress_events[-1], "completed") == getattr(
+        progress_events[-1], "total"
+    )
 
 
 def test_concurrent_fetches_are_idempotent_and_preserve_one_artifact(

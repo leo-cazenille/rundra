@@ -53,6 +53,7 @@ _COMMANDS = (
     "purge",
     "doctor",
     "agent-guide",
+    "help",
 )
 
 
@@ -192,7 +193,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     fetch = subparsers.add_parser("fetch", help="retrieve a Run's outputs")
     fetch.add_argument("run_id")
-    fetch.add_argument("--destination", required=True, type=Path)
+    fetch.add_argument("--destination", type=Path)
     fetch.add_argument(
         "--mode",
         choices=("auto", "copy", "reference", "archive"),
@@ -210,6 +211,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="TASK_ID_OR_INDEX",
         help="retrieve only this Task; repeat to select multiple Tasks",
     )
+    _add_feedback_arguments(fetch)
     _add_store_option(fetch)
     _add_json_option(fetch)
 
@@ -242,7 +244,58 @@ def build_parser() -> argparse.ArgumentParser:
     guide_action.add_argument("--write", type=Path, metavar="PATH")
     guide_action.add_argument("--check", type=Path, metavar="PATH")
     _add_json_option(agent_guide)
+
+    help_command = subparsers.add_parser(
+        "help", help="show an overview or detailed command help"
+    )
+    help_command.add_argument(
+        "topic",
+        nargs="?",
+        choices=tuple(subparsers.choices),
+        metavar="COMMAND",
+        help="command whose detailed help should be shown",
+    )
     return parser
+
+
+def _help_text(parser: argparse.ArgumentParser, topic: str | None) -> str:
+    subcommands = next(
+        action
+        for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+    )
+    if topic is not None:
+        return subcommands.choices[topic].format_help().rstrip()
+    summaries = {
+        action.dest: action.help for action in subcommands._choices_actions
+    }
+    width = max(len(name) for name in subcommands.choices)
+    command_lines = tuple(
+        f"  {name:<{width}}  {summaries.get(name) or ''}"
+        for name in subcommands.choices
+    )
+    return "\n".join(
+        (
+            "Rundra executes reproducible scientific experiments locally or on "
+            "remote schedulers.",
+            "",
+            "Usage:",
+            "  rundr COMMAND [OPTIONS]",
+            "  rundr help [COMMAND]",
+            "",
+            "Common workflow:",
+            "  rundr doctor EXPERIMENT       Check target configuration and access",
+            "  rundr plan EXPERIMENT         Inspect tasks, resources, and preparation",
+            "  rundr submit EXPERIMENT       Submit without keeping the client attached",
+            "  rundr wait RUN_ID             Wait until completion",
+            "  rundr fetch RUN_ID            Retrieve outputs to the default destination",
+            "",
+            "Commands:",
+            *command_lines,
+            "",
+            "Run 'rundr help COMMAND' for detailed arguments and options.",
+        )
+    )
 
 
 def _add_json_option(parser: argparse.ArgumentParser) -> None:
@@ -365,6 +418,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
         parser.print_help()
         return 0
+    if arguments.command == "help":
+        print(_help_text(parser, arguments.topic))
+        return 0
+
     try:
         progress = create_progress_reporter(
             verbose=getattr(arguments, "verbose", False),
@@ -569,6 +626,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             tasks=arguments.task,
             mode=arguments.mode,
             extract=arguments.extract,
+            progress=progress,
         )
     elif arguments.command == "inspect":
         result = inspect_operation(

@@ -1,5 +1,5 @@
 {
-  "format_version": 7,
+  "format_version": 9,
   "program": "rundr",
   "global_options": ["--json"],
   "commands": {
@@ -14,10 +14,11 @@
     "tasks": {"positionals": ["run_id"], "options": ["--data-dir", "--json", "--limit", "--offset"]},
     "list": {"positionals": [], "options": ["--data-dir", "--json"]},
     "logs": {"positionals": ["run_id"], "options": ["--data-dir", "--json", "--preparation", "--task"]},
-    "fetch": {"positionals": ["run_id"], "options": ["--data-dir", "--destination", "--extract", "--json", "--mode", "--task"]},
+    "fetch": {"positionals": ["run_id"], "options": ["--data-dir", "--destination", "--extract", "--json", "--mode", "--progress", "--task", "--verbose"]},
     "inspect": {"positionals": ["run_id"], "options": ["--data-dir", "--json"]},
     "cancel": {"positionals": ["run_id"], "options": ["--data-dir", "--json"]},
     "purge": {"positionals": ["run_id"], "options": ["--confirm", "--data-dir", "--dry-run", "--json", "--workspace"]},
+    "help": {"positionals": ["topic"], "options": []},
     "agent-guide": {"positionals": [], "options": ["--check", "--json", "--write"]}
   }
 }

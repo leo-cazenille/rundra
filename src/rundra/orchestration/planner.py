@@ -198,7 +198,9 @@ def create_scalable_plan(
     else:
         leases = ceil(task_space.task_count / policy.worker_pool.tasks_per_lease)
         task_slots_per_worker = (
-            policy.worker_pool.task_slots_per_worker if version == 5 else 1
+            min(policy.worker_pool.task_slots_per_worker, task_space.task_count)
+            if version == 5
+            else 1
         )
         worker_count = min(
             policy.worker_pool.max_workers,

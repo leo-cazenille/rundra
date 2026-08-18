@@ -306,10 +306,7 @@ def render_human(result: OperationResult[Any]) -> str:
         }:
             rendered += f"\nNext: {_lifecycle_command('wait', value)}"
         elif value.record.run.retrieval_state is not RetrievalState.SUCCEEDED:
-            rendered += (
-                f"\nNext: rundr fetch {shlex.quote(str(value.run_id))} "
-                "--destination PATH"
-            )
+            rendered += f"\nNext: rundr fetch {shlex.quote(str(value.run_id))}"
         return _with_launch(rendered, value.launch)
     if isinstance(value, StatusValue):
         counts = ", ".join(
@@ -362,10 +359,7 @@ def render_human(result: OperationResult[Any]) -> str:
         if value.timed_out:
             rendered += f"\nNext: rundr wait {shlex.quote(str(status.run_id))}"
         elif status.retrieval_state is not RetrievalState.SUCCEEDED:
-            rendered += (
-                f"\nNext: rundr fetch {shlex.quote(str(status.run_id))} "
-                "--destination PATH"
-            )
+            rendered += f"\nNext: rundr fetch {shlex.quote(str(status.run_id))}"
         return rendered
     if isinstance(value, CancelValue):
         status = value.status
@@ -635,9 +629,9 @@ def _error_hint(code: str, details: Mapping[str, object]) -> str | None:
             f"retry rundr status {run_id}" if run_id is not None else "retry status"
         ),
         "RESULT_RETRIEVAL_FAILED": (
-            f"retry rundr fetch {run_id} --destination PATH"
+            f"retry rundr fetch {run_id}"
             if run_id is not None
-            else "retry fetch with an explicit destination"
+            else "retry fetch and inspect the reported destination"
         ),
         "RUN_STORE_CONFLICT": "retry the same lifecycle command",
         "TASK_CONFIRMATION_REQUIRED": (

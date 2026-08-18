@@ -1506,10 +1506,8 @@ def run_operation(
                     else None
                 ),
                 task_slots_per_worker=(
-                    targets_config.execution[
-                        target_name
-                    ].worker_pool.task_slots_per_worker
-                    if target_name in targets_config.execution
+                    plan.task_slots_per_worker
+                    if plan.task_slots_per_worker is not None
                     else 1
                 ),
                 shard_outputs=(
@@ -1774,10 +1772,8 @@ def submit_operation(
                     else None
                 ),
                 task_slots_per_worker=(
-                    targets_config.execution[
-                        target_name
-                    ].worker_pool.task_slots_per_worker
-                    if target_name in targets_config.execution
+                    plan.task_slots_per_worker
+                    if plan.task_slots_per_worker is not None
                     else 1
                 ),
                 shard_outputs=(
@@ -1947,7 +1943,7 @@ def wait_operation(
         _report_progress(
             progress,
             ProgressPhase.WAIT,
-            min(5 + complete, 5 + total),
+            min((6 if terminal else 5) + complete, 6 + total),
             f"run={value.state.value} terminal={terminal}",
             value.run_id,
             task_total=total,
@@ -2407,27 +2403,46 @@ def logs_operation(
 def fetch_operation(
     run_id: str,
     store: RunStore,
-    destination: Path,
+    destination: Path | None = None,
     *,
     tasks: Sequence[str] | None = None,
     stager: Stager | None = None,
     mode: str = "auto",
     extract: bool = False,
+    progress: ProgressObserver | None = None,
 ) -> OperationResult[FetchValue]:
     record, error = _load_record(run_id, store)
     if error is not None:
         return OperationResult.failure("fetch", error)
     assert record is not None
+    effective_destination = destination or _default_fetch_destination(record)
     with store.operation_lock(record.run.id):
         return _fetch_operation_locked(
             run_id,
             store,
-            destination,
+            effective_destination,
             tasks=tasks,
             stager=stager,
             mode=mode,
             extract=extract,
+            progress=progress,
         )
+
+
+def _default_fetch_destination(record: RunRecord) -> Path:
+    project_root = (
+        Path(str(record.experiment_source)).parent
+        if record.experiment_source is not None
+        else Path(str(record.source_root))
+    )
+    config_stem = (
+        record.run.tasks[0].config.source.stem
+        if record.run.tasks
+        else record.experiment_source.stem
+        if record.experiment_source is not None
+        else record.experiment.name
+    )
+    return project_root / "retrieved" / config_stem
 
 
 def _fetch_operation_locked(
@@ -2439,6 +2454,7 @@ def _fetch_operation_locked(
     stager: Stager | None = None,
     mode: str = "auto",
     extract: bool = False,
+    progress: ProgressObserver | None = None,
 ) -> OperationResult[FetchValue]:
     record, error = _load_record(run_id, store)
     if error is not None:
@@ -2483,6 +2499,17 @@ def _fetch_operation_locked(
         task_id
         for task_id in selected
         if retrieval_states[task_id] is not RetrievalState.SUCCEEDED
+    )
+    _report_progress(
+        progress,
+        ProgressPhase.RETRIEVE,
+        5 + len(selected) - len(transitioning),
+        (
+            f"mode={effective_mode} destination={destination} "
+            f"tasks={len(selected)}"
+        ),
+        record.run.id,
+        task_total=len(selected),
     )
     if transitioning:
         for task_id in transitioning:
@@ -2590,6 +2617,14 @@ def _fetch_operation_locked(
         return OperationResult.failure(
             "fetch", _run_store_operation_error(error, record.run.id)
         )
+    _report_progress(
+        progress,
+        ProgressPhase.COMPLETE,
+        6 + len(selected),
+        f"retrieval={retrieval_state.value} destination={destination}",
+        record.run.id,
+        task_total=len(selected),
+    )
     return OperationResult.success(
         "fetch",
         FetchValue(

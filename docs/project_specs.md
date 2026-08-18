@@ -1598,6 +1598,7 @@ Preparation logs remain separate from scientific Task logs.
 ### 21.7 `fetch`
 
 ```bash
+rundr fetch <run-id>
 rundr fetch <run-id> --destination retrieved
 rundr fetch <run-id> --destination retrieved --mode reference
 rundr fetch <run-id> --destination retrieved --task task_000017

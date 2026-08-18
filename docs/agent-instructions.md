@@ -9,8 +9,9 @@
 - Use explicit seeds for reproducibility. Above a target safety threshold, pass
   the exact requested `--confirm-tasks N` value only after reviewing the plan.
 - Prefer `rundr submit EXPERIMENT`, then `rundr wait RUN_ID`, then
-  `rundr fetch RUN_ID --destination PATH` for long Runs. Use `rundr run` only
-  when keeping the client attached is appropriate.
+  `rundr fetch RUN_ID` for long Runs. Use `--destination PATH` only to override
+  the configuration-based default. Use `rundr run` only when keeping the client
+  attached is appropriate.
 - Preserve the Run ID and the exact `--data-dir` used at submission. Lifecycle
   commands must use the same Run store.
 - Use `--json` or Rundra MCP tools. Never parse scheduler-native output.

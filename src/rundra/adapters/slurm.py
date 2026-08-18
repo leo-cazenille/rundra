@@ -461,7 +461,7 @@ class SlurmScheduler:
             raise SlurmSubmissionError(
                 "Slurm bundle submission requires an explicit worker limit"
             )
-        task_slots = request.task_slots_per_worker
+        task_slots = min(request.task_slots_per_worker, len(request.mapping))
         worker_count = min(
             *limits,
             max_array_size,
