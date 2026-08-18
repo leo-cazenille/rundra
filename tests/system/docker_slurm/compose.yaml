@@ -1,0 +1,67 @@
+name: rundra-slurm-system
+
+x-apptainer: &apptainer
+  security_opt:
+    - seccomp=unconfined
+    - systempaths=unconfined
+  devices:
+    - /dev/fuse:/dev/fuse
+
+x-volumes: &cluster-volumes
+  volumes:
+    - cluster-config:/cluster
+    - cluster-workspace:/workspace
+
+services:
+  init:
+    <<: [*apptainer, *cluster-volumes]
+    build: .
+    command: [init]
+    volumes:
+      - cluster-config:/cluster
+      - cluster-workspace:/workspace
+      - ${RUNDRA_DOCKER_STATE:?set RUNDRA_DOCKER_STATE}:/state
+
+  controller:
+    <<: [*apptainer, *cluster-volumes]
+    build: .
+    hostname: controller
+    command: [controller]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:2222:22"
+    cpus: 0.75
+    mem_limit: 768m
+    healthcheck:
+      test: [CMD-SHELL, "scontrol ping | grep -q UP"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+
+  compute1:
+    <<: [*apptainer, *cluster-volumes]
+    build: .
+    hostname: compute1
+    command: [compute]
+    depends_on:
+      controller:
+        condition: service_healthy
+    cpus: 2
+    mem_limit: 2g
+
+  compute2:
+    <<: [*apptainer, *cluster-volumes]
+    build: .
+    hostname: compute2
+    command: [compute]
+    depends_on:
+      controller:
+        condition: service_healthy
+    cpus: 2
+    mem_limit: 2g
+
+volumes:
+  cluster-config:
+  cluster-workspace:

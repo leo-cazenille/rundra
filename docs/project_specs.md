@@ -1331,6 +1331,19 @@ command print `rundr version VERSION`, where `VERSION` is read from installed
 distribution metadata. They exit successfully without loading project or Run
 configuration.
 
+The installed agent-guide section remains self-contained and links to the
+canonical PyPI project overview for additional installation and workflow
+documentation. Because that page describes the latest release, installed help
+and version output remain authoritative for local behavior.
+
+M12.1 adds an opt-in Docker Compose system boundary with one Slurm controller,
+two compute nodes, SSH/rsync staging, and restricted-capability nested
+Apptainer. It validates 1,000 logical Tasks through bounded worker allocations,
+sharded retrieval, and compute-host evidence. The harness is excluded from
+default tests, runs manually and nightly, generates credentials at runtime, and
+does not use privileged containers. It is a lifecycle and logical-scale proof,
+not a performance model of a production cluster.
+
 The command-line executable is:
 
 ```text

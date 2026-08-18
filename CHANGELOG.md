@@ -4,10 +4,21 @@ All notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-19
+
 ### Added
 
 - `rundr --version` and `rundr version` report the installed distribution
   version from package metadata.
+- `rundr agent-guide` links to the public PyPI overview while retaining
+  self-contained, version-aware baseline instructions.
+- An opt-in Docker Compose system harness exercises the complete remote stack
+  and a 1,000-Task worker-pool Run on two local Slurm compute containers.
+
+### Changed
+
+- Manual release-workflow dispatches publish only to TestPyPI; published GitHub
+  releases publish directly to PyPI after rebuilding and validating artifacts.
 
 ## [0.1.0] - 2026-08-18
 

@@ -87,6 +87,16 @@ def shoal_gpu_image() -> Path:
 
 
 @pytest.fixture(scope="session")
+def docker_slurm_targets_source() -> Path:
+    return _required_file("RUNDRA_DOCKER_SLURM_TARGETS_FILE")
+
+
+@pytest.fixture(scope="session")
+def docker_slurm_target_name() -> str:
+    return os.environ.get("RUNDRA_DOCKER_SLURM_TARGET", "docker-slurm")
+
+
+@pytest.fixture(scope="session")
 def shoal_experiment(shoal_experiment_source: Path) -> ExperimentSpec:
     try:
         return load_experiment(shoal_experiment_source)

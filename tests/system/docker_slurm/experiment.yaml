@@ -1,0 +1,22 @@
+version: 1
+
+experiment:
+  name: docker-slurm-scale
+
+command:
+  argv: [/bin/sh, run.sh, --config, "{config}", --seed, "{seed}"]
+
+container:
+  image: /cluster/rundra-test.sif
+  gpu: false
+
+resources:
+  nodes: 1
+  tasks: 1
+  cpus_per_task: 1
+  gpus_per_task: 0
+  memory: 32MiB
+  walltime: "00:00:02"
+
+outputs:
+  include: [results/**]
