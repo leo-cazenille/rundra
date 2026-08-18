@@ -4,6 +4,7 @@ Rundra includes an opt-in two-node Slurm cluster for validating the complete
 SSH, rsync, Slurm, Apptainer, worker-pool, sharded-output, and retrieval path.
 It executes 1,000 deterministic logical Tasks while limiting scheduled workers
 and Docker CPU/memory consumption.
+The suite also covers bounded multi-array partial failure and cancellation.
 
 Run it on a Linux host with Docker Engine, Docker Compose v2, `/dev/fuse`, and
 the kernel support required by unprivileged Apptainer:
