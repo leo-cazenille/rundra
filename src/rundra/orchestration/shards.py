@@ -63,9 +63,7 @@ def read_shard_index(path: Path, *, hostname: str | None = None) -> ShardIndex:
             if stream is None:
                 raise ShardError("Output shard index cannot be read")
             content = stream.read().decode("utf-8")
-            value: object = (
-                json.loads(content) if index_kind == "json" else content
-            )
+            value: object = json.loads(content) if index_kind == "json" else content
     except (
         OSError,
         tarfile.TarError,

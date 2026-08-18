@@ -1062,9 +1062,9 @@ def _render_lane_shard(
             "        printf 'RUNDRA_SHARD\\t2\\t%s\\t%s\\n' "
             '"$SLURM_ARRAY_TASK_ID" "$SLURM_PROCID" > "$index"'
         ),
-        '        tab=$(printf \'\\t\')',
+        "        tab=$(printf '\\t')",
         '        while IFS="$tab" read -r task_id task_status; do',
-        f"          case \"$task_id\" in {task_cases}) ;; *) exit 76 ;; esac",
+        f'          case "$task_id" in {task_cases}) ;; *) exit 76 ;; esac',
         (
             "          printf 'TASK\\t%s\\t%s\\n' \"$task_id\" "
             '"$task_status" >> "$index"'
@@ -1073,25 +1073,25 @@ def _render_lane_shard(
         '          [ -d "$task_dir" ] || exit 76',
         '          [ -z "$(find "$task_dir" -type l -print -quit)" ] || exit 76',
         (
-            '          find "$task_dir" -type f -printf \'%P\\t%s\\n\' '
+            "          find \"$task_dir\" -type f -printf '%P\\t%s\\n' "
             '| LC_ALL=C sort | while IFS="$tab" read -r member size; do'
         ),
         '            [ -n "$member" ] || exit 76',
         '            digest=$(sha256sum -- "$task_dir/$member")',
-        '            digest=${digest%% *}',
+        "            digest=${digest%% *}",
         (
             "            printf 'MEMBER\\t%s/%s\\t%s\\t%s\\n' "
             '"$task_id" "$member" "$size" "$digest" >> "$index"'
         ),
-        '          done',
+        "          done",
         '        done < "$journal_tmp"',
         (
             "        tar --sort=name --mtime=@0 --owner=0 --group=0 "
-            "--numeric-owner -cf \"$shard_tmp\" -C \"$output_root\" "
-            f"{quoted_tasks} -C \"$index_dir\" index.tsv"
+            '--numeric-owner -cf "$shard_tmp" -C "$output_root" '
+            f'{quoted_tasks} -C "$index_dir" index.tsv'
         ),
         '        shard_digest=$(sha256sum -- "$shard_tmp")',
-        '        shard_digest=${shard_digest%% *}',
+        "        shard_digest=${shard_digest%% *}",
         (
             "        printf '%s  %s\\n' \"$shard_digest\" "
             '"${shard##*/}" > "$checksum_tmp"'

@@ -117,9 +117,7 @@ class SharedStager:
         except LocalStagerError as error:
             raise SharedStagerError(str(error)) from error
 
-    def _write_reference(
-        self, request: FetchRequest, destination: Path
-    ) -> FetchResult:
+    def _write_reference(self, request: FetchRequest, destination: Path) -> FetchResult:
         destination.mkdir(parents=True, exist_ok=True)
         manifest = destination / "rundra-reference.json"
         document = {
@@ -137,9 +135,12 @@ class SharedStager:
         )
         temporary = Path(temporary_name)
         try:
-            payload = json.dumps(
-                document, sort_keys=True, separators=(",", ":")
-            ).encode("utf-8") + b"\n"
+            payload = (
+                json.dumps(document, sort_keys=True, separators=(",", ":")).encode(
+                    "utf-8"
+                )
+                + b"\n"
+            )
             with os.fdopen(descriptor, "wb") as stream:
                 stream.write(payload)
                 stream.flush()
@@ -167,7 +168,9 @@ class SharedStager:
         """Atomically publish an immutable file within the shared root."""
         if not source.is_file() or source.is_symlink():
             raise SharedStagerError("Verified file source must be a regular file")
-        if len(sha256) != 64 or any(value not in "0123456789abcdef" for value in sha256):
+        if len(sha256) != 64 or any(
+            value not in "0123456789abcdef" for value in sha256
+        ):
             raise SharedStagerError("Verified file SHA-256 is invalid")
         if _sha256(source) != sha256:
             raise SharedStagerError("Verified file source digest does not match")

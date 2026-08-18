@@ -6,10 +6,10 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import statistics
-import hashlib
 import tarfile
 from collections import defaultdict
 from dataclasses import dataclass
@@ -147,9 +147,7 @@ def _shard_members(shard_root: Path) -> dict[str, ShardInput]:
             member = fields[1]
             if member.endswith("/data.feather"):
                 task_id = member.split("/", 1)[0]
-                results[task_id] = ShardInput(
-                    shard, member, int(fields[2]), fields[3]
-                )
+                results[task_id] = ShardInput(shard, member, int(fields[2]), fields[3])
     return results
 
 

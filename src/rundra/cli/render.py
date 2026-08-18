@@ -211,8 +211,8 @@ def render_human(result: OperationResult[Any]) -> str:
         if plan.array_mapping:
             mapping = _human_sequence(
                 tuple(
-                f"{item.array_index}={item.task_id}/seed={item.seed}"
-                for item in plan.array_mapping
+                    f"{item.array_index}={item.task_id}/seed={item.seed}"
+                    for item in plan.array_mapping
                 )
             )
             rendered = f"{rendered}\nArray mapping: {mapping}"

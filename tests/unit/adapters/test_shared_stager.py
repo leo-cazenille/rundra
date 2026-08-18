@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import json
+from pathlib import Path
 
 import pytest
 
@@ -74,7 +74,9 @@ def test_shared_fetch_auto_writes_constant_size_reference(tmp_path: Path) -> Non
     (source / "main.py").write_text("pass\n", encoding="utf-8")
     stager = SharedStager(root)
     workspace = stager.stage(_request(source, root))
-    (Path(workspace.outputs) / "result.txt").write_text("large result\n", encoding="utf-8")
+    (Path(workspace.outputs) / "result.txt").write_text(
+        "large result\n", encoding="utf-8"
+    )
 
     result = stager.fetch(
         FetchRequest(workspace, ("result.txt",), root / "retrieved", mode="auto")

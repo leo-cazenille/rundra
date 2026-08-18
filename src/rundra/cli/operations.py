@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import secrets
 import hashlib
+import secrets
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from importlib.metadata import version

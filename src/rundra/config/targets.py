@@ -87,9 +87,7 @@ def load_targets_config(source: Path) -> TargetsConfig:
             source=source,
             path=("version",),
             code="UNSUPPORTED_VERSION",
-            message=(
-                "Unsupported targets version; supported versions are 1 through 5"
-            ),
+            message=("Unsupported targets version; supported versions are 1 through 5"),
         )
     raw_targets = expect_mapping(document["targets"], source=source, path=("targets",))
     targets: dict[str, Target] = {}
@@ -486,7 +484,9 @@ def _backend_config(
                 message="Shared root must be an absolute non-root path",
             )
         options["root"] = root
-    elif any(field in section for field in ("host", "executable", "config_file", "root")):
+    elif any(
+        field in section for field in ("host", "executable", "config_file", "root")
+    ):
         field = next(
             field
             for field in ("host", "executable", "config_file", "root")
