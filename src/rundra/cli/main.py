@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
+from importlib.metadata import version as distribution_version
 from pathlib import Path
 from typing import Any, Never, cast
 
@@ -55,6 +56,7 @@ _COMMANDS = (
     "doctor",
     "agent-guide",
     "help",
+    "version",
 )
 
 
@@ -79,6 +81,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="emit JSON output (may also follow the command)",
+    )
+    parser.add_argument(
+        "--version",
+        dest="show_version",
+        action="store_true",
+        help="show the installed Rundra version and exit",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -256,6 +264,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="COMMAND",
         help="command whose detailed help should be shown",
     )
+    subparsers.add_parser("version", help="show the installed Rundra version")
     return parser
 
 
@@ -422,6 +431,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(output, file=sys.stdout if json_requested else sys.stderr)
         return 1
+    if arguments.show_version:
+        print(_version_text())
+        return 0
     if arguments.command is None:
         if arguments.json:
             missing_command_result: OperationResult[Any] = OperationResult.failure(
@@ -438,6 +450,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if arguments.command == "help":
         print(_help_text(parser, arguments.topic))
+        return 0
+    if arguments.command == "version":
+        print(_version_text())
         return 0
 
     try:
@@ -685,3 +700,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _requested_operation(arguments: Sequence[str]) -> str:
     candidate = next((value for value in arguments if value != "--json"), None)
     return candidate if candidate in _COMMANDS else "cli"
+
+
+def _version_text() -> str:
+    return f"rundr version {distribution_version('rundra')}"

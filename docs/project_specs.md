@@ -1326,6 +1326,11 @@ independent so transfer failure never rewrites scientific execution state.
 
 The CLI is the first public interface.
 
+The top-level `rundr --version` option and the equivalent `rundr version`
+command print `rundr version VERSION`, where `VERSION` is read from installed
+distribution metadata. They exit successfully without loading project or Run
+configuration.
+
 The command-line executable is:
 
 ```text

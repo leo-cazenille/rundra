@@ -4,6 +4,11 @@ All notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
+### Added
+
+- `rundr --version` and `rundr version` report the installed distribution
+  version from package metadata.
+
 ## [0.1.0] - 2026-08-18
 
 ### Added

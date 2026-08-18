@@ -11,6 +11,7 @@ Rundra requires Python 3.12. Install the command as an isolated user tool:
 
 ```bash
 uv tool install rundra
+rundr --version
 rundr help
 ```
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from importlib.metadata import version as distribution_version
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,22 @@ def test_console_entry_point_displays_help() -> None:
         "doctor",
     ):
         assert command in result.stdout
+
+
+@pytest.mark.parametrize("arguments", (("--version",), ("version",)))
+def test_console_entry_point_displays_installed_version(
+    arguments: tuple[str, ...],
+) -> None:
+    result = subprocess.run(
+        ("rundr", *arguments),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+    assert result.stdout == f"rundr version {distribution_version('rundra')}\n"
 
 
 def test_doctor_parser_accepts_direct_and_project_target_selection() -> None:
