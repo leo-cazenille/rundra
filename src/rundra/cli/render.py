@@ -609,7 +609,7 @@ def _result_format_version(value: object) -> int:
     if isinstance(value, (LogsValue, FetchValue, PurgeValue)):
         return value.format_version
     if isinstance(value, TasksValue):
-        return 4
+        return value.format_version
     if (
         isinstance(value, ValidationValue)
         and value.project is not None

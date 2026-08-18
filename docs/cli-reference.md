@@ -24,7 +24,7 @@ For synchronous arrays the bar total is six lifecycle units plus the number of
 Tasks; scheduler updates show terminal/total, running, queued, failed, and
 allocated-node counts.
 | `status` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Reconcile scheduler state and return portable Run/Task status. |
-| `tasks` | `RUN_ID` or `--last` | `--offset`, `--limit`, `--data-dir`, `--json` | Return one bounded page from a compact version-4 TaskSpace sidecar. |
+| `tasks` | `RUN_ID` or `--last` | `--offset`, `--limit`, `--data-dir`, `--json` | Return one bounded page from materialized Run tasks or a compact version-4 TaskSpace sidecar. |
 | `list` | none | `--data-dir`, `--json` | List persisted Runs in deterministic order. |
 | `logs` | `RUN_ID` or `--last` | `--task`, `--data-dir`, `--json` | Read one Task's framework-managed stdout/stderr. |
 | `fetch` | `RUN_ID` or `--last` | optional `--destination`; repeatable `--task`; `--verbose`, `--progress`, `--data-dir`, `--json` | Idempotently retrieve all or selected Task artifacts. Defaults to `retrieved/<config-stem>` and reports task-scaled retrieval progress when requested. |

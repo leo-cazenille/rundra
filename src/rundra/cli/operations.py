@@ -67,6 +67,7 @@ from rundra.domain.purge import (
     PurgeScope,
 )
 from rundra.domain.records import RunRecord
+from rundra.domain.scaling import TaskCoordinate
 from rundra.domain.states import (
     ExecutionState,
     RetrievalState,
@@ -361,6 +362,7 @@ class TasksValue:
     offset: int
     limit: int
     tasks: tuple[TaskState, ...]
+    format_version: int = 4
 
     def __post_init__(self) -> None:
         if type(self.run_id) is not RunId:
@@ -373,6 +375,13 @@ class TasksValue:
             raise ValueError("TasksValue limit must be positive")
         if any(type(item) is not TaskState for item in self.tasks):
             raise TypeError("TasksValue tasks must contain TaskState values")
+        if type(self.format_version) is not int or self.format_version not in {
+            1,
+            2,
+            3,
+            4,
+        }:
+            raise ValueError("TasksValue format_version must be supported")
 
 
 @dataclass(frozen=True, slots=True)
@@ -2240,12 +2249,35 @@ def tasks_operation(
     if error is not None:
         return OperationResult.failure("tasks", error)
     assert record is not None
-    if record.format_version != 4 or record.task_state_store is None:
+    if record.format_version != 4:
+        try:
+            page = _materialized_task_page(record, offset=offset, limit=limit)
+        except ValueError as task_error:
+            return OperationResult.failure(
+                "tasks",
+                OperationError(
+                    "TASK_STATE_ERROR",
+                    str(task_error),
+                    {"run_id": str(record.run.id)},
+                ),
+            )
+        return OperationResult.success(
+            "tasks",
+            TasksValue(
+                record.run.id,
+                len(record.run.tasks),
+                offset,
+                limit,
+                page,
+                format_version=record.format_version,
+            ),
+        )
+    if record.task_state_store is None:
         return OperationResult.failure(
             "tasks",
             OperationError(
-                "TASK_PAGINATION_UNAVAILABLE",
-                f"Run {record.run.id} does not use compact v4 Task state",
+                "TASK_STATE_MISMATCH",
+                f"Run {record.run.id} has no compact Task state sidecar",
                 {"run_id": str(record.run.id)},
             ),
         )
@@ -2277,8 +2309,54 @@ def tasks_operation(
             page.offset,
             page.limit,
             page.tasks,
+            format_version=record.format_version,
         ),
     )
+
+
+def _materialized_task_page(
+    record: RunRecord,
+    *,
+    offset: int,
+    limit: int,
+) -> tuple[TaskState, ...]:
+    if type(offset) is not int or offset < 0:
+        raise ValueError("Task page offset must be a non-negative integer")
+    if type(limit) is not int or not 1 <= limit <= 1000:
+        raise ValueError("Task page limit must be between 1 and 1000")
+    stop = min(len(record.run.tasks), offset + limit)
+    if offset >= stop:
+        return ()
+    retrieval_states = _task_retrieval_states(record)
+    parameter_ordinals: dict[str, int] = {}
+    seed_ordinals: dict[int, int] = {}
+    page: list[TaskState] = []
+    for ordinal, task in enumerate(record.run.tasks[:stop]):
+        parameter_key = task.parameter_set.id if task.parameter_set is not None else ""
+        parameter_ordinal = parameter_ordinals.setdefault(
+            parameter_key, len(parameter_ordinals)
+        )
+        seed_ordinal = seed_ordinals.get(parameter_ordinal, 0)
+        seed_ordinals[parameter_ordinal] = seed_ordinal + 1
+        if ordinal < offset:
+            continue
+        page.append(
+            TaskState(
+                TaskCoordinate(
+                    task.id,
+                    ordinal,
+                    parameter_ordinal,
+                    seed_ordinal,
+                    task.seed,
+                ),
+                execution_state=task.state,
+                retrieval_state=retrieval_states[task.id],
+                scheduler_id=record.task_scheduler_ids.get(task.id),
+                native_state=record.task_native_states.get(task.id),
+                exit_code=record.task_exit_codes.get(task.id),
+            )
+        )
+    return tuple(page)
 
 
 def logs_operation(

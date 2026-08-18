@@ -46,7 +46,7 @@ def test_tasks_operation_returns_a_bounded_v4_page(tmp_path: Path) -> None:
     assert status.value.task_counts == {"CREATED": 99_999_999, "FAILED": 1}
 
 
-def test_tasks_operation_rejects_legacy_records(tmp_path: Path) -> None:
+def test_tasks_operation_pages_materialized_records(tmp_path: Path) -> None:
     from tests.unit.persistence.test_json_store import _record
 
     record = _record()
@@ -58,5 +58,16 @@ def test_tasks_operation_rejects_legacy_records(tmp_path: Path) -> None:
         SqliteTaskStore(tmp_path),
     )
 
-    assert result.error is not None
-    assert result.error.code == "TASK_PAGINATION_UNAVAILABLE"
+    assert result.ok
+    document = result_document(result)
+    assert document["format_version"] == 1
+    assert document["tasks"]["total"] == 1
+    item = document["tasks"]["items"][0]
+    task = record.run.tasks[0]
+    assert item["task_id"] == "task_000000"
+    assert item["ordinal"] == 0
+    assert item["parameter_set_ordinal"] == 0
+    assert item["seed_ordinal"] == 0
+    assert item["seed"] == 17
+    assert item["state"] == task.state.value
+    assert item["retrieval_state"] == record.run.retrieval_state.value
