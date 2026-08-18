@@ -1452,6 +1452,11 @@ def run_operation(
                     if target_name in targets_config.execution
                     else 1
                 ),
+                shard_outputs=(
+                    target_name in targets_config.execution
+                    and len(plan.units)
+                    >= targets_config.execution[target_name].output_shard_tasks
+                ),
             )
         )
         record = result.record
@@ -1707,6 +1712,11 @@ def submit_operation(
                     ].worker_pool.task_slots_per_worker
                     if target_name in targets_config.execution
                     else 1
+                ),
+                shard_outputs=(
+                    target_name in targets_config.execution
+                    and len(plan.units)
+                    >= targets_config.execution[target_name].output_shard_tasks
                 ),
             )
         )
@@ -2355,6 +2365,8 @@ def _task_retrieval_states(record: RunRecord) -> dict[TaskId, RetrievalState]:
 def _selected_fetch_patterns(
     record: RunRecord, task_ids: tuple[TaskId, ...]
 ) -> tuple[str, ...]:
+    if record.scheduler_metadata.get("result_shards") is True:
+        return (".rundra-shards/*.tar", ".rundra-shards/*.sha256")
     if len(record.run.tasks) == 1:
         return record.experiment.outputs
     return tuple(
@@ -2375,10 +2387,16 @@ def _selected_fetch_artifacts(
         ArtifactKind.STDERR,
         ArtifactKind.SCHEDULER_METADATA,
         ArtifactKind.REFERENCE_MANIFEST,
+        ArtifactKind.OUTPUT_SHARD,
     }
     selected = set(task_ids)
     result: list[Artifact] = []
     for artifact in artifacts:
+        if (
+            artifact.kind is ArtifactKind.RAW_RESULT
+            and ".rundra-shards" in artifact.path.parts
+        ):
+            artifact = replace(artifact, kind=ArtifactKind.OUTPUT_SHARD)
         if artifact.kind not in allowed:
             raise ValueError(f"unsupported artifact kind {artifact.kind.value}")
         task_id = artifact.task_id

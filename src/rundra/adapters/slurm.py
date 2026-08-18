@@ -975,9 +975,11 @@ def render_slurm_bundle_manifest(
             )
             start = worker_index + lane_index * worker_count
             stride = worker_count * task_slots_per_worker
+            lane_task_ids: list[str] = []
             for ordinal in range(start, len(request.mapping), stride):
                 unit = request.group.units[ordinal]
                 mapping = request.mapping[ordinal]
+                lane_task_ids.append(str(mapping.task_id))
                 timeout = _task_timeout_seconds(unit.resources.walltime)
                 command = serialize_remote_command(unit.command)
                 rendered = (
@@ -1002,6 +1004,14 @@ def render_slurm_bundle_manifest(
                         ),
                     )
                 )
+            if request.output_root is not None and request.shard_root is not None:
+                branches.extend(
+                    _render_lane_shard(
+                        request.output_root,
+                        request.shard_root,
+                        tuple(lane_task_ids),
+                    )
+                )
             branches.extend(
                 (
                     '        chmod 400 "$journal_tmp"',
@@ -1023,6 +1033,75 @@ def render_slurm_bundle_manifest(
             "esac",
             "",
         )
+    )
+
+
+def _render_lane_shard(
+    output_root: PurePath,
+    shard_root: PurePath,
+    task_ids: tuple[str, ...],
+) -> tuple[str, ...]:
+    quoted_output = shlex.quote(str(output_root))
+    quoted_shards = shlex.quote(str(shard_root))
+    quoted_tasks = " ".join(shlex.quote(task_id) for task_id in task_ids)
+    task_cases = "|".join(task_ids)
+    return (
+        f"        output_root={quoted_output}",
+        f"        shard_root={quoted_shards}",
+        '        mkdir -p -- "$shard_root"',
+        (
+            '        shard="$shard_root/${SLURM_ARRAY_JOB_ID}_'
+            '${SLURM_ARRAY_TASK_ID}.lane-${SLURM_PROCID}.tar"'
+        ),
+        '        shard_tmp="${shard}.$$"',
+        '        checksum="${shard}.sha256"',
+        '        checksum_tmp="${checksum}.$$"',
+        '        index_dir=$(mktemp -d "$shard_root/.index.XXXXXX")',
+        '        index="$index_dir/index.tsv"',
+        (
+            "        printf 'RUNDRA_SHARD\\t2\\t%s\\t%s\\n' "
+            '"$SLURM_ARRAY_TASK_ID" "$SLURM_PROCID" > "$index"'
+        ),
+        '        tab=$(printf \'\\t\')',
+        '        while IFS="$tab" read -r task_id task_status; do',
+        f"          case \"$task_id\" in {task_cases}) ;; *) exit 76 ;; esac",
+        (
+            "          printf 'TASK\\t%s\\t%s\\n' \"$task_id\" "
+            '"$task_status" >> "$index"'
+        ),
+        '          task_dir="$output_root/$task_id"',
+        '          [ -d "$task_dir" ] || exit 76',
+        '          [ -z "$(find "$task_dir" -type l -print -quit)" ] || exit 76',
+        (
+            '          find "$task_dir" -type f -printf \'%P\\t%s\\n\' '
+            '| LC_ALL=C sort | while IFS="$tab" read -r member size; do'
+        ),
+        '            [ -n "$member" ] || exit 76',
+        '            digest=$(sha256sum -- "$task_dir/$member")',
+        '            digest=${digest%% *}',
+        (
+            "            printf 'MEMBER\\t%s/%s\\t%s\\t%s\\n' "
+            '"$task_id" "$member" "$size" "$digest" >> "$index"'
+        ),
+        '          done',
+        '        done < "$journal_tmp"',
+        (
+            "        tar --sort=name --mtime=@0 --owner=0 --group=0 "
+            "--numeric-owner -cf \"$shard_tmp\" -C \"$output_root\" "
+            f"{quoted_tasks} -C \"$index_dir\" index.tsv"
+        ),
+        '        shard_digest=$(sha256sum -- "$shard_tmp")',
+        '        shard_digest=${shard_digest%% *}',
+        (
+            "        printf '%s  %s\\n' \"$shard_digest\" "
+            '"${shard##*/}" > "$checksum_tmp"'
+        ),
+        '        chmod 400 "$shard_tmp" "$checksum_tmp"',
+        '        mv -- "$shard_tmp" "$shard"',
+        '        mv -- "$checksum_tmp" "$checksum"',
+        "        rm -rf -- "
+        + " ".join(f'"$output_root/{task_id}"' for task_id in task_ids),
+        '        rm -rf -- "$index_dir"',
     )
 
 

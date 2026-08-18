@@ -135,6 +135,8 @@ class SchedulerArrayRequest:
     max_concurrent_jobs: int | None = None
     max_workers: int | None = None
     task_slots_per_worker: int = 1
+    output_root: PurePath | None = None
+    shard_root: PurePath | None = None
 
     def __post_init__(self) -> None:
         if type(self.group) is not SchedulerGroup:
@@ -187,6 +189,17 @@ class SchedulerArrayRequest:
             raise ValueError(
                 "SchedulerArrayRequest task_slots_per_worker must be positive"
             )
+        if (self.output_root is None) != (self.shard_root is None):
+            raise ValueError("SchedulerArrayRequest shard paths must be set together")
+        for name in ("output_root", "shard_root"):
+            path = getattr(self, name)
+            if path is not None and (
+                not isinstance(path, PurePath)
+                or not path.is_absolute()
+                or path == PurePath("/")
+                or "\x00" in str(path)
+            ):
+                raise ValueError(f"SchedulerArrayRequest {name} must be absolute")
         object.__setattr__(self, "mapping", mapping)
 
 

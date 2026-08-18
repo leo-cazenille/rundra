@@ -195,6 +195,7 @@ class ArtifactKind(StrEnum):
     SCHEDULER_METADATA = "scheduler_metadata"
     PROVENANCE_METADATA = "provenance_metadata"
     REFERENCE_MANIFEST = "reference_manifest"
+    OUTPUT_SHARD = "output_shard"
 
 
 @dataclass(frozen=True, slots=True)

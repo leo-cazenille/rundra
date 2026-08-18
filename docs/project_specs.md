@@ -1037,6 +1037,17 @@ file materialization. Reference retrieval is rejected until the Run is
 terminal and remains dependent on the configured remote-workspace retention
 policy.
 
+For bundled Slurm runs at or above the target's `output_shard_tasks` threshold,
+each scheduled worker lane seals its completed Task output directories into one
+deterministic uncompressed tar shard on the allocated compute node. The shard
+contains a bounded TSV index with Task exit codes and every regular member's
+size and SHA-256. Symlink outputs are rejected. The archive and checksum are
+published atomically and read-only before loose Task directories are removed;
+packaging failures preserve loose outputs and fail the worker. Run scheduler
+metadata records the shard root. Fetches select the lane archives rather than
+requesting files that were compacted, reducing a 20,000-Task Run with 320 lanes
+to roughly 640 result files including checksums.
+
 ---
 
 ### 12.3 Staging current working trees

@@ -51,13 +51,21 @@ def read_shard_index(path: Path, *, hostname: str | None = None) -> ShardIndex:
         raise ShardError(f"Output shard is not a regular file: {path}")
     try:
         with tarfile.open(path, mode="r:") as archive:
-            member = archive.getmember("index.json")
+            try:
+                member = archive.getmember("index.json")
+                index_kind = "json"
+            except KeyError:
+                member = archive.getmember("index.tsv")
+                index_kind = "tsv"
             if not member.isfile() or member.size > 16 * 1024 * 1024:
                 raise ShardError("Output shard index is not a bounded regular file")
             stream = archive.extractfile(member)
             if stream is None:
                 raise ShardError("Output shard index cannot be read")
-            value: object = json.loads(stream.read().decode("utf-8"))
+            content = stream.read().decode("utf-8")
+            value: object = (
+                json.loads(content) if index_kind == "json" else content
+            )
     except (
         OSError,
         tarfile.TarError,
@@ -66,7 +74,72 @@ def read_shard_index(path: Path, *, hostname: str | None = None) -> ShardIndex:
         json.JSONDecodeError,
     ) as error:
         raise ShardError(f"Could not read output shard index: {error}") from error
-    return _parse_index(value)
+    return _parse_index(value) if index_kind == "json" else _parse_tsv_index(content)
+
+
+def _parse_tsv_index(content: str) -> ShardIndex:
+    lines = content.splitlines()
+    if not lines:
+        raise ShardError("Output shard TSV index is empty")
+    header = lines[0].split("\t")
+    if len(header) != 4 or header[:2] != ["RUNDRA_SHARD", "2"]:
+        raise ShardError("Output shard TSV index header is invalid")
+    try:
+        worker = _index_integer(int(header[2]))
+        lane = _index_integer(int(header[3]))
+    except ValueError as error:
+        raise ShardError("Output shard worker identity is invalid") from error
+    tasks: dict[str, int] = {}
+    members: list[IndexedShardMember] = []
+    member_paths: set[PurePosixPath] = set()
+    for line in lines[1:]:
+        fields = line.split("\t")
+        if len(fields) == 3 and fields[0] == "TASK":
+            task_id = fields[1]
+            if task_id in tasks or not task_id.startswith("task_"):
+                raise ShardError("Output shard TSV Task is invalid")
+            try:
+                tasks[task_id] = int(fields[2])
+            except ValueError as error:
+                raise ShardError("Output shard TSV exit code is invalid") from error
+        elif len(fields) == 4 and fields[0] == "MEMBER":
+            relative = PurePosixPath(fields[1])
+            if (
+                relative.is_absolute()
+                or ".." in relative.parts
+                or len(relative.parts) < 2
+                or relative in member_paths
+            ):
+                raise ShardError("Output shard TSV member path is unsafe")
+            try:
+                size = int(fields[2])
+            except ValueError as error:
+                raise ShardError("Output shard TSV member size is invalid") from error
+            digest = fields[3]
+            if (
+                relative.parts[0] not in tasks
+                or size < 0
+                or len(digest) != 64
+                or any(value not in "0123456789abcdef" for value in digest)
+            ):
+                raise ShardError("Output shard TSV member identity is invalid")
+            member_paths.add(relative)
+            members.append(IndexedShardMember(relative, size, digest))
+        else:
+            raise ShardError("Output shard TSV row is invalid")
+    if not tasks:
+        raise ShardError("Output shard TSV contains no Tasks")
+    try:
+        ordinals = tuple(int(task_id.removeprefix("task_")) for task_id in tasks)
+    except ValueError as error:
+        raise ShardError("Output shard TSV Task ordinal is invalid") from error
+    return ShardIndex(
+        lease_ordinal=worker * 1_000_000 + lane,
+        task_start=min(ordinals),
+        task_stop=max(ordinals) + 1,
+        task_exit_codes=tasks,
+        members=tuple(members),
+    )
 
 
 def extract_shard(

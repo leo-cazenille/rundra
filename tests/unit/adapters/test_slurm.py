@@ -764,6 +764,8 @@ def test_slurm_scheduler_runs_concurrent_lanes_in_bounded_workers() -> None:
         max_concurrent_jobs=8,
         max_workers=2,
         task_slots_per_worker=2,
+        output_root=PurePosixPath("/remote/run/output"),
+        shard_root=PurePosixPath("/remote/run/output/.rundra-shards"),
     )
     transport.results.extend(
         (
@@ -786,6 +788,10 @@ def test_slurm_scheduler_runs_concurrent_lanes_in_bounded_workers() -> None:
     assert manifest.count("# task_id=") == 8
     assert 'case "$SLURM_PROCID" in' in manifest
     assert ".lane-${SLURM_PROCID}.tsv" in manifest
+    assert "RUNDRA_SHARD\\t2" in manifest
+    assert "sha256sum" in manifest
+    assert ".rundra-shards" in manifest
+    assert "tar --sort=name" in manifest
     assert "#SBATCH --array=0-1" in script
     assert "#SBATCH --ntasks=2" in script
     assert "#SBATCH --mem=2048M" in script

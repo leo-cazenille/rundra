@@ -382,6 +382,7 @@ class RunExecutionRequest:
     max_concurrent_jobs: int | None = None
     max_workers: int | None = None
     task_slots_per_worker: int = 1
+    shard_outputs: bool = False
 
     def __post_init__(self) -> None:
         if type(self.plan) is not ExecutionPlan:
@@ -434,6 +435,8 @@ class RunExecutionRequest:
             or self.task_slots_per_worker < 1
         ):
             raise ValueError("task_slots_per_worker must be positive")
+        if type(self.shard_outputs) is not bool:
+            raise TypeError("shard_outputs must be bool")
 
 
 @dataclass(frozen=True, slots=True)
@@ -705,6 +708,12 @@ class OrchestrationService:
                     max_concurrent_jobs=request.max_concurrent_jobs,
                     max_workers=request.max_workers,
                     task_slots_per_worker=request.task_slots_per_worker,
+                    output_root=(workspace.outputs if request.shard_outputs else None),
+                    shard_root=(
+                        workspace.outputs / ".rundra-shards"
+                        if request.shard_outputs
+                        else None
+                    ),
                 )
                 submission = (
                     cast(DependencyScheduler, self._scheduler).submit_array_afterok(
@@ -753,6 +762,16 @@ class OrchestrationService:
                         "max_concurrent_jobs": request.max_concurrent_jobs or 0,
                         "max_workers": request.max_workers or 0,
                         "task_slots_per_worker": request.task_slots_per_worker,
+                        "result_shards": request.shard_outputs,
+                        **(
+                            {
+                                "result_shard_root": str(
+                                    workspace.outputs / ".rundra-shards"
+                                )
+                            }
+                            if request.shard_outputs
+                            else {}
+                        ),
                     }
                     if bundled
                     else {}
@@ -850,8 +869,13 @@ class OrchestrationService:
             fetched = self._stager.fetch(
                 FetchRequest(
                     workspace=workspace,
-                    patterns=_fetch_patterns(request.experiment.outputs, units),
+                    patterns=(
+                        (".rundra-shards/*.tar", ".rundra-shards/*.sha256")
+                        if request.shard_outputs
+                        else _fetch_patterns(request.experiment.outputs, units)
+                    ),
                     destination=request.fetch_destination,
+                    mode="auto",
                 )
             )
             fetched_artifacts = _fetched_task_artifacts(fetched.artifacts, units)
@@ -1435,6 +1459,8 @@ def _fetched_task_artifacts(
         ArtifactKind.STDOUT,
         ArtifactKind.STDERR,
         ArtifactKind.SCHEDULER_METADATA,
+        ArtifactKind.REFERENCE_MANIFEST,
+        ArtifactKind.OUTPUT_SHARD,
     }
     if any(artifact.kind not in allowed for artifact in artifacts):
         raise ValueError("Stager fetch returned an unsupported artifact")
@@ -1446,6 +1472,12 @@ def _fetched_task_artifacts(
         raise ValueError("Stager fetch returned an artifact for another Task")
     result: list[Artifact] = []
     for artifact in artifacts:
+        if (
+            artifact.kind is ArtifactKind.RAW_RESULT
+            and ".rundra-shards" in artifact.path.parts
+        ):
+            result.append(replace(artifact, kind=ArtifactKind.OUTPUT_SHARD))
+            continue
         if artifact.kind is not ArtifactKind.RAW_RESULT or artifact.task_id is not None:
             result.append(artifact)
             continue
