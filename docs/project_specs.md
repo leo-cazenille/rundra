@@ -1939,10 +1939,13 @@ MCP must be an interface adapter over the execution core, not the foundation of 
 
 Version 0.1 should rely on the CLI plus `--json` as the first agent-compatible interface.
 
-The implemented MCP adapter is an optional local stdio server above the same
-typed operation layer as the CLI. It fixes its project root, RunStore, and
-target file at startup, constrains tool paths, and requires a fresh plan digest
-before execution. It exposes no HTTP listener or credential broker.
+The implemented MCP adapter is optional and remains above the same typed
+operation layer as the CLI. It fixes its project root, RunStore, and target
+file at startup, constrains tool paths, and requires a fresh plan digest before
+execution. Local stdio remains the default. An explicitly selected Streamable
+HTTP transport requires an environment-sourced static bearer token and
+DNS-rebinding host policy; TLS terminates at an operator-managed reverse proxy.
+The process is launched by the user and is not a persistent Rundra daemon.
 
 Long Runs use renewable waiting. `wait` reconciles durable state until terminal
 or timeout and never fetches implicitly. MCP waits are bounded so an agent host

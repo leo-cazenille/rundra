@@ -4,7 +4,7 @@ import argparse
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Never
+from typing import Any, Never, cast
 
 from rundra.cli.agent_guide import AgentGuideValue, agent_guide_operation
 from rundra.cli.doctor import DoctorValue, doctor_operation
@@ -266,10 +266,9 @@ def _help_text(parser: argparse.ArgumentParser, topic: str | None) -> str:
         if isinstance(action, argparse._SubParsersAction)
     )
     if topic is not None:
-        return subcommands.choices[topic].format_help().rstrip()
-    summaries = {
-        action.dest: action.help for action in subcommands._choices_actions
-    }
+        command_parser = cast(argparse.ArgumentParser, subcommands.choices[topic])
+        return command_parser.format_help().rstrip()
+    summaries = {action.dest: action.help for action in subcommands._choices_actions}
     width = max(len(name) for name in subcommands.choices)
     command_lines = tuple(
         f"  {name:<{width}}  {summaries.get(name) or ''}"

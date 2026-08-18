@@ -1,0 +1,6 @@
+{
+  "format_version": 1,
+  "program": "rundr-mcp",
+  "positionals": [],
+  "options": ["--allow-path", "--allowed-host", "--allowed-origin", "--data-dir", "--host", "--http-path", "--port", "--root", "--targets-file", "--token-env", "--transport"]
+}

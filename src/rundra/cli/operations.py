@@ -2251,7 +2251,9 @@ def tasks_operation(
     assert record is not None
     if record.format_version != 4:
         try:
-            page = _materialized_task_page(record, offset=offset, limit=limit)
+            materialized_page = _materialized_task_page(
+                record, offset=offset, limit=limit
+            )
         except ValueError as task_error:
             return OperationResult.failure(
                 "tasks",
@@ -2268,7 +2270,7 @@ def tasks_operation(
                 len(record.run.tasks),
                 offset,
                 limit,
-                page,
+                materialized_page,
                 format_version=record.format_version,
             ),
         )
@@ -2587,10 +2589,7 @@ def _fetch_operation_locked(
         progress,
         ProgressPhase.RETRIEVE,
         5 + len(selected) - len(transitioning),
-        (
-            f"mode={effective_mode} destination={destination} "
-            f"tasks={len(selected)}"
-        ),
+        (f"mode={effective_mode} destination={destination} tasks={len(selected)}"),
         record.run.id,
         task_total=len(selected),
     )

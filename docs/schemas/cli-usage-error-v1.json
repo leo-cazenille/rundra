@@ -4,7 +4,7 @@
     "details": {
       "command": "status"
     },
-    "message": "the following arguments are required: run_id"
+    "message": "one of the arguments run_id --last is required"
   },
   "format_version": 1,
   "ok": false,

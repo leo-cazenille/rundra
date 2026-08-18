@@ -4,11 +4,19 @@ import argparse
 import asyncio
 import hashlib
 import json
+import os
+import re
+import secrets
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server import MCPServer
+from mcp.server.auth.provider import AccessToken, TokenVerifier
+from mcp.server.auth.settings import AuthSettings
+from mcp.server.transport_security import TransportSecuritySettings
+from pydantic import AnyHttpUrl
 
 from rundra.cli.agent_guide import GUIDE
 from rundra.cli.doctor import doctor_operation
@@ -55,13 +63,80 @@ class ServerSettings:
         return resolved
 
 
-def build_server(settings: ServerSettings) -> MCPServer:
+@dataclass(frozen=True, slots=True)
+class HTTPSettings:
+    host: str
+    port: int
+    path: str
+    token_env: str
+    allowed_hosts: tuple[str, ...]
+    allowed_origins: tuple[str, ...]
+
+    def transport_security(self) -> TransportSecuritySettings | None:
+        if not self.allowed_hosts and self.host in _LOOPBACK_HOSTS:
+            return None
+        hosts = self.allowed_hosts
+        origins = self.allowed_origins
+        if self.host in _LOOPBACK_HOSTS:
+            hosts = tuple(dict.fromkeys((*_LOOPBACK_ALLOWED_HOSTS, *hosts)))
+            origins = tuple(dict.fromkeys((*_LOOPBACK_ALLOWED_ORIGINS, *origins)))
+        return TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=list(hosts),
+            allowed_origins=list(origins),
+        )
+
+
+class StaticBearerTokenVerifier:
+    """Verify one process-local opaque bearer token without logging it."""
+
+    def __init__(self, token: str) -> None:
+        _validate_token(token)
+        self._token = token
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        if not secrets.compare_digest(token, self._token):
+            return None
+        return AccessToken(
+            token=token,
+            client_id="rundr-mcp-static",
+            scopes=[],
+            subject="rundr-mcp-client",
+        )
+
+
+_LOOPBACK_HOSTS = frozenset(("127.0.0.1", "localhost", "::1"))
+_LOOPBACK_ALLOWED_HOSTS = (
+    "127.0.0.1:*",
+    "localhost:*",
+    "[::1]:*",
+)
+_LOOPBACK_ALLOWED_ORIGINS = (
+    "http://127.0.0.1:*",
+    "http://localhost:*",
+    "http://[::1]:*",
+)
+_ENVIRONMENT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+_STATIC_AUTH_SETTINGS = AuthSettings(
+    issuer_url=AnyHttpUrl("https://rundr-mcp.invalid"),
+    resource_server_url=None,
+    required_scopes=[],
+)
+
+
+def build_server(
+    settings: ServerSettings,
+    *,
+    token_verifier: TokenVerifier | None = None,
+) -> MCPServer:
     server = MCPServer(
         "Rundra",
         instructions=(
             "Plan before submission. Use explicit seeds and preserve Run IDs. "
             "For long work use submit_experiment, wait_run, then fetch_results."
         ),
+        token_verifier=token_verifier,
+        auth=_STATIC_AUTH_SETTINGS if token_verifier is not None else None,
     )
 
     def store() -> JsonRunStore:
@@ -372,7 +447,7 @@ def build_server(settings: ServerSettings) -> MCPServer:
     return server
 
 
-def main() -> None:
+def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="rundr-mcp")
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument(
@@ -382,7 +457,27 @@ def main() -> None:
         "--targets-file", type=Path, default=Path("~/.config/rundra/targets.yaml")
     )
     parser.add_argument("--allow-path", action="append", type=Path, default=[])
-    arguments = parser.parse_args()
+    parser.add_argument(
+        "--transport",
+        choices=("stdio", "streamable-http"),
+        default="stdio",
+    )
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=_port, default=8000)
+    parser.add_argument("--http-path", default="/mcp")
+    parser.add_argument("--token-env", default="RUNDRA_MCP_TOKEN")
+    parser.add_argument("--allowed-host", action="append", default=[])
+    parser.add_argument("--allowed-origin", action="append", default=[])
+    return parser
+
+
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> None:
+    parser = build_argument_parser()
+    arguments = parser.parse_args(argv)
     root = arguments.root.expanduser().resolve()
     allowed = tuple(
         dict.fromkeys(
@@ -395,7 +490,109 @@ def main() -> None:
         arguments.targets_file.expanduser().resolve(),
         allowed,
     )
-    build_server(settings).run(transport="stdio")
+    transport: Literal["stdio", "streamable-http"] = arguments.transport
+    if transport == "stdio":
+        build_server(settings).run(transport="stdio")
+        return
+    try:
+        http = _http_settings(arguments)
+        token = _token_from_environment(http.token_env, environ or os.environ)
+    except ValueError as error:
+        parser.error(str(error))
+    verifier = StaticBearerTokenVerifier(token)
+    build_server(settings, token_verifier=verifier).run(
+        transport="streamable-http",
+        host=http.host,
+        port=http.port,
+        streamable_http_path=http.path,
+        transport_security=http.transport_security(),
+    )
+
+
+def _http_settings(arguments: argparse.Namespace) -> HTTPSettings:
+    host = _safe_nonblank(arguments.host, name="HTTP host")
+    if "://" in host or "/" in host:
+        raise ValueError("HTTP host must be a hostname or address, not a URL")
+    path = _safe_nonblank(arguments.http_path, name="HTTP path")
+    if (
+        not path.startswith("/")
+        or path == "/"
+        or "?" in path
+        or "#" in path
+        or "//" in path
+    ):
+        raise ValueError("HTTP path must be one absolute path such as /mcp")
+    token_env = _safe_nonblank(arguments.token_env, name="token environment name")
+    if _ENVIRONMENT_NAME.fullmatch(token_env) is None:
+        raise ValueError("token environment name is invalid")
+    allowed_hosts = tuple(
+        dict.fromkeys(_allowed_host(value) for value in arguments.allowed_host)
+    )
+    allowed_origins = tuple(
+        dict.fromkeys(_allowed_origin(value) for value in arguments.allowed_origin)
+    )
+    if host not in _LOOPBACK_HOSTS and not allowed_hosts:
+        raise ValueError("non-loopback HTTP requires at least one --allowed-host")
+    return HTTPSettings(
+        host,
+        arguments.port,
+        path,
+        token_env,
+        allowed_hosts,
+        allowed_origins,
+    )
+
+
+def _port(value: str) -> int:
+    try:
+        port = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("port must be an integer") from error
+    if not 1 <= port <= 65535:
+        raise argparse.ArgumentTypeError("port must be between 1 and 65535")
+    return port
+
+
+def _safe_nonblank(value: object, *, name: str) -> str:
+    if type(value) is not str or not value.strip() or "\x00" in value:
+        raise ValueError(f"{name} must be a safe nonblank string")
+    if value != value.strip() or any(character.isspace() for character in value):
+        raise ValueError(f"{name} must not contain whitespace")
+    return value
+
+
+def _allowed_host(value: object) -> str:
+    host = _safe_nonblank(value, name="allowed host")
+    if "://" in host or "/" in host:
+        raise ValueError("allowed host must be a Host header pattern")
+    return host
+
+
+def _allowed_origin(value: object) -> str:
+    origin = _safe_nonblank(value, name="allowed origin")
+    if not origin.startswith(("http://", "https://")):
+        raise ValueError("allowed origin must use http:// or https://")
+    remainder = origin.split("://", 1)[1]
+    if not remainder or "/" in remainder or "@" in remainder:
+        raise ValueError("allowed origin must contain only scheme and authority")
+    return origin
+
+
+def _token_from_environment(name: str, environ: Mapping[str, str]) -> str:
+    token = environ.get(name)
+    if token is None:
+        raise ValueError(f"Streamable HTTP requires token environment variable {name}")
+    _validate_token(token)
+    return token
+
+
+def _validate_token(token: object) -> None:
+    if type(token) is not str or len(token) < 32:
+        raise ValueError(
+            "Streamable HTTP bearer token must contain at least 32 characters"
+        )
+    if token != token.strip() or any(character in token for character in "\r\n\x00"):
+        raise ValueError("Streamable HTTP bearer token contains unsafe whitespace")
 
 
 if __name__ == "__main__":

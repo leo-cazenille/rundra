@@ -45,6 +45,7 @@ from rundra.domain.preparation import PreparationRecord
 from rundra.domain.purge import PurgeOutcome
 from rundra.domain.records import RunRecord
 from rundra.domain.states import ExecutionState, RetrievalState
+from rundra.orchestration.progress import ProgressEvent
 from rundra.persistence import JsonRunStore, PurgeReceiptStore, record_from_dict
 from rundra.ports import (
     CapabilityCheck,
@@ -192,19 +193,15 @@ def test_persisted_status_list_and_inspect_share_typed_record_values(
 
 def test_wait_returns_terminal_status_without_fetching(tmp_path: Path) -> None:
     store, run_id = _stored_record(tmp_path)
-    progress_events: list[object] = []
+    progress_events: list[ProgressEvent] = []
 
-    waited = wait_operation(
-        run_id, store, timeout=0, progress=progress_events.append
-    )
+    waited = wait_operation(run_id, store, timeout=0, progress=progress_events.append)
 
     assert waited.ok and isinstance(waited.value, WaitValue)
     assert waited.value.terminal is True
     assert waited.value.timed_out is False
     assert result_document(waited)["wait"]["status"]["state"] == "SUCCEEDED"
-    assert getattr(progress_events[-1], "completed") == getattr(
-        progress_events[-1], "total"
-    )
+    assert progress_events[-1].completed == progress_events[-1].total
 
 
 def test_last_run_selector_resolves_the_newest_registered_run(tmp_path: Path) -> None:
@@ -393,11 +390,9 @@ def test_fetch_is_idempotent_and_preserves_successful_retrieval_state(
 ) -> None:
     store, run_id = _stored_record(tmp_path)
     destination = tmp_path / "retrieved"
-    progress_events: list[object] = []
+    progress_events: list[ProgressEvent] = []
 
-    first = fetch_operation(
-        run_id, store, destination, progress=progress_events.append
-    )
+    first = fetch_operation(run_id, store, destination, progress=progress_events.append)
     second = fetch_operation(run_id, store, destination)
 
     assert first.ok and isinstance(first.value, FetchValue)
@@ -410,9 +405,7 @@ def test_fetch_is_idempotent_and_preserves_successful_retrieval_state(
         store.load(first.value.run_id).run.retrieval_state is RetrievalState.SUCCEEDED
     )
     assert result_document(second)["fetch"]["artifacts"][0]["kind"] == "raw_result"
-    assert getattr(progress_events[-1], "completed") == getattr(
-        progress_events[-1], "total"
-    )
+    assert progress_events[-1].completed == progress_events[-1].total
 
 
 def test_concurrent_fetches_are_idempotent_and_preserve_one_artifact(

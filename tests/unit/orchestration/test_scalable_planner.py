@@ -166,7 +166,7 @@ def test_v5_worker_plan_clamps_slots_for_an_underfilled_worker() -> None:
         1001,
         1000,
         20_000,
-        WorkerPoolPolicy(1, 8, 100, 2, 8, 40),
+        WorkerPoolPolicy(2, 8, 100, 2, 8, 40),
         max_concurrent_jobs=8,
     )
     spec = ExperimentSpec(
