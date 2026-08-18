@@ -1055,6 +1055,11 @@ Task files. `--mode archive` is rejected for unsharded Runs. On a shared target,
 `--extract`, archives remain compact and project analysis may consume their
 indexes and members directly.
 
+Human rendering of large plans, submissions, status responses, and fetch Task
+selections is bounded: it reports totals with head/tail previews and directs the
+caller to `--json` or the paginated `tasks` command for complete detail. Public
+JSON documents retain every schema-defined item and are not compacted.
+
 ---
 
 ### 12.3 Staging current working trees

@@ -176,7 +176,7 @@ def render_human(result: OperationResult[Any]) -> str:
         return rendered
     if isinstance(value, PlanValue):
         plan = value.plan
-        seeds = ", ".join(str(unit.seed) for unit in plan.units)
+        seeds = _human_sequence(tuple(unit.seed for unit in plan.units))
         resources = plan.units[0].resources
         task_count = (
             plan.task_space.task_count
@@ -209,9 +209,11 @@ def render_human(result: OperationResult[Any]) -> str:
                     f"lane_depth={plan.max_lane_depth}"
                 )
         if plan.array_mapping:
-            mapping = ", ".join(
+            mapping = _human_sequence(
+                tuple(
                 f"{item.array_index}={item.task_id}/seed={item.seed}"
                 for item in plan.array_mapping
+                )
             )
             rendered = f"{rendered}\nArray mapping: {mapping}"
         if plan.preparation is not None:
@@ -269,6 +271,7 @@ def render_human(result: OperationResult[Any]) -> str:
             )
         if not value.task_details:
             return summary
+        preview = _bounded_preview(value.task_details)
         details = "\n".join(
             "  "
             f"{task.task_id} seed={task.seed} state={task.state.value} "
@@ -276,8 +279,11 @@ def render_human(result: OperationResult[Any]) -> str:
             f"retrieval={task.retrieval_state.value} "
             f"native={task.native_state or '-'} exit="
             f"{task.exit_code if task.exit_code is not None else '-'}"
-            for task in value.task_details
+            for task in preview
         )
+        omitted = len(value.task_details) - len(preview)
+        if omitted:
+            details += f"\n  ... {omitted} additional Task(s); use --json or tasks"
         return f"{summary}\nTask details:\n{details}"
     if isinstance(value, CancelValue):
         status = value.status
@@ -302,7 +308,7 @@ def render_human(result: OperationResult[Any]) -> str:
             f"--- stderr ---\n{value.stderr}"
         ).rstrip()
     if isinstance(value, FetchValue):
-        selected = ", ".join(str(task_id) for task_id in value.task_ids) or "all"
+        selected = _human_sequence(value.task_ids) if value.task_ids else "all"
         return (
             f"Fetched {len(value.artifacts)} artifact(s) for {value.run_id} "
             f"to {value.destination}\nTasks: {selected}\n"
@@ -550,7 +556,7 @@ def _human_run_dimensions(value: RunValue) -> str:
     return (
         f"Seed: {value.seed}"
         if len(value.seeds) == 1
-        else f"Seeds: {', '.join(str(seed) for seed in value.seeds)}"
+        else f"Seeds: {_human_sequence(value.seeds)}"
     )
 
 
@@ -568,9 +574,29 @@ def _human_parameter_lines(
         entry[1].append(item.seed)
     return "\n".join(
         f"  {identifier} ({_human_choices(choices)}): seeds="
-        f"{','.join(str(seed) for seed in seeds)}"
+        f"{_human_sequence(tuple(seeds), separator=',')}"
         for identifier, (choices, seeds) in grouped.items()
     )
+
+
+def _human_sequence(
+    values: Sequence[object], *, separator: str = ", ", limit: int = 12
+) -> str:
+    normalized = tuple(str(value) for value in values)
+    if len(normalized) <= limit:
+        return separator.join(normalized)
+    shown = (*normalized[:8], *normalized[-2:])
+    return (
+        separator.join((*shown[:8], f"... {len(normalized) - 10} omitted", *shown[8:]))
+        + f" ({len(normalized)} total)"
+    )
+
+
+def _bounded_preview(values: Sequence[TaskStatusValue]) -> tuple[TaskStatusValue, ...]:
+    normalized = tuple(values)
+    if len(normalized) <= 20:
+        return normalized
+    return (*normalized[:12], *normalized[-3:])
 
 
 def _human_choices(choices: Mapping[str, object]) -> str:
