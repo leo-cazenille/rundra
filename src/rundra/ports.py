@@ -481,6 +481,7 @@ class FetchRequest:
     workspace: StagedWorkspace
     patterns: tuple[str, ...]
     destination: PurePath
+    mode: str = "copy"
 
     def __post_init__(self) -> None:
         if type(self.workspace) is not StagedWorkspace:
@@ -499,6 +500,10 @@ class FetchRequest:
             for pattern in patterns
         ):
             raise ValueError("FetchRequest patterns must be safe relative patterns")
+        if self.mode not in {"auto", "copy", "reference", "archive"}:
+            raise ValueError(
+                "FetchRequest mode must be auto, copy, reference, or archive"
+            )
         object.__setattr__(self, "patterns", patterns)
 
 

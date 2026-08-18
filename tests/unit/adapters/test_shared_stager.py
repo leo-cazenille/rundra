@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import pytest
 
@@ -64,3 +65,24 @@ def test_shared_stager_rejects_paths_outside_declared_root(tmp_path: Path) -> No
 
     with pytest.raises(SharedStagerError, match="source root"):
         SharedStager(root).stage(_request(source, root))
+
+
+def test_shared_fetch_auto_writes_constant_size_reference(tmp_path: Path) -> None:
+    root = tmp_path / "shared"
+    source = root / "project"
+    source.mkdir(parents=True)
+    (source / "main.py").write_text("pass\n", encoding="utf-8")
+    stager = SharedStager(root)
+    workspace = stager.stage(_request(source, root))
+    (Path(workspace.outputs) / "result.txt").write_text("large result\n", encoding="utf-8")
+
+    result = stager.fetch(
+        FetchRequest(workspace, ("result.txt",), root / "retrieved", mode="auto")
+    )
+
+    manifest = Path(result.artifacts[0].path)
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    assert document["kind"] == "rundra-shared-reference"
+    assert document["output_root"] == str(workspace.outputs)
+    assert document["patterns"] == ["result.txt"]
+    assert not (root / "retrieved/result.txt").exists()

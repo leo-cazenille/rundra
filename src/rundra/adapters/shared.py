@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import stat
@@ -9,7 +10,7 @@ from dataclasses import replace
 from pathlib import Path, PurePath
 
 from rundra.adapters.local import LocalStager, LocalStagerError
-from rundra.domain.models import BackendConfig
+from rundra.domain.models import Artifact, ArtifactKind, BackendConfig
 from rundra.ports import (
     CapabilityCheck,
     FetchRequest,
@@ -70,19 +71,67 @@ class SharedStager:
     def fetch(self, request: FetchRequest) -> FetchResult:
         if type(request) is not FetchRequest:
             raise TypeError("SharedStager.fetch requires a FetchRequest")
-        self._require_beneath(
+        workspace = self._require_beneath(
             request.workspace.root, name="Run workspace", must_exist=True
         )
         self._require_beneath(
             request.workspace.outputs, name="output directory", must_exist=True
         )
-        self._require_beneath(
+        destination = self._require_beneath(
             request.destination, name="fetch destination", must_exist=False
         )
+        if destination == workspace or destination.is_relative_to(workspace):
+            raise SharedStagerError(
+                "Fetch destination must remain outside the Run workspace"
+            )
+        mode = "reference" if request.mode == "auto" else request.mode
+        if mode == "reference":
+            return self._write_reference(request, destination)
         try:
             return LocalStager().fetch(request)
         except LocalStagerError as error:
             raise SharedStagerError(str(error)) from error
+
+    def _write_reference(
+        self, request: FetchRequest, destination: Path
+    ) -> FetchResult:
+        destination.mkdir(parents=True, exist_ok=True)
+        manifest = destination / "rundra-reference.json"
+        document = {
+            "format_version": 1,
+            "kind": "rundra-shared-reference",
+            "immutable": True,
+            "run_root": str(request.workspace.root),
+            "output_root": str(request.workspace.outputs),
+            "metadata_root": str(request.workspace.metadata),
+            "log_root": str(request.workspace.logs),
+            "patterns": list(request.patterns),
+        }
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=".rundra-reference.tmp-", dir=destination
+        )
+        temporary = Path(temporary_name)
+        try:
+            payload = json.dumps(
+                document, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8") + b"\n"
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.chmod(temporary, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+            os.replace(temporary, manifest)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return FetchResult(
+            (
+                Artifact(
+                    ArtifactKind.REFERENCE_MANIFEST,
+                    manifest,
+                    size_bytes=manifest.stat().st_size,
+                ),
+            )
+        )
 
     def publish_verified_file(
         self,

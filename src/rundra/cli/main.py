@@ -178,6 +178,12 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument("run_id")
     fetch.add_argument("--destination", required=True, type=Path)
     fetch.add_argument(
+        "--mode",
+        choices=("auto", "copy", "reference", "archive"),
+        default="auto",
+        help="retrieval strategy; auto references shared targets and copies others",
+    )
+    fetch.add_argument(
         "--task",
         action="append",
         metavar="TASK_ID_OR_INDEX",
@@ -509,6 +515,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             JsonRunStore(arguments.data_dir),
             arguments.destination,
             tasks=arguments.task,
+            mode=arguments.mode,
         )
     elif arguments.command == "inspect":
         result = inspect_operation(arguments.run_id, JsonRunStore(arguments.data_dir))

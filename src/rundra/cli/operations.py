@@ -2073,11 +2073,30 @@ def fetch_operation(
     *,
     tasks: Sequence[str] | None = None,
     stager: Stager | None = None,
+    mode: str = "auto",
 ) -> OperationResult[FetchValue]:
     record, error = _load_record(run_id, store)
     if error is not None:
         return OperationResult.failure("fetch", error)
     assert record is not None
+    effective_mode = (
+        "reference"
+        if mode == "auto" and record.run.target.staging.kind == "shared"
+        else ("copy" if mode == "auto" else mode)
+    )
+    if effective_mode == "reference" and record.run.state not in {
+        ExecutionState.SUCCEEDED,
+        ExecutionState.FAILED,
+        ExecutionState.CANCELLED,
+    }:
+        return OperationResult.failure(
+            "fetch",
+            OperationError(
+                "RUN_NOT_TERMINAL",
+                "Reference retrieval requires a terminal Run",
+                {"run_id": str(record.run.id), "state": record.run.state.value},
+            ),
+        )
     selected = _selected_task_ids(record, tasks)
     if isinstance(selected, OperationError):
         return OperationResult.failure("fetch", selected)
@@ -2115,6 +2134,7 @@ def fetch_operation(
                 workspace,
                 _selected_fetch_patterns(record, selected),
                 destination,
+                effective_mode,
             )
         )
     except (OSError, RuntimeError, ValueError) as error:
@@ -2354,6 +2374,7 @@ def _selected_fetch_artifacts(
         ArtifactKind.STDOUT,
         ArtifactKind.STDERR,
         ArtifactKind.SCHEDULER_METADATA,
+        ArtifactKind.REFERENCE_MANIFEST,
     }
     selected = set(task_ids)
     result: list[Artifact] = []

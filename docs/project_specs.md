@@ -1027,6 +1027,16 @@ and destinations inside the Run workspace, and atomically replaces each copied
 destination file. Repeating the same fetch is therefore safe and updates an
 existing retrieved file without partially overwriting it.
 
+`rundr fetch` accepts `--mode auto|copy|reference|archive`. Existing local and
+rsync target versions resolve `auto` to `copy`. Version-5 shared targets resolve
+`auto` to `reference`: Rundra writes an atomic read-only
+`rundra-reference.json` in the destination instead of duplicating result data.
+The manifest records the immutable terminal Run's output, metadata, and log
+roots plus selected output patterns. Explicit `--mode copy` retains ordinary
+file materialization. Reference retrieval is rejected until the Run is
+terminal and remains dependent on the configured remote-workspace retention
+policy.
+
 ---
 
 ### 12.3 Staging current working trees
@@ -1555,6 +1565,7 @@ Preparation logs remain separate from scientific Task logs.
 
 ```bash
 rundr fetch <run-id> --destination retrieved
+rundr fetch <run-id> --destination retrieved --mode reference
 rundr fetch <run-id> --destination retrieved --task task_000017
 rundr fetch <run-id> --destination retrieved --task 17 --task 18
 ```
