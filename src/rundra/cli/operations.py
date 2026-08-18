@@ -122,6 +122,7 @@ from rundra.provenance import GitProvenanceCapture
 from rundra.results import OperationError, OperationResult
 
 _DEFAULT_PREPARATION_STORAGE = PreparationStorageConfig()
+LAST_RUN_SELECTOR = "__rundra_last_run__"
 
 
 def _report_progress(
@@ -1789,7 +1790,6 @@ def submit_operation(
             6,
             f"run={result.record.run.id} state={result.record.run.state.value} submission durable",
             result.record.run.id,
-            task_total=task_total,
         )
         return OperationResult.success("submit", RunValue(result.record, launch))
     except ConfigError as error:
@@ -1908,6 +1908,11 @@ def wait_operation(
                 "INVALID_POLL_INTERVAL", "Wait poll interval must be positive"
             ),
         )
+    selected_record, selected_error = _load_record(run_id, store)
+    if selected_error is not None:
+        return OperationResult.failure("wait", selected_error)
+    assert selected_record is not None
+    resolved_run_id = str(selected_record.run.id)
     started = monotonic_clock()
     terminal_states = {
         ExecutionState.SUCCEEDED,
@@ -1916,7 +1921,7 @@ def wait_operation(
     }
     while True:
         status = status_operation(
-            run_id,
+            resolved_run_id,
             store,
             scheduler=scheduler,
             transport=transport,
@@ -2418,7 +2423,7 @@ def fetch_operation(
     effective_destination = destination or _default_fetch_destination(record)
     with store.operation_lock(record.run.id):
         return _fetch_operation_locked(
-            run_id,
+            str(record.run.id),
             store,
             effective_destination,
             tasks=tasks,
@@ -2639,12 +2644,33 @@ def _fetch_operation_locked(
 
 
 def _load_record(
-    value: str,
+    value: object,
     store: RunStore,
 ) -> tuple[RunRecord | None, OperationError | None]:
+    if type(value) is not str:
+        return None, OperationError(
+            "INVALID_RUN_ID",
+            "Run selector must be a Run ID or --last",
+            {"run_id": str(value)},
+        )
+    if value == LAST_RUN_SELECTOR:
+        try:
+            records = store.list()
+        except RunStoreError as error:
+            return None, OperationError("RUN_STORE_ERROR", str(error))
+        if not records:
+            return None, OperationError(
+                "RUN_NOT_FOUND",
+                "No registered Runs are available; submit or run an experiment first",
+                {"selector": "last"},
+            )
+        return max(
+            records,
+            key=lambda record: (record.run.created_at, str(record.run.id)),
+        ), None
     try:
         run_id = RunId(value)
-    except (TypeError, ValueError) as error:
+    except ValueError as error:
         return None, OperationError("INVALID_RUN_ID", str(error), {"run_id": value})
     try:
         return store.load(run_id), None

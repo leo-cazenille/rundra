@@ -150,6 +150,7 @@ def record_from_dict(value: object) -> RunRecord:
     document.setdefault("task_scheduler_ids", {})
     document.setdefault("task_native_states", {})
     document.setdefault("task_retrieval_states", {})
+    document.setdefault("scheduler_metadata", {})
     _exact_fields(
         document,
         _RECORD_FIELDS_V1

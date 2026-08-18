@@ -4,7 +4,11 @@ from collections.abc import Callable
 from importlib import import_module
 from typing import IO, Any, Protocol, cast
 
-from rundra.orchestration.progress import ProgressEvent, ProgressObserver
+from rundra.orchestration.progress import (
+    ProgressEvent,
+    ProgressObserver,
+    ProgressPhase,
+)
 
 
 class ProgressUnavailableError(RuntimeError):
@@ -68,7 +72,11 @@ class CLIProgressReporter:
             else:
                 bar.write(line, file=self._stream)
         if bar is not None:
-            bar.total = max(bar.total or 0.0, float(event.total))
+            bar.total = (
+                float(event.total)
+                if event.phase is ProgressPhase.COMPLETE
+                else max(bar.total or 0.0, float(event.total))
+            )
             bar.set_description_str(f"rundr {event.phase.value}", refresh=False)
             bar.update(max(0.0, float(event.completed) - bar.n))
             bar.set_postfix_str(event.message, refresh=True)

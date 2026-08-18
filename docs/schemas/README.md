@@ -21,7 +21,7 @@ instead. Use the fields, not object-key order or human output, as the interface.
 
 | Operation or document | Checked example | Primary payload |
 |---|---|---|
-| CLI surface | [`cli-surface-v9.json`](cli-surface-v9.json) | current program, commands, positionals, options |
+| CLI surface | [`cli-surface-v10.json`](cli-surface-v10.json) | current program, commands, positionals, options |
 | `validate` | [`validate-success-v1.json`](validate-success-v1.json) | `experiment` |
 | `plan` | [`plan-success-v1.json`](plan-success-v1.json) | `plan`, plus launch resolution |
 | parameterized `plan` | [`plan-success-v3.json`](plan-success-v3.json) | Task parameter sets and effective-config hashes |

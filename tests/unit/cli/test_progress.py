@@ -91,3 +91,26 @@ def test_verbose_without_progress_writes_plain_stderr_lines() -> None:
     reporter.close()
 
     assert stream.getvalue() == "[rundr] prepare: image_action=reuse\n"
+
+
+def test_complete_event_defines_terminal_extent_for_submit() -> None:
+    stream = StringIO()
+    bars: list[FakeBar] = []
+
+    def factory(**options: object) -> FakeBar:
+        bar = FakeBar(**options)
+        bars.append(bar)
+        return bar
+
+    reporter = CLIProgressReporter(
+        verbose=False,
+        progress=True,
+        stream=stream,
+        tqdm_factory=factory,
+    )
+    reporter(ProgressEvent(ProgressPhase.STAGE, 3, 14, "tasks=8"))
+    reporter(ProgressEvent(ProgressPhase.COMPLETE, 6, 6, "state=SUBMITTED"))
+    reporter.close()
+
+    assert bars[0].n == 6
+    assert bars[0].total == 6

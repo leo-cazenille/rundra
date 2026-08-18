@@ -9,6 +9,7 @@ from typing import Any, Never
 from rundra.cli.agent_guide import AgentGuideValue, agent_guide_operation
 from rundra.cli.doctor import DoctorValue, doctor_operation
 from rundra.cli.operations import (
+    LAST_RUN_SELECTOR,
     RunValue,
     cancel_operation,
     fetch_operation,
@@ -152,7 +153,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_json_option(submit)
 
     wait = subparsers.add_parser("wait", help="wait for a submitted Run")
-    wait.add_argument("run_id")
+    _add_run_selector(wait)
     wait.add_argument("--timeout", type=float)
     wait.add_argument("--poll-interval", type=float, default=2.0)
     _add_feedback_arguments(wait)
@@ -160,12 +161,12 @@ def build_parser() -> argparse.ArgumentParser:
     _add_json_option(wait)
 
     status = subparsers.add_parser("status", help="show persisted Run status")
-    status.add_argument("run_id")
+    _add_run_selector(status)
     _add_store_option(status)
     _add_json_option(status)
 
     tasks = subparsers.add_parser("tasks", help="page through compact Run Tasks")
-    tasks.add_argument("run_id")
+    _add_run_selector(tasks)
     tasks.add_argument("--offset", type=int, default=0)
     tasks.add_argument("--limit", type=int, default=100)
     _add_store_option(tasks)
@@ -176,7 +177,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_json_option(list_runs)
 
     logs = subparsers.add_parser("logs", help="read framework-managed Task logs")
-    logs.add_argument("run_id")
+    _add_run_selector(logs)
     log_selection = logs.add_mutually_exclusive_group()
     log_selection.add_argument(
         "--task",
@@ -192,7 +193,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_json_option(logs)
 
     fetch = subparsers.add_parser("fetch", help="retrieve a Run's outputs")
-    fetch.add_argument("run_id")
+    _add_run_selector(fetch)
     fetch.add_argument("--destination", type=Path)
     fetch.add_argument(
         "--mode",
@@ -216,17 +217,17 @@ def build_parser() -> argparse.ArgumentParser:
     _add_json_option(fetch)
 
     inspect = subparsers.add_parser("inspect", help="inspect a persisted Run record")
-    inspect.add_argument("run_id")
+    _add_run_selector(inspect)
     _add_store_option(inspect)
     _add_json_option(inspect)
 
     cancel = subparsers.add_parser("cancel", help="cancel an active Slurm Run")
-    cancel.add_argument("run_id")
+    _add_run_selector(cancel)
     _add_store_option(cancel)
     _add_json_option(cancel)
 
     purge = subparsers.add_parser("purge", help="delete terminal Run data safely")
-    purge.add_argument("run_id")
+    _add_run_selector(purge)
     purge.add_argument(
         "--workspace",
         action="store_true",
@@ -320,6 +321,24 @@ def _add_store_option(
 ) -> None:
     parser.add_argument(
         "--data-dir", type=Path, default=_default_data_dir() if use_default else None
+    )
+
+
+def _add_run_selector(parser: argparse.ArgumentParser) -> None:
+    selector = parser.add_mutually_exclusive_group(required=True)
+    selector.add_argument(
+        "run_id",
+        nargs="?",
+        default=argparse.SUPPRESS,
+        help="stable Run ID",
+    )
+    selector.add_argument(
+        "--last",
+        dest="run_id",
+        action="store_const",
+        const=LAST_RUN_SELECTOR,
+        default=argparse.SUPPRESS,
+        help="use the most recently registered Run",
     )
 
 

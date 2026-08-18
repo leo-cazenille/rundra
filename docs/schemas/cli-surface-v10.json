@@ -1,5 +1,5 @@
 {
-  "format_version": 9,
+  "format_version": 10,
   "program": "rundr",
   "global_options": ["--json"],
   "commands": {
@@ -9,15 +9,15 @@
     "doctor": {"positionals": ["experiment"], "options": ["--connect", "--json", "--profile", "--project-file", "--target", "--targets-file"]},
     "run": {"positionals": ["experiment"], "options": ["--config", "--confirm-tasks", "--data-dir", "--destination", "--json", "--offline", "--prepare-location", "--profile", "--progress", "--project-file", "--random-seed", "--rebuild", "--seed", "--seeds", "--source-root", "--target", "--targets-file", "--verbose"]},
     "submit": {"positionals": ["experiment"], "options": ["--config", "--confirm-tasks", "--data-dir", "--destination", "--json", "--offline", "--prepare-location", "--profile", "--progress", "--project-file", "--random-seed", "--rebuild", "--seed", "--seeds", "--source-root", "--target", "--targets-file", "--verbose"]},
-    "wait": {"positionals": ["run_id"], "options": ["--data-dir", "--json", "--poll-interval", "--progress", "--timeout", "--verbose"]},
-    "status": {"positionals": ["run_id"], "options": ["--data-dir", "--json"]},
-    "tasks": {"positionals": ["run_id"], "options": ["--data-dir", "--json", "--limit", "--offset"]},
+    "wait": {"positionals": ["run_id"], "options": ["--data-dir", "--json", "--last", "--poll-interval", "--progress", "--timeout", "--verbose"]},
+    "status": {"positionals": ["run_id"], "options": ["--data-dir", "--json", "--last"]},
+    "tasks": {"positionals": ["run_id"], "options": ["--data-dir", "--json", "--last", "--limit", "--offset"]},
     "list": {"positionals": [], "options": ["--data-dir", "--json"]},
-    "logs": {"positionals": ["run_id"], "options": ["--data-dir", "--json", "--preparation", "--task"]},
-    "fetch": {"positionals": ["run_id"], "options": ["--data-dir", "--destination", "--extract", "--json", "--mode", "--progress", "--task", "--verbose"]},
-    "inspect": {"positionals": ["run_id"], "options": ["--data-dir", "--json"]},
-    "cancel": {"positionals": ["run_id"], "options": ["--data-dir", "--json"]},
-    "purge": {"positionals": ["run_id"], "options": ["--confirm", "--data-dir", "--dry-run", "--json", "--workspace"]},
+    "logs": {"positionals": ["run_id"], "options": ["--data-dir", "--json", "--last", "--preparation", "--task"]},
+    "fetch": {"positionals": ["run_id"], "options": ["--data-dir", "--destination", "--extract", "--json", "--last", "--mode", "--progress", "--task", "--verbose"]},
+    "inspect": {"positionals": ["run_id"], "options": ["--data-dir", "--json", "--last"]},
+    "cancel": {"positionals": ["run_id"], "options": ["--data-dir", "--json", "--last"]},
+    "purge": {"positionals": ["run_id"], "options": ["--confirm", "--data-dir", "--dry-run", "--json", "--last", "--workspace"]},
     "help": {"positionals": ["topic"], "options": []},
     "agent-guide": {"positionals": [], "options": ["--check", "--json", "--write"]}
   }

@@ -10,6 +10,7 @@ import pytest
 
 import rundra.cli.operations as operations
 from rundra.cli.operations import (
+    LAST_RUN_SELECTOR,
     FetchValue,
     InspectValue,
     ListRunsValue,
@@ -204,6 +205,23 @@ def test_wait_returns_terminal_status_without_fetching(tmp_path: Path) -> None:
     assert getattr(progress_events[-1], "completed") == getattr(
         progress_events[-1], "total"
     )
+
+
+def test_last_run_selector_resolves_the_newest_registered_run(tmp_path: Path) -> None:
+    store, run_id = _stored_record(tmp_path)
+
+    status = status_operation(LAST_RUN_SELECTOR, store)
+
+    assert status.ok and isinstance(status.value, StatusValue)
+    assert str(status.value.run_id) == run_id
+
+
+def test_last_run_selector_reports_an_empty_store(tmp_path: Path) -> None:
+    status = status_operation(LAST_RUN_SELECTOR, JsonRunStore(tmp_path))
+
+    assert not status.ok
+    assert status.error is not None
+    assert status.error.code == "RUN_NOT_FOUND"
 
 
 def test_wait_timeout_is_a_successful_renewable_result(tmp_path: Path) -> None:

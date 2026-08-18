@@ -29,7 +29,8 @@ GUIDE = f"""{START_MARKER}
   the configuration-based default. Use `rundr run` only when keeping the client
   attached is appropriate.
 - Preserve the Run ID and the exact `--data-dir` used at submission. Lifecycle
-  commands must use the same Run store.
+  commands must use the same Run store. `--last` is convenient interactively,
+  but agents should retain explicit Run IDs to avoid selecting concurrent work.
 - Use `--json` or Rundra MCP tools. Never parse scheduler-native output.
 - Run scientific and analysis workloads on the configured execution target or
   an approved workstation, never on a login/controller host.

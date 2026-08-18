@@ -12,7 +12,7 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 | `targets` | none | `--targets-file`, `--json` | Validate and list configured targets. |
 | `doctor` | optional `EXPERIMENT` | `--target`, `--targets-file`, `--project-file`, `--profile`, `--connect`, `--json` | Diagnose static target setup and optionally perform a read-only live SSH probe. |
 | `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--verbose`, `--progress`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
-| `wait` | `RUN_ID` | `--timeout`, `--poll-interval`, `--data-dir`, `--verbose`, `--progress`, `--json` | Reconcile until terminal or a renewable timeout. |
+| `wait` | `RUN_ID` or `--last` | `--timeout`, `--poll-interval`, `--data-dir`, `--verbose`, `--progress`, `--json` | Reconcile until terminal or a renewable timeout. |
 | `agent-guide` | none | `--write PATH`, `--check PATH`, `--json` | Print, install, or check portable agent instructions. |
 | `help` | optional `COMMAND` | none | List commands and the common workflow, or show one command's detailed arguments and options. |
 | `submit` | `EXPERIMENT` | same as `run` | Submit asynchronously when the selected scheduler supports it. |
@@ -23,13 +23,14 @@ human or JSON result on stdout.
 For synchronous arrays the bar total is six lifecycle units plus the number of
 Tasks; scheduler updates show terminal/total, running, queued, failed, and
 allocated-node counts.
-| `status` | `RUN_ID` | `--data-dir`, `--json` | Reconcile scheduler state and return portable Run/Task status. |
-| `tasks` | `RUN_ID` | `--offset`, `--limit`, `--data-dir`, `--json` | Return one bounded page from a compact version-4 TaskSpace sidecar. |
+| `status` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Reconcile scheduler state and return portable Run/Task status. |
+| `tasks` | `RUN_ID` or `--last` | `--offset`, `--limit`, `--data-dir`, `--json` | Return one bounded page from a compact version-4 TaskSpace sidecar. |
 | `list` | none | `--data-dir`, `--json` | List persisted Runs in deterministic order. |
-| `logs` | `RUN_ID` | `--task`, `--data-dir`, `--json` | Read one Task's framework-managed stdout/stderr. |
-| `fetch` | `RUN_ID` | optional `--destination`; repeatable `--task`; `--verbose`, `--progress`, `--data-dir`, `--json` | Idempotently retrieve all or selected Task artifacts. Defaults to `retrieved/<config-stem>` and reports task-scaled retrieval progress when requested. |
-| `inspect` | `RUN_ID` | `--data-dir`, `--json` | Return the complete persisted RunRecord. |
-| `cancel` | `RUN_ID` | `--data-dir`, `--json` | Reconcile and cancel only active scheduler work; repeat safely. |
+| `logs` | `RUN_ID` or `--last` | `--task`, `--data-dir`, `--json` | Read one Task's framework-managed stdout/stderr. |
+| `fetch` | `RUN_ID` or `--last` | optional `--destination`; repeatable `--task`; `--verbose`, `--progress`, `--data-dir`, `--json` | Idempotently retrieve all or selected Task artifacts. Defaults to `retrieved/<config-stem>` and reports task-scaled retrieval progress when requested. |
+| `inspect` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Return the complete persisted RunRecord. |
+| `cancel` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Reconcile and cancel only active scheduler work; repeat safely. |
+| `purge` | `RUN_ID` or `--last` | `--workspace`, `--confirm RUN_ID`, `--dry-run`, `--data-dir`, `--json` | Preview or delete terminal Run outputs and workspaces with explicit confirmation. |
 
 `--seeds START:STOP` is an inclusive integer range. Seed selectors are mutually
 exclusive. If no seed is supplied, launch resolution uses a configured seed or
@@ -37,6 +38,11 @@ generates and persists one; `--random-seed` forces generation even when a fixed
 default exists. `--task` accepts a stable `task_NNNNNN` ID or zero-based
 ordinal. Without a selector, `fetch` addresses all Tasks and `logs` requires a
 single-Task Run.
+
+Lifecycle commands accepting a Run ID also accept `--last`, which resolves once
+to the newest Run in the selected `--data-dir`. Scripts and agents should retain
+explicit stable Run IDs; `--last` is intended for interactive use. `purge --last`
+still requires `--confirm` with the resolved concrete Run ID.
 
 A config with `_rundr: {version: 1}` may define deterministic YAML dimensions
 using `batch_options`, `batch_options_range`, and

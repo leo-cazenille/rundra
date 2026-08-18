@@ -309,6 +309,15 @@ def test_run_record_accepts_pre_m55_version_one_document() -> None:
     assert loaded.task_retrieval_states == {}
 
 
+def test_run_record_accepts_document_without_scheduler_metadata() -> None:
+    document = record_to_dict(_record())
+    del document["scheduler_metadata"]
+
+    loaded = record_from_dict(document)
+
+    assert loaded.scheduler_metadata == {}
+
+
 def test_run_record_rejects_array_mapping_identity_mismatches() -> None:
     record = _record()
     mapping = ArrayTaskMapping(record.run.tasks[0].id, 999, 0)
