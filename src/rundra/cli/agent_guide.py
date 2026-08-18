@@ -22,6 +22,9 @@ GUIDE = f"""{START_MARKER}
   the exact requested `--confirm-tasks N` value only after reviewing the plan.
 - Use `rundr help` to discover available operations and the common workflow.
   Use `rundr help COMMAND` for command-specific arguments and options.
+- See https://pypi.org/project/rundra/ for installation and overview
+  documentation. That page describes the latest release; `rundr version` and
+  the installed `rundr help` output are authoritative for the local version.
 - Treat help output as guidance only. Use `--json` or Rundra MCP tools for
   structured automation; do not parse human-oriented help text.
 - Prefer `rundr submit EXPERIMENT`, then `rundr wait RUN_ID`, then

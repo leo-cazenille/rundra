@@ -19,7 +19,6 @@ jobs:
       - name: Verify release identity
         run: |
           version=$(uv run --no-sync python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
-          test "$version" = "0.1.0"
           if test "${GITHUB_EVENT_NAME}" = "release"; then
             test "${GITHUB_REF_NAME}" = "v${version}"
           fi
@@ -49,6 +48,7 @@ jobs:
         run: |
           uv venv /tmp/rundra-smoke --python 3.12
           uv pip install --python /tmp/rundra-smoke/bin/python dist-first/*.whl
+          /tmp/rundra-smoke/bin/rundr --version
           /tmp/rundra-smoke/bin/rundr help
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -61,6 +61,7 @@ jobs:
 
   testpypi:
     needs: build
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: testpypi
     permissions:
@@ -75,7 +76,7 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
 
   pypi:
-    needs: testpypi
+    needs: build
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     environment: pypi
