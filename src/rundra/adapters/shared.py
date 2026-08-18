@@ -88,6 +88,31 @@ class SharedStager:
         if mode == "reference":
             return self._write_reference(request, destination)
         try:
+            if mode == "archive":
+                fetched = LocalStager().fetch(
+                    replace(request, destination=destination / "output")
+                )
+                task_manifest = Path(request.workspace.metadata) / "tasks.json"
+                metadata_target = destination / "metadata" / "tasks.json"
+                metadata_target.parent.mkdir(parents=True, exist_ok=True)
+                temporary = metadata_target.with_name(
+                    f".{metadata_target.name}.tmp-{os.getpid()}"
+                )
+                try:
+                    shutil.copyfile(task_manifest, temporary)
+                    os.replace(temporary, metadata_target)
+                finally:
+                    temporary.unlink(missing_ok=True)
+                return FetchResult(
+                    (
+                        *fetched.artifacts,
+                        Artifact(
+                            ArtifactKind.SCHEDULER_METADATA,
+                            metadata_target,
+                            size_bytes=metadata_target.stat().st_size,
+                        ),
+                    )
+                )
             return LocalStager().fetch(request)
         except LocalStagerError as error:
             raise SharedStagerError(str(error)) from error

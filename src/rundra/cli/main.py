@@ -184,6 +184,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="retrieval strategy; auto references shared targets and copies others",
     )
     fetch.add_argument(
+        "--extract",
+        action="store_true",
+        help="verify and safely extract fetched result shards",
+    )
+    fetch.add_argument(
         "--task",
         action="append",
         metavar="TASK_ID_OR_INDEX",
@@ -516,6 +521,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             arguments.destination,
             tasks=arguments.task,
             mode=arguments.mode,
+            extract=arguments.extract,
         )
     elif arguments.command == "inspect":
         result = inspect_operation(arguments.run_id, JsonRunStore(arguments.data_dir))

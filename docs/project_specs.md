@@ -1048,6 +1048,13 @@ metadata records the shard root. Fetches select the lane archives rather than
 requesting files that were compacted, reducing a 20,000-Task Run with 320 lanes
 to roughly 640 result files including checksums.
 
+`rundr fetch --extract` verifies each archive checksum and indexed member hash,
+rejects unsafe paths and symlink parents, and atomically publishes only selected
+Task files. `--mode archive` is rejected for unsharded Runs. On a shared target,
+`auto --extract` selects archive materialization instead of a reference. Without
+`--extract`, archives remain compact and project analysis may consume their
+indexes and members directly.
+
 ---
 
 ### 12.3 Staging current working trees

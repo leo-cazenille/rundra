@@ -9,11 +9,34 @@ import csv
 import json
 import math
 import statistics
+import hashlib
+import tarfile
 from collections import defaultdict
+from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 import pyarrow.feather as feather
+
+
+@dataclass(frozen=True)
+class ShardInput:
+    shard: Path
+    member: str
+    size: int
+    sha256: str
+
+
+type ResultInput = Path | ShardInput
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def mean_ci95(values: list[float]) -> tuple[float, float]:
@@ -40,13 +63,26 @@ def coordinate_columns(names: set[str]) -> tuple[str, str]:
     raise RuntimeError(f"No supported position columns: {sorted(names)}")
 
 
-def run_msd(path: Path) -> tuple[dict[float, float], list[str], int]:
-    table = feather.read_table(path)
+def run_msd(source: ResultInput) -> tuple[dict[float, float], list[str], int]:
+    if isinstance(source, Path):
+        table = feather.read_table(source)
+        label = str(source)
+    else:
+        with tarfile.open(source.shard, mode="r:") as archive:
+            member = archive.getmember(source.member)
+            stream = archive.extractfile(member)
+            if stream is None or not member.isfile() or member.size != source.size:
+                raise RuntimeError(f"Invalid shard member {source.member}")
+            content = stream.read()
+        if hashlib.sha256(content).hexdigest() != source.sha256:
+            raise RuntimeError(f"Digest mismatch for shard member {source.member}")
+        table = feather.read_table(BytesIO(content))
+        label = f"{source.shard}:{source.member}"
     names = set(table.column_names)
     x_name, y_name = coordinate_columns(names)
     required = {"time", "robot_id", x_name, y_name}
     if not required <= names:
-        raise RuntimeError(f"Missing columns in {path}: {sorted(required - names)}")
+        raise RuntimeError(f"Missing columns in {label}: {sorted(required - names)}")
     columns = {
         name: table[name].combine_chunks().to_pylist()
         for name in ("time", "robot_id", x_name, y_name)
@@ -79,17 +115,61 @@ def nearest(curve: dict[float, float], target: float) -> tuple[float, float]:
     return time, curve[time]
 
 
-def discovered_runs(root: Path) -> dict[str, list[tuple[int, Path]]]:
-    manifest_path = root / "metadata/tasks.json"
+def _input_roots(root: Path) -> tuple[Path, Path]:
+    reference = root if root.is_file() else root / "rundra-reference.json"
+    if reference.is_file():
+        document = json.loads(reference.read_text(encoding="utf-8"))
+        if document.get("kind") != "rundra-shared-reference":
+            raise RuntimeError(f"Unsupported reference manifest: {reference}")
+        return Path(document["metadata_root"]), Path(document["output_root"])
+    return root / "metadata", root / "output"
+
+
+def _shard_members(shard_root: Path) -> dict[str, ShardInput]:
+    results: dict[str, ShardInput] = {}
+    for shard in sorted(shard_root.glob("*.tar")):
+        checksum = shard.with_suffix(".tar.sha256")
+        fields = checksum.read_text(encoding="ascii").strip().split()
+        if len(fields) != 2 or fields[1] != shard.name:
+            raise RuntimeError(f"Invalid shard checksum: {checksum}")
+        digest = file_sha256(shard)
+        if digest != fields[0]:
+            raise RuntimeError(f"Shard checksum mismatch: {shard}")
+        with tarfile.open(shard, mode="r:") as archive:
+            index = archive.extractfile("index.tsv")
+            if index is None:
+                raise RuntimeError(f"Missing shard index: {shard}")
+            lines = index.read().decode("utf-8").splitlines()
+        for line in lines[1:]:
+            fields = line.split("\t")
+            if len(fields) != 4 or fields[0] != "MEMBER":
+                continue
+            member = fields[1]
+            if member.endswith("/data.feather"):
+                task_id = member.split("/", 1)[0]
+                results[task_id] = ShardInput(
+                    shard, member, int(fields[2]), fields[3]
+                )
+    return results
+
+
+def discovered_runs(root: Path) -> dict[str, list[tuple[int, ResultInput]]]:
+    metadata_root, output_root = _input_roots(root)
+    manifest_path = metadata_root / "tasks.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    conditions: dict[str, list[tuple[int, Path]]] = defaultdict(list)
+    shard_root = output_root / ".rundra-shards"
+    shards = _shard_members(shard_root) if shard_root.is_dir() else {}
+    conditions: dict[str, list[tuple[int, ResultInput]]] = defaultdict(list)
     for task in manifest["tasks"]:
         choices = task["parameter_set"]["choices"]
         regime = choices.get("regime")
         if regime not in {"ballistic", "long_tumble"}:
             continue
         output = root / task["output"] / "data.feather"
-        conditions[regime].append((int(task["seed"]), output))
+        if not output.is_file():
+            output = output_root / task["task_id"] / "data.feather"
+        result: ResultInput = output if output.is_file() else shards[task["task_id"]]
+        conditions[regime].append((int(task["seed"]), result))
     return {
         condition: sorted(items, key=lambda item: item[0])
         for condition, items in conditions.items()
@@ -103,8 +183,8 @@ def analyze(root: Path, destination: Path) -> dict[str, Any]:
     robot_counts: dict[str, list[int]] = {}
     for condition in ("ballistic", "long_tumble"):
         items = discovered.get(condition, [])
-        if len(items) != 20:
-            raise RuntimeError(f"Expected 20 runs for {condition}, found {len(items)}")
+        if not items:
+            raise RuntimeError(f"No runs found for {condition}")
         condition_runs: list[dict[float, float]] = []
         counts: list[int] = []
         for _, path in items:
@@ -118,6 +198,8 @@ def analyze(root: Path, destination: Path) -> dict[str, Any]:
     common_times = sorted(
         set.intersection(*(set(curve) for values in runs.values() for curve in values))
     )
+    if len(runs["ballistic"]) != len(runs["long_tumble"]):
+        raise RuntimeError("Conditions must contain the same number of paired seeds")
     ensemble = {
         condition: {
             time: mean_ci95([curve[time] for curve in condition_runs])
@@ -160,7 +242,10 @@ def analyze(root: Path, destination: Path) -> dict[str, Any]:
         paired_ratios[str(target)] = {"mean": mean, "ci95": ci95}
 
     summary: dict[str, Any] = {
-        "method": "Per-robot squared displacement, averaged within runs and across 20 paired seeds.",
+        "method": (
+            "Per-robot squared displacement, averaged within runs and across "
+            f"{len(runs['ballistic'])} paired seeds."
+        ),
         "schemas": schemas,
         "runs": {condition: len(values) for condition, values in runs.items()},
         "robots_per_run": robot_counts,

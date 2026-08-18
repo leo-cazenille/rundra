@@ -85,6 +85,13 @@ uv run examples/pogosim-shoal/analysis/analyze_msd.py \
 Derived `summary.json` and `curves.csv` files stay outside the immutable raw
 retrieval tree.
 
+For large sharded Runs, `rundr fetch RUN_ID --destination PATH --extract`
+verifies lane archives and materializes selected Task files. The analyzer also
+accepts `PATH/rundra-reference.json` or a retrieval directory containing
+`output/.rundra-shards`; it verifies and reads Feather members directly without
+creating a transient loose-file tree. Its expected paired seed count is inferred
+from `metadata/tasks.json` rather than fixed at 20.
+
 ## Troubleshooting only
 
 Ordinary use does not require a manual checkout, image pull, or compilation.

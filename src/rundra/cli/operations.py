@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+import hashlib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from importlib.metadata import version
@@ -85,6 +86,7 @@ from rundra.orchestration.service import (
     RunExecutionRequest,
     SchedulerLifecycleService,
 )
+from rundra.orchestration.shards import extract_shard, read_shard_index
 from rundra.persistence import (
     RunNotFoundError,
     RunStore,
@@ -2084,16 +2086,30 @@ def fetch_operation(
     tasks: Sequence[str] | None = None,
     stager: Stager | None = None,
     mode: str = "auto",
+    extract: bool = False,
 ) -> OperationResult[FetchValue]:
     record, error = _load_record(run_id, store)
     if error is not None:
         return OperationResult.failure("fetch", error)
     assert record is not None
-    effective_mode = (
-        "reference"
-        if mode == "auto" and record.run.target.staging.kind == "shared"
-        else ("copy" if mode == "auto" else mode)
-    )
+    sharded = record.scheduler_metadata.get("result_shards") is True
+    if mode == "archive" and not sharded:
+        return OperationResult.failure(
+            "fetch",
+            OperationError(
+                "SHARDS_UNAVAILABLE",
+                "Archive retrieval requires a Run with sealed result shards",
+                {"run_id": str(record.run.id)},
+            ),
+        )
+    effective_mode = mode
+    if mode == "auto":
+        if extract and sharded:
+            effective_mode = "archive"
+        elif record.run.target.staging.kind == "shared":
+            effective_mode = "reference"
+        else:
+            effective_mode = "copy"
     if effective_mode == "reference" and record.run.state not in {
         ExecutionState.SUCCEEDED,
         ExecutionState.FAILED,
@@ -2175,6 +2191,11 @@ def fetch_operation(
         )
     try:
         artifacts = _selected_fetch_artifacts(record, selected, fetched.artifacts)
+        if extract and sharded:
+            artifacts = (
+                *artifacts,
+                *_extract_fetched_shards(destination, artifacts, selected),
+            )
     except ValueError as error:
         if transitioning:
             for task_id in transitioning:
@@ -2421,6 +2442,67 @@ def _selected_fetch_artifacts(
             continue
         result.append(artifact)
     return tuple(result)
+
+
+def _extract_fetched_shards(
+    destination: Path,
+    artifacts: tuple[Artifact, ...],
+    selected: tuple[TaskId, ...],
+) -> tuple[Artifact, ...]:
+    shard_paths = tuple(
+        Path(artifact.path)
+        for artifact in artifacts
+        if artifact.kind is ArtifactKind.OUTPUT_SHARD
+        and str(artifact.path).endswith(".tar")
+    )
+    selected_names = {str(task_id): task_id for task_id in selected}
+    covered: set[str] = set()
+    extracted_artifacts: list[Artifact] = []
+    output_root = destination / "output"
+    for shard in shard_paths:
+        _verify_shard_checksum(shard)
+        index = read_shard_index(shard)
+        shard_tasks = tuple(
+            task_id for task_id in selected_names if task_id in index.task_exit_codes
+        )
+        if not shard_tasks:
+            continue
+        for path in extract_shard(shard, output_root, task_ids=shard_tasks):
+            task_id = selected_names[path.relative_to(output_root).parts[0]]
+            extracted_artifacts.append(
+                Artifact(
+                    ArtifactKind.RAW_RESULT,
+                    path,
+                    task_id=task_id,
+                    size_bytes=path.stat().st_size,
+                )
+            )
+        covered.update(shard_tasks)
+    missing = set(selected_names) - covered
+    if missing:
+        raise ValueError(f"Result shards do not contain selected Task {min(missing)}")
+    return tuple(extracted_artifacts)
+
+
+def _verify_shard_checksum(shard: Path) -> None:
+    checksum = shard.with_suffix(f"{shard.suffix}.sha256")
+    try:
+        fields = checksum.read_text(encoding="ascii").strip().split()
+    except OSError as error:
+        raise ValueError(f"Shard checksum is unavailable for {shard.name}") from error
+    if (
+        len(fields) != 2
+        or fields[1] != shard.name
+        or len(fields[0]) != 64
+        or any(value not in "0123456789abcdef" for value in fields[0])
+    ):
+        raise ValueError(f"Shard checksum is invalid for {shard.name}")
+    digest = hashlib.sha256()
+    with shard.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    if digest.hexdigest() != fields[0]:
+        raise ValueError(f"Shard checksum mismatch for {shard.name}")
 
 
 def _artifact_for(
