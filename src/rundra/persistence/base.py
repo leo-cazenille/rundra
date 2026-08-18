@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import AbstractContextManager
 from typing import Protocol, runtime_checkable
 
 from rundra.domain.models import RunId
@@ -22,3 +23,5 @@ class RunStore(Protocol):
     ) -> None: ...
 
     def list(self) -> tuple[RunRecord, ...]: ...
+
+    def operation_lock(self, run_id: RunId) -> AbstractContextManager[None]: ...

@@ -1060,6 +1060,17 @@ selections is bounded: it reports totals with head/tail previews and directs the
 caller to `--json` or the paginated `tasks` command for complete detail. Public
 JSON documents retain every schema-defined item and are not compacted.
 
+`rundr purge` applies retention only to one exact terminal Run derived from its
+persisted target and Run ID. Outputs are the default scope; `--workspace`
+selects the complete per-Run workspace. Mutation requires `--confirm RUN_ID`,
+while `--dry-run` reports existence and resumable tombstones without mutation.
+Local and shared targets delete locally; legacy rsync targets execute one
+tightly scoped SSH controller command. This cleanup is an allowed control-plane
+operation on fishvision, not application computation. A fixed tombstone rename
+precedes recursive deletion, symlinked semantic roots and collisions are
+rejected, and retries resume safely. Separate atomic receipt version 1 records
+attempts without modifying RunRecord v1-v4 documents.
+
 ---
 
 ### 12.3 Staging current working trees

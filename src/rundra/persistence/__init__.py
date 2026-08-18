@@ -9,6 +9,7 @@ from rundra.persistence.errors import (
     RunStoreError,
 )
 from rundra.persistence.json_store import JsonRunStore
+from rundra.persistence.purge_store import PurgeReceiptStore, receipt_document
 from rundra.persistence.serialization import record_from_dict, record_to_dict
 from rundra.persistence.task_store import (
     SqliteTaskStore,
@@ -19,6 +20,7 @@ from rundra.persistence.task_store import (
 
 __all__ = [
     "JsonRunStore",
+    "PurgeReceiptStore",
     "RunAlreadyExistsError",
     "RunNotFoundError",
     "RunRecordFormatError",
@@ -31,4 +33,5 @@ __all__ = [
     "TaskStatePage",
     "record_from_dict",
     "record_to_dict",
+    "receipt_document",
 ]

@@ -15,6 +15,7 @@ from rundra.cli.operations import (
     list_runs_operation,
     logs_operation,
     plan_operation,
+    purge_operation,
     resolve_plan_inputs_operation,
     resolve_run_inputs_operation,
     run_operation,
@@ -30,7 +31,7 @@ from rundra.cli.progress import (
     create_progress_reporter,
 )
 from rundra.cli.render import render_human, render_json
-from rundra.persistence import JsonRunStore, SqliteTaskStore
+from rundra.persistence import JsonRunStore, PurgeReceiptStore, SqliteTaskStore
 from rundra.results import OperationError, OperationResult
 
 _COMMANDS = (
@@ -46,6 +47,7 @@ _COMMANDS = (
     "fetch",
     "inspect",
     "cancel",
+    "purge",
     "doctor",
 )
 
@@ -206,6 +208,18 @@ def build_parser() -> argparse.ArgumentParser:
     cancel.add_argument("run_id")
     _add_store_option(cancel)
     _add_json_option(cancel)
+
+    purge = subparsers.add_parser("purge", help="delete terminal Run data safely")
+    purge.add_argument("run_id")
+    purge.add_argument(
+        "--workspace",
+        action="store_true",
+        help="delete the complete per-Run workspace instead of outputs only",
+    )
+    purge.add_argument("--confirm", metavar="RUN_ID")
+    purge.add_argument("--dry-run", action="store_true")
+    _add_store_option(purge)
+    _add_json_option(purge)
     return parser
 
 
@@ -524,9 +538,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             extract=arguments.extract,
         )
     elif arguments.command == "inspect":
-        result = inspect_operation(arguments.run_id, JsonRunStore(arguments.data_dir))
+        result = inspect_operation(
+            arguments.run_id,
+            JsonRunStore(arguments.data_dir),
+            receipts=PurgeReceiptStore(arguments.data_dir),
+        )
     elif arguments.command == "cancel":
         result = cancel_operation(arguments.run_id, JsonRunStore(arguments.data_dir))
+    elif arguments.command == "purge":
+        result = purge_operation(
+            arguments.run_id,
+            JsonRunStore(arguments.data_dir),
+            PurgeReceiptStore(arguments.data_dir),
+            workspace=arguments.workspace,
+            confirm=arguments.confirm,
+            dry_run=arguments.dry_run,
+        )
     else:
         raise AssertionError(f"Unhandled CLI command: {arguments.command}")
     close_progress_reporter(progress)

@@ -116,6 +116,26 @@ class JsonRunStore:
             records.append(record)
         return tuple(records)
 
+    @contextmanager
+    def operation_lock(self, run_id: RunId) -> Iterator[None]:
+        """Serialize result transfer and destructive retention for one Run."""
+        if type(run_id) is not RunId:
+            raise TypeError("JsonRunStore.operation_lock requires a RunId")
+        self._ensure_root()
+        lock_path = self._root / f".{run_id}.operation.lock"
+        flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_CLOEXEC", 0)
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = os.open(lock_path, flags, 0o600)
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise RunStoreError("Run operation lock is not a regular file")
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
+
     def _ensure_root(self) -> None:
         try:
             self._root.mkdir(parents=True, exist_ok=True)

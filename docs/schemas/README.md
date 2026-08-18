@@ -21,7 +21,7 @@ instead. Use the fields, not object-key order or human output, as the interface.
 
 | Operation or document | Checked example | Primary payload |
 |---|---|---|
-| CLI surface | [`cli-surface-v5.json`](cli-surface-v5.json) | current program, commands, positionals, options |
+| CLI surface | [`cli-surface-v6.json`](cli-surface-v6.json) | current program, commands, positionals, options |
 | `validate` | [`validate-success-v1.json`](validate-success-v1.json) | `experiment` |
 | `plan` | [`plan-success-v1.json`](plan-success-v1.json) | `plan`, plus launch resolution |
 | parameterized `plan` | [`plan-success-v3.json`](plan-success-v3.json) | Task parameter sets and effective-config hashes |
@@ -34,6 +34,7 @@ instead. Use the fields, not object-key order or human output, as the interface.
 | `logs` | [`logs-success-v1.json`](logs-success-v1.json) | one Task's stdout/stderr and paths |
 | `fetch` | [`fetch-success-v1.json`](fetch-success-v1.json) | destination, selected Tasks, artifacts |
 | `cancel` | [`cancel-success-v1.json`](cancel-success-v1.json) | reconciled cancellation status |
+| `purge` | composed and contract-tested | scope, backend, outcome, paths, receipt |
 | `inspect` | composed and contract-tested | `record` equal to the RunRecord below |
 | operation failure | [`error-v1.json`](error-v1.json) | structured `error` |
 | CLI usage failure | [`cli-usage-error-v1.json`](cli-usage-error-v1.json) | `CLI_USAGE_ERROR` |
@@ -76,6 +77,11 @@ uv run rundr plan examples/minimal/experiment.yaml --seed 17 --json \
 operation failures write JSON to stdout, leave stderr empty, and exit 1.
 Successful operations exit 0. Only synchronous `run` uses exit 2 after it has
 successfully returned a durable failed or cancelled experiment result.
+
+The version-6 CLI surface adds `purge`. Purge results use operation format
+version 1 and strict receipt version 1. An inspected Run with purge history uses
+inspect format version 5 and adds a `retention` sibling without changing the
+embedded RunRecord. Inspecting an unpurged Run remains unchanged.
 
 ## RunRecord and lifecycle semantics
 

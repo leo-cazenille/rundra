@@ -16,6 +16,7 @@ from rundra.cli.operations import (
     LogsValue,
     PlanValue,
     PreparationLogsValue,
+    PurgeValue,
     RunValue,
     StatusValue,
     TargetsValue,
@@ -26,7 +27,7 @@ from rundra.cli.operations import (
 from rundra.domain.models import Artifact, Command, ResourceRequest, Target, Task
 from rundra.domain.preparation import PreparationPlan, source_recipe_identity
 from rundra.orchestration.models import ExecutionPlan, ExecutionUnit
-from rundra.persistence import record_to_dict
+from rundra.persistence import receipt_document, record_to_dict
 from rundra.results import OperationResult
 
 _FORMAT_VERSION = 1
@@ -130,6 +131,22 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
         }
     elif isinstance(value, InspectValue):
         document["record"] = record_to_dict(value.record)
+        if value.retention is not None:
+            document["retention"] = receipt_document(value.retention)
+    elif isinstance(value, PurgeValue):
+        document["purge"] = {
+            "run_id": str(value.run_id),
+            "scope": value.scope.value,
+            "dry_run": value.dry_run,
+            "backend": value.result.backend,
+            "path": str(value.result.path),
+            "tombstone": str(value.result.tombstone),
+            "outcome": value.result.outcome.value,
+            "receipt_path": str(value.receipt_path),
+            "receipt": (
+                None if value.receipt is None else receipt_document(value.receipt)
+            ),
+        }
     elif isinstance(value, TasksValue):
         document["tasks"] = {
             "run_id": str(value.run_id),
@@ -316,11 +333,20 @@ def render_human(result: OperationResult[Any]) -> str:
         )
     if isinstance(value, InspectValue):
         record = value.record
-        return (
+        rendered = (
             f"Run: {record.run.id}\nExperiment: {record.run.experiment_name}\n"
             f"State: {record.run.state.value}\n"
             f"Retrieval: {record.run.retrieval_state.value}\n"
             f"Artifacts: {len(record.artifacts)}"
+        )
+        if value.retention is not None:
+            rendered += f"\nPurge attempts: {len(value.retention.attempts)}"
+        return rendered
+    if isinstance(value, PurgeValue):
+        return (
+            f"Run: {value.run_id}\nScope: {value.scope.value}\n"
+            f"Backend: {value.result.backend}\nOutcome: {value.result.outcome.value}\n"
+            f"Path: {value.result.path}\nReceipt: {value.receipt_path}"
         )
     if isinstance(value, TasksValue):
         header = (
@@ -498,7 +524,7 @@ def _result_format_version(value: object) -> int:
     if isinstance(value, RunValue):
         return value.record.format_version
     if isinstance(value, InspectValue):
-        return value.record.format_version
+        return 5 if value.retention is not None else value.record.format_version
     if isinstance(value, StatusValue) and value.preparation is not None:
         return value.format_version
     if isinstance(value, StatusValue):
@@ -515,7 +541,7 @@ def _result_format_version(value: object) -> int:
         return max(run.format_version for run in value.runs)
     if isinstance(value, PreparationLogsValue):
         return value.format_version
-    if isinstance(value, (LogsValue, FetchValue)):
+    if isinstance(value, (LogsValue, FetchValue, PurgeValue)):
         return value.format_version
     if isinstance(value, TasksValue):
         return 4

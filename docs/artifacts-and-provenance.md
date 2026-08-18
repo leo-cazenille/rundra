@@ -156,3 +156,12 @@ Remote Run directories and scheduler logs are not deleted automatically. Use
 the RunRecord to resolve one exact terminal Run, then apply site-approved
 retention or cleanup to only that Run's workspace and log paths. Do not
 recursively delete a configured workspace root.
+
+`rundr purge RUN_ID --confirm RUN_ID` deletes only the terminal Run's
+`output/` directory. `--workspace` instead deletes the exact per-Run workspace.
+Mutation requires exact Run-ID confirmation; `--dry-run` needs no confirmation.
+Deletion first renames data to a framework tombstone and is idempotent and
+resumable. Strict receipts are stored below the local RunStore's `purges/`
+directory. Purge never removes the RunRecord, target caches, previously fetched
+destinations, reference manifests, task-state sidecars, or scheduler logs stored
+outside the Run workspace.

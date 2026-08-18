@@ -829,88 +829,93 @@ class OrchestrationService:
                 run_id=run_id,
             ) from error
 
-        if command_result is not None:
-            try:
-                log_artifacts = _write_task_logs(
-                    workspace,
-                    units[0],
-                    stdout=command_result.stdout,
-                    stderr=command_result.stderr,
-                )
-            except Exception as error:
-                self._record_retrieval_failure(record)
-                raise OrchestrationError(
-                    code="LOG_PERSISTENCE_FAILED",
-                    message=(
-                        f"Run {run_id} completed but logs could not be persisted: {error}"
-                    ),
-                    run_id=run_id,
-                ) from error
-            updated = replace(record, artifacts=(*record.artifacts, *log_artifacts))
-            self.store.update(updated, expected=record)
-            record = updated
-        updated = replace(
-            record,
-            run=replace(record.run, retrieval_state=RetrievalState.PENDING),
-            task_retrieval_states={
-                task.id: RetrievalState.PENDING for task in record.run.tasks
-            },
-        )
-        self.store.update(updated, expected=record)
-        record = updated
-        self._report(
-            ProgressPhase.RETRIEVE,
-            5 + len(units),
-            f"destination={request.fetch_destination}",
-            run_id,
-            len(units),
-        )
-        try:
-            fetched = self._stager.fetch(
-                FetchRequest(
-                    workspace=workspace,
-                    patterns=(
-                        (".rundra-shards/*.tar", ".rundra-shards/*.sha256")
-                        if request.shard_outputs
-                        else _fetch_patterns(request.experiment.outputs, units)
-                    ),
-                    destination=request.fetch_destination,
-                    mode="auto",
-                )
-            )
-            fetched_artifacts = _fetched_task_artifacts(fetched.artifacts, units)
-        except Exception as error:
-            failed = replace(
+        with self.store.operation_lock(run_id):
+            if command_result is not None:
+                try:
+                    log_artifacts = _write_task_logs(
+                        workspace,
+                        units[0],
+                        stdout=command_result.stdout,
+                        stderr=command_result.stderr,
+                    )
+                except Exception as error:
+                    self._record_retrieval_failure(record)
+                    raise OrchestrationError(
+                        code="LOG_PERSISTENCE_FAILED",
+                        message=(
+                            f"Run {run_id} completed but logs could not be persisted: "
+                            f"{error}"
+                        ),
+                        run_id=run_id,
+                    ) from error
+                updated = replace(record, artifacts=(*record.artifacts, *log_artifacts))
+                self.store.update(updated, expected=record)
+                record = updated
+            updated = replace(
                 record,
-                run=replace(record.run, retrieval_state=RetrievalState.FAILED),
+                run=replace(record.run, retrieval_state=RetrievalState.PENDING),
                 task_retrieval_states={
-                    task.id: RetrievalState.FAILED for task in record.run.tasks
+                    task.id: RetrievalState.PENDING for task in record.run.tasks
                 },
             )
-            self.store.update(failed, expected=record)
-            raise OrchestrationError(
-                code="RESULT_RETRIEVAL_FAILED",
-                message=f"Run {run_id} result retrieval failed: {error}",
-                run_id=run_id,
-            ) from error
+            self.store.update(updated, expected=record)
+            record = updated
+            self._report(
+                ProgressPhase.RETRIEVE,
+                5 + len(units),
+                f"destination={request.fetch_destination}",
+                run_id,
+                len(units),
+            )
+            try:
+                fetched = self._stager.fetch(
+                    FetchRequest(
+                        workspace=workspace,
+                        patterns=(
+                            (".rundra-shards/*.tar", ".rundra-shards/*.sha256")
+                            if request.shard_outputs
+                            else _fetch_patterns(request.experiment.outputs, units)
+                        ),
+                        destination=request.fetch_destination,
+                        mode="auto",
+                    )
+                )
+                fetched_artifacts = _fetched_task_artifacts(fetched.artifacts, units)
+            except Exception as error:
+                failed = replace(
+                    record,
+                    run=replace(record.run, retrieval_state=RetrievalState.FAILED),
+                    task_retrieval_states={
+                        task.id: RetrievalState.FAILED for task in record.run.tasks
+                    },
+                )
+                self.store.update(failed, expected=record)
+                raise OrchestrationError(
+                    code="RESULT_RETRIEVAL_FAILED",
+                    message=f"Run {run_id} result retrieval failed: {error}",
+                    run_id=run_id,
+                ) from error
 
-        updated = replace(
-            record,
-            run=replace(record.run, retrieval_state=RetrievalState.SUCCEEDED),
-            task_retrieval_states={
-                task.id: RetrievalState.SUCCEEDED for task in record.run.tasks
-            },
-            artifacts=(*record.artifacts, *fetched_artifacts),
-        )
-        self.store.update(updated, expected=record)
-        self._report(
-            ProgressPhase.RETRIEVE,
-            6 + len(units),
-            f"artifacts={len(fetched_artifacts)} state={updated.run.retrieval_state.value}",
-            run_id,
-            len(units),
-        )
-        return RunExecutionResult(updated, workspace)
+            updated = replace(
+                record,
+                run=replace(record.run, retrieval_state=RetrievalState.SUCCEEDED),
+                task_retrieval_states={
+                    task.id: RetrievalState.SUCCEEDED for task in record.run.tasks
+                },
+                artifacts=(*record.artifacts, *fetched_artifacts),
+            )
+            self.store.update(updated, expected=record)
+            self._report(
+                ProgressPhase.RETRIEVE,
+                6 + len(units),
+                (
+                    f"artifacts={len(fetched_artifacts)} "
+                    f"state={updated.run.retrieval_state.value}"
+                ),
+                run_id,
+                len(units),
+            )
+            return RunExecutionResult(updated, workspace)
 
     def _report(
         self,

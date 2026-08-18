@@ -4,22 +4,26 @@ import hashlib
 import secrets
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path, PurePath
 from types import MappingProxyType
 
 from rundra.adapters import (
     ApptainerRuntime,
+    LocalPurger,
     LocalScheduler,
     LocalStager,
     LocalTransport,
     NativeRuntime,
+    PurgeError,
     RemoteApptainerRuntime,
     RsyncStager,
     RsyncUploadError,
     SharedStager,
     SlurmScheduler,
     SlurmScriptError,
+    SSHPurger,
     SSHTransport,
     validate_slurm_resources,
 )
@@ -52,6 +56,14 @@ from rundra.domain.preparation import (
     PreparationPlan,
     PreparationRecord,
     PreparationStorageConfig,
+)
+from rundra.domain.purge import (
+    PurgeAttempt,
+    PurgeOutcome,
+    PurgeReceipt,
+    PurgeRequest,
+    PurgeResult,
+    PurgeScope,
 )
 from rundra.domain.records import RunRecord
 from rundra.domain.states import (
@@ -88,6 +100,7 @@ from rundra.orchestration.service import (
 )
 from rundra.orchestration.shards import extract_shard, read_shard_index
 from rundra.persistence import (
+    PurgeReceiptStore,
     RunNotFoundError,
     RunStore,
     RunStoreConflictError,
@@ -300,6 +313,18 @@ class ListRunsValue:
 @dataclass(frozen=True, slots=True)
 class InspectValue:
     record: RunRecord
+    retention: PurgeReceipt | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PurgeValue:
+    run_id: RunId
+    scope: PurgeScope
+    dry_run: bool
+    result: PurgeResult
+    receipt: PurgeReceipt | None
+    receipt_path: PurePath
+    format_version: int = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -1893,12 +1918,194 @@ def list_runs_operation(
 def inspect_operation(
     run_id: str,
     store: RunStore,
+    *,
+    receipts: PurgeReceiptStore | None = None,
 ) -> OperationResult[InspectValue]:
     record, error = _load_record(run_id, store)
     if error is not None:
         return OperationResult.failure("inspect", error)
     assert record is not None
-    return OperationResult.success("inspect", InspectValue(record))
+    try:
+        retention = None if receipts is None else receipts.load(record.run.id)
+    except RunStoreError as receipt_error:
+        return OperationResult.failure(
+            "inspect", OperationError("PURGE_RECEIPT_INVALID", str(receipt_error))
+        )
+    return OperationResult.success("inspect", InspectValue(record, retention))
+
+
+def purge_operation(
+    run_id: str,
+    store: RunStore,
+    receipts: PurgeReceiptStore,
+    *,
+    workspace: bool = False,
+    confirm: str | None = None,
+    dry_run: bool = False,
+    purger: LocalPurger | SSHPurger | None = None,
+    scheduler: Scheduler | None = None,
+    transport: Transport | None = None,
+) -> OperationResult[PurgeValue]:
+    record, error = _load_record(run_id, store)
+    if error is not None:
+        return OperationResult.failure("purge", error)
+    assert record is not None
+    if not dry_run and confirm != str(record.run.id):
+        return OperationResult.failure(
+            "purge",
+            OperationError(
+                "PURGE_CONFIRMATION_REQUIRED",
+                "Purge requires --confirm with the exact Run ID",
+                {"run_id": str(record.run.id)},
+            ),
+        )
+    with store.operation_lock(record.run.id):
+        try:
+            record = store.load(record.run.id)
+        except RunStoreError as store_error:
+            return OperationResult.failure(
+                "purge", _run_store_operation_error(store_error, record.run.id)
+            )
+        if (
+            record.run.state
+            not in {
+                ExecutionState.SUCCEEDED,
+                ExecutionState.FAILED,
+                ExecutionState.CANCELLED,
+            }
+            and record.run.target.scheduler.kind == "slurm"
+        ):
+            try:
+                active_scheduler = scheduler or _record_slurm_scheduler(record)
+                record = SchedulerLifecycleService(
+                    store=store,
+                    scheduler=active_scheduler,
+                    transport=transport or _record_ssh_transport(record),
+                ).refresh(record)
+            except (
+                OrchestrationError,
+                RunStoreError,
+                RuntimeError,
+                TypeError,
+                ValueError,
+            ) as refresh_error:
+                return OperationResult.failure(
+                    "purge",
+                    OperationError(
+                        "SCHEDULER_QUERY_FAILED",
+                        f"Run {record.run.id} state refresh failed: {refresh_error}",
+                        {"run_id": str(record.run.id)},
+                    ),
+                )
+        if record.run.state not in {
+            ExecutionState.SUCCEEDED,
+            ExecutionState.FAILED,
+            ExecutionState.CANCELLED,
+        }:
+            return OperationResult.failure(
+                "purge",
+                OperationError(
+                    "RUN_NOT_TERMINAL",
+                    f"Run {record.run.id} must be terminal before purge",
+                    {"run_id": str(record.run.id), "state": record.run.state.value},
+                ),
+            )
+        scope = PurgeScope.WORKSPACE if workspace else PurgeScope.OUTPUTS
+        request = PurgeRequest(
+            record.run.id,
+            _record_workspace(record).root,
+            record.run.target.workspace,
+            scope,
+        )
+        try:
+            active_purger = purger or _record_purger(record)
+            planned = active_purger.purge(request, dry_run=True)
+        except (
+            OSError,
+            PurgeError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as purge_error:
+            return OperationResult.failure(
+                "purge",
+                OperationError(
+                    "PURGE_FAILED",
+                    f"Run {record.run.id} purge validation failed: {purge_error}",
+                    {"run_id": str(record.run.id), "scope": scope.value},
+                ),
+            )
+        if dry_run:
+            try:
+                receipt = receipts.load(record.run.id)
+            except RunStoreError as receipt_error:
+                return OperationResult.failure(
+                    "purge",
+                    OperationError("PURGE_RECEIPT_INVALID", str(receipt_error)),
+                )
+            return OperationResult.success(
+                "purge",
+                PurgeValue(
+                    record.run.id,
+                    scope,
+                    True,
+                    planned,
+                    receipt,
+                    receipts.path(record.run.id),
+                ),
+            )
+        pending = PurgeAttempt(
+            secrets.token_hex(16),
+            datetime.now(UTC),
+            None,
+            scope,
+            planned.backend,
+            planned.path,
+            planned.tombstone,
+            PurgeOutcome.PENDING,
+        )
+        receipt_started = False
+        try:
+            receipts.append(record.run.id, pending)
+            receipt_started = True
+            result = active_purger.purge(request)
+            completed = replace(
+                pending,
+                finished_at=datetime.now(UTC),
+                outcome=result.outcome,
+            )
+            receipt = receipts.replace_last(record.run.id, completed)
+        except (OSError, PurgeError, RunStoreError, RuntimeError) as purge_error:
+            failed = replace(
+                pending,
+                finished_at=datetime.now(UTC),
+                outcome=PurgeOutcome.FAILED,
+                error_code="PURGE_FAILED",
+            )
+            if receipt_started:
+                try:
+                    receipts.replace_last(record.run.id, failed)
+                except RunStoreError:
+                    pass
+            return OperationResult.failure(
+                "purge",
+                OperationError(
+                    "PURGE_FAILED",
+                    f"Run {record.run.id} purge failed: {purge_error}",
+                    {"run_id": str(record.run.id), "scope": scope.value},
+                ),
+            )
+        return OperationResult.success(
+            "purge",
+            PurgeValue(
+                record.run.id,
+                scope,
+                False,
+                result,
+                receipt,
+                receipts.path(record.run.id),
+            ),
+        )
 
 
 def tasks_operation(
@@ -2079,6 +2286,32 @@ def logs_operation(
 
 
 def fetch_operation(
+    run_id: str,
+    store: RunStore,
+    destination: Path,
+    *,
+    tasks: Sequence[str] | None = None,
+    stager: Stager | None = None,
+    mode: str = "auto",
+    extract: bool = False,
+) -> OperationResult[FetchValue]:
+    record, error = _load_record(run_id, store)
+    if error is not None:
+        return OperationResult.failure("fetch", error)
+    assert record is not None
+    with store.operation_lock(record.run.id):
+        return _fetch_operation_locked(
+            run_id,
+            store,
+            destination,
+            tasks=tasks,
+            stager=stager,
+            mode=mode,
+            extract=extract,
+        )
+
+
+def _fetch_operation_locked(
     run_id: str,
     store: RunStore,
     destination: Path,
@@ -2618,6 +2851,16 @@ def _merge_artifacts(
             merged,
             key=lambda item: (item[0].value, str(item[1]), str(item[2])),
         )
+    )
+
+
+def _record_purger(record: RunRecord) -> LocalPurger | SSHPurger:
+    if record.run.target.staging.kind in {"local", "shared"}:
+        return LocalPurger()
+    if record.run.target.transport.kind == "ssh":
+        return SSHPurger(_record_ssh_transport(record))
+    raise ValueError(
+        f"Persisted target {record.run.target.name!r} cannot purge Run data"
     )
 
 

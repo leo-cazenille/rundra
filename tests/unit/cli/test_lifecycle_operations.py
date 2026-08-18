@@ -15,12 +15,14 @@ from rundra.cli.operations import (
     ListRunsValue,
     LogsValue,
     PreparationLogsValue,
+    PurgeValue,
     RunValue,
     StatusValue,
     fetch_operation,
     inspect_operation,
     list_runs_operation,
     logs_operation,
+    purge_operation,
     resolve_plan_inputs_operation,
     resolve_run_inputs_operation,
     run_operation,
@@ -37,9 +39,10 @@ from rundra.domain.models import (
     TaskId,
 )
 from rundra.domain.preparation import PreparationRecord
+from rundra.domain.purge import PurgeOutcome
 from rundra.domain.records import RunRecord
 from rundra.domain.states import ExecutionState, RetrievalState
-from rundra.persistence import JsonRunStore, record_from_dict
+from rundra.persistence import JsonRunStore, PurgeReceiptStore, record_from_dict
 from rundra.ports import (
     CapabilityCheck,
     ContainerRequest,
@@ -182,6 +185,36 @@ def test_persisted_status_list_and_inspect_share_typed_record_values(
     assert result_document(status)["status"]["run_id"] == run_id
     assert result_document(listed)["runs"][0]["state"] == "SUCCEEDED"
     assert result_document(inspected)["record"]["format_version"] == 1
+
+
+def test_purge_outputs_requires_confirmation_and_preserves_record(
+    tmp_path: Path,
+) -> None:
+    store, run_id = _stored_record(tmp_path)
+    receipts = PurgeReceiptStore(tmp_path / "records")
+
+    rejected = purge_operation(run_id, store, receipts)
+    dry_run = purge_operation(run_id, store, receipts, dry_run=True)
+    purged = purge_operation(run_id, store, receipts, confirm=run_id)
+    repeated = purge_operation(run_id, store, receipts, confirm=run_id)
+
+    assert rejected.error is not None
+    assert rejected.error.code == "PURGE_CONFIRMATION_REQUIRED"
+    assert dry_run.ok and isinstance(dry_run.value, PurgeValue)
+    assert dry_run.value.result.outcome is PurgeOutcome.PLANNED
+    assert purged.ok and isinstance(purged.value, PurgeValue)
+    assert purged.value.result.outcome is PurgeOutcome.PURGED
+    assert repeated.ok and isinstance(repeated.value, PurgeValue)
+    assert repeated.value.result.outcome is PurgeOutcome.ALREADY_ABSENT
+    record = store.load(RunId(run_id))
+    run_root = Path(record.run.target.workspace) / "runs" / run_id
+    assert not (run_root / "output").exists()
+    assert (run_root / "logs").exists()
+    inspected = inspect_operation(run_id, store, receipts=receipts)
+    assert inspected.ok and isinstance(inspected.value, InspectValue)
+    assert inspected.value.retention is not None
+    assert len(inspected.value.retention.attempts) == 2
+    assert result_document(inspected)["format_version"] == 5
 
 
 def test_replicated_status_and_run_values_expose_concise_per_task_details(
@@ -345,7 +378,7 @@ def test_concurrent_fetches_are_idempotent_and_preserve_one_artifact(
     )
 
 
-def test_disjoint_concurrent_fetch_conflict_is_retryable_without_lost_state(
+def test_disjoint_concurrent_fetches_are_serialized_without_lost_state(
     tmp_path: Path,
 ) -> None:
     _, run_id = _stored_array_record(tmp_path)
@@ -378,34 +411,12 @@ def test_disjoint_concurrent_fetch_conflict_is_retryable_without_lost_state(
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = tuple(executor.map(fetch, selections))
 
-    assert sum(result.ok for result in results) == 1
-    conflict_index = next(
-        index for index, result in enumerate(results) if not result.ok
-    )
-    conflict = results[conflict_index]
-    assert conflict.error is not None
-    assert conflict.error.code == "RUN_STORE_CONFLICT"
+    assert all(result.ok for result in results)
     persisted = JsonRunStore(store_path).list()[0]
     assert (
         tuple(persisted.task_retrieval_states.values()).count(RetrievalState.SUCCEEDED)
-        == 1
+        == 2
     )
-    assert (
-        tuple(persisted.task_retrieval_states.values()).count(
-            RetrievalState.NOT_REQUESTED
-        )
-        == 1
-    )
-
-    retried = fetch_operation(
-        run_id,
-        JsonRunStore(store_path),
-        tmp_path / "retrieved",
-        tasks=(selections[conflict_index],),
-        stager=RecordingFetchStager(),
-    )
-
-    assert retried.ok
     completed = JsonRunStore(store_path).list()[0]
     assert completed.run.retrieval_state is RetrievalState.SUCCEEDED
     assert set(completed.task_retrieval_states.values()) == {RetrievalState.SUCCEEDED}

@@ -1,5 +1,5 @@
 {
-  "format_version": 5,
+  "format_version": 6,
   "program": "rundr",
   "global_options": ["--json"],
   "commands": {
@@ -15,6 +15,7 @@
     "logs": {"positionals": ["run_id"], "options": ["--data-dir", "--json", "--preparation", "--task"]},
     "fetch": {"positionals": ["run_id"], "options": ["--data-dir", "--destination", "--extract", "--json", "--mode", "--task"]},
     "inspect": {"positionals": ["run_id"], "options": ["--data-dir", "--json"]},
-    "cancel": {"positionals": ["run_id"], "options": ["--data-dir", "--json"]}
+    "cancel": {"positionals": ["run_id"], "options": ["--data-dir", "--json"]},
+    "purge": {"positionals": ["run_id"], "options": ["--confirm", "--data-dir", "--dry-run", "--json", "--workspace"]}
   }
 }
