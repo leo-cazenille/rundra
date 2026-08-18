@@ -13,8 +13,12 @@ dependencies = [
     "tqdm>=4.67,<5",
 ]
 
+[project.optional-dependencies]
+mcp = ["mcp>=2,<3"]
+
 [project.scripts]
 rundr = "rundra.cli.main:main"
+rundr-mcp = "rundra.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rundra"]
@@ -22,6 +26,7 @@ packages = ["src/rundra"]
 [dependency-groups]
 dev = [
   "mypy>=1.14",
+  "mcp>=2,<3",
   "pytest>=8.3",
   "ruff>=0.9",
   "types-pyyaml>=6.0.12",

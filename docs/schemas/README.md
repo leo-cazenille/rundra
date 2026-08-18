@@ -21,7 +21,7 @@ instead. Use the fields, not object-key order or human output, as the interface.
 
 | Operation or document | Checked example | Primary payload |
 |---|---|---|
-| CLI surface | [`cli-surface-v6.json`](cli-surface-v6.json) | current program, commands, positionals, options |
+| CLI surface | [`cli-surface-v7.json`](cli-surface-v7.json) | current program, commands, positionals, options |
 | `validate` | [`validate-success-v1.json`](validate-success-v1.json) | `experiment` |
 | `plan` | [`plan-success-v1.json`](plan-success-v1.json) | `plan`, plus launch resolution |
 | parameterized `plan` | [`plan-success-v3.json`](plan-success-v3.json) | Task parameter sets and effective-config hashes |
@@ -29,12 +29,14 @@ instead. Use the fields, not object-key order or human output, as the interface.
 | `run` | [`run-success-v1.json`](run-success-v1.json) | terminal `run`, plus launch resolution |
 | `submit` | [`submit-success-v1.json`](submit-success-v1.json) | submitted `run` |
 | `status` | [`status-success-v1.json`](status-success-v1.json) | aggregate and Task status |
+| `wait` | composed and contract-tested | status, terminal/timeout flags, elapsed duration |
 | `tasks` | composed and contract-tested | bounded v4 Task-state page |
 | `list` | [`list-success-v1.json`](list-success-v1.json) | ordered `runs` summaries |
 | `logs` | [`logs-success-v1.json`](logs-success-v1.json) | one Task's stdout/stderr and paths |
 | `fetch` | [`fetch-success-v1.json`](fetch-success-v1.json) | destination, selected Tasks, artifacts |
 | `cancel` | [`cancel-success-v1.json`](cancel-success-v1.json) | reconciled cancellation status |
 | `purge` | composed and contract-tested | scope, backend, outcome, paths, receipt |
+| `agent-guide` | composed and contract-tested | action, path, canonical Markdown content |
 | `inspect` | composed and contract-tested | `record` equal to the RunRecord below |
 | operation failure | [`error-v1.json`](error-v1.json) | structured `error` |
 | CLI usage failure | [`cli-usage-error-v1.json`](cli-usage-error-v1.json) | `CLI_USAGE_ERROR` |

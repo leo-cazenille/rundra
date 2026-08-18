@@ -18,6 +18,7 @@ from rundra.cli.operations import (
     PurgeValue,
     RunValue,
     StatusValue,
+    WaitValue,
     fetch_operation,
     inspect_operation,
     list_runs_operation,
@@ -27,6 +28,7 @@ from rundra.cli.operations import (
     resolve_run_inputs_operation,
     run_operation,
     status_operation,
+    wait_operation,
 )
 from rundra.cli.render import result_document
 from rundra.domain.mappings import ArrayTaskMapping
@@ -185,6 +187,42 @@ def test_persisted_status_list_and_inspect_share_typed_record_values(
     assert result_document(status)["status"]["run_id"] == run_id
     assert result_document(listed)["runs"][0]["state"] == "SUCCEEDED"
     assert result_document(inspected)["record"]["format_version"] == 1
+
+
+def test_wait_returns_terminal_status_without_fetching(tmp_path: Path) -> None:
+    store, run_id = _stored_record(tmp_path)
+
+    waited = wait_operation(run_id, store, timeout=0)
+
+    assert waited.ok and isinstance(waited.value, WaitValue)
+    assert waited.value.terminal is True
+    assert waited.value.timed_out is False
+    assert result_document(waited)["wait"]["status"]["state"] == "SUCCEEDED"
+
+
+def test_wait_timeout_is_a_successful_renewable_result(tmp_path: Path) -> None:
+    source, run_id = _stored_record(tmp_path / "source")
+    original = source.load(RunId(run_id))
+    task = replace(original.run.tasks[0], state=ExecutionState.RUNNING)
+    active = replace(
+        original,
+        run=replace(
+            original.run,
+            tasks=(task,),
+            state=ExecutionState.RUNNING,
+            retrieval_state=RetrievalState.NOT_REQUESTED,
+        ),
+        completed_at=None,
+        task_retrieval_states={task.id: RetrievalState.NOT_REQUESTED},
+    )
+    store = JsonRunStore(tmp_path / "active")
+    store.create(active)
+
+    waited = wait_operation(run_id, store, timeout=0)
+
+    assert waited.ok and isinstance(waited.value, WaitValue)
+    assert waited.value.terminal is False
+    assert waited.value.timed_out is True
 
 
 def test_purge_outputs_requires_confirmation_and_preserves_record(

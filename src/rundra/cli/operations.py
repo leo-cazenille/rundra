@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path, PurePath
+from time import monotonic, sleep
 from types import MappingProxyType
 
 from rundra.adapters import (
@@ -79,6 +80,7 @@ from rundra.orchestration.planner import (
     create_scalable_plan,
     create_sweep_plan,
     expand_seeds,
+    validate_task_confirmation,
 )
 from rundra.orchestration.preparation import (
     PreparationError,
@@ -256,6 +258,8 @@ class StatusValue:
     task_details: tuple[TaskStatusValue, ...] = ()
     preparation: PreparationStatusValue | None = None
     format_version: int = 1
+    worker_count: int | None = None
+    task_slots_per_worker: int | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -294,6 +298,28 @@ class StatusValue:
             )
         if self.format_version not in {1, 2, 3, 4}:
             raise ValueError("StatusValue format_version is unsupported")
+        for name in ("worker_count", "task_slots_per_worker"):
+            item = getattr(self, name)
+            if item is not None and (type(item) is not int or item < 1):
+                raise ValueError(f"StatusValue {name} must be positive or None")
+
+
+@dataclass(frozen=True, slots=True)
+class WaitValue:
+    status: StatusValue
+    terminal: bool
+    timed_out: bool
+    elapsed_seconds: float
+
+    def __post_init__(self) -> None:
+        if type(self.status) is not StatusValue:
+            raise TypeError("WaitValue status must be a StatusValue")
+        if type(self.terminal) is not bool or type(self.timed_out) is not bool:
+            raise TypeError("WaitValue flags must be booleans")
+        if self.terminal and self.timed_out:
+            raise ValueError("A terminal wait cannot be timed out")
+        if type(self.elapsed_seconds) is not float or self.elapsed_seconds < 0:
+            raise ValueError("WaitValue elapsed_seconds must be non-negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1274,6 +1300,7 @@ def run_operation(
     preparation_storage: PreparationStorageConfig = _DEFAULT_PREPARATION_STORAGE,
     progress: ProgressObserver | None = None,
     sweep: SweepExpansion | None = None,
+    confirm_tasks: int | None = None,
 ) -> OperationResult[RunValue]:
     try:
         _report_progress(
@@ -1299,6 +1326,12 @@ def run_operation(
                 ),
             )
         target = targets[target_name]
+        if target_name in targets_config.execution:
+            validate_task_confirmation(
+                task_total,
+                targets_config.execution[target_name],
+                confirm_tasks,
+            )
         _report_progress(
             progress,
             ProgressPhase.RESOLVE,
@@ -1550,6 +1583,7 @@ def submit_operation(
     preparation_storage: PreparationStorageConfig = _DEFAULT_PREPARATION_STORAGE,
     progress: ProgressObserver | None = None,
     sweep: SweepExpansion | None = None,
+    confirm_tasks: int | None = None,
 ) -> OperationResult[RunValue]:
     try:
         _report_progress(
@@ -1575,6 +1609,12 @@ def submit_operation(
                 ),
             )
         target = targets[target_name]
+        if target_name in targets_config.execution:
+            validate_task_confirmation(
+                task_total,
+                targets_config.execution[target_name],
+                confirm_tasks,
+            )
         _report_progress(
             progress,
             ProgressPhase.RESOLVE,
@@ -1845,6 +1885,85 @@ def status_operation(
             "status", _run_store_operation_error(store_error, record.run.id)
         )
     return OperationResult.success("status", _status_value(record, counts))
+
+
+def wait_operation(
+    run_id: str,
+    store: RunStore,
+    *,
+    timeout: float | None = None,
+    poll_interval: float = 2.0,
+    scheduler: Scheduler | None = None,
+    transport: Transport | None = None,
+    task_store: SqliteTaskStore | None = None,
+    progress: ProgressObserver | None = None,
+    sleeper: Callable[[float], None] = sleep,
+    monotonic_clock: Callable[[], float] = monotonic,
+) -> OperationResult[WaitValue]:
+    if timeout is not None and (type(timeout) not in (int, float) or timeout < 0):
+        return OperationResult.failure(
+            "wait",
+            OperationError("INVALID_TIMEOUT", "Wait timeout must be non-negative"),
+        )
+    if type(poll_interval) not in (int, float) or poll_interval <= 0:
+        return OperationResult.failure(
+            "wait",
+            OperationError(
+                "INVALID_POLL_INTERVAL", "Wait poll interval must be positive"
+            ),
+        )
+    started = monotonic_clock()
+    terminal_states = {
+        ExecutionState.SUCCEEDED,
+        ExecutionState.FAILED,
+        ExecutionState.CANCELLED,
+    }
+    while True:
+        status = status_operation(
+            run_id,
+            store,
+            scheduler=scheduler,
+            transport=transport,
+            task_store=task_store,
+        )
+        if not status.ok:
+            assert status.error is not None
+            if status.error.code == "RUN_STORE_CONFLICT":
+                continue
+            return OperationResult.failure("wait", status.error)
+        assert status.value is not None
+        value = status.value
+        elapsed = max(0.0, monotonic_clock() - started)
+        terminal = value.state in terminal_states
+        total = sum(value.task_counts.values())
+        complete = sum(
+            value.task_counts.get(state.value, 0)
+            for state in (
+                ExecutionState.SUCCEEDED,
+                ExecutionState.FAILED,
+                ExecutionState.CANCELLED,
+            )
+        )
+        _report_progress(
+            progress,
+            ProgressPhase.WAIT,
+            min(5 + complete, 5 + total),
+            f"run={value.state.value} terminal={terminal}",
+            value.run_id,
+            task_total=total,
+        )
+        if terminal:
+            return OperationResult.success(
+                "wait", WaitValue(value, True, False, float(elapsed))
+            )
+        if timeout is not None and elapsed >= float(timeout):
+            return OperationResult.success(
+                "wait", WaitValue(value, False, True, float(elapsed))
+            )
+        delay = float(poll_interval)
+        if timeout is not None:
+            delay = min(delay, max(0.0, float(timeout) - elapsed))
+        sleeper(delay)
 
 
 def cancel_operation(
@@ -2557,6 +2676,18 @@ def _status_value(
             )
         ),
         format_version=record.format_version,
+        worker_count=(
+            int(record.scheduler_metadata["max_workers"])
+            if type(record.scheduler_metadata.get("max_workers")) is int
+            and int(record.scheduler_metadata["max_workers"]) > 0
+            else None
+        ),
+        task_slots_per_worker=(
+            int(record.scheduler_metadata["task_slots_per_worker"])
+            if type(record.scheduler_metadata.get("task_slots_per_worker")) is int
+            and int(record.scheduler_metadata["task_slots_per_worker"]) > 0
+            else None
+        ),
     )
 
 

@@ -103,6 +103,8 @@ User documentation:
 - [local and remote execution, lifecycle commands, and troubleshooting](docs/usage.md);
 - [artifact, provenance, and reproducibility semantics](docs/artifacts-and-provenance.md);
 - [versioned JSON contracts for agents](docs/schemas/README.md);
+- [portable agent instructions](docs/agent-instructions.md);
+- [task-oriented tutorials](docs/tutorials/01-local-first-run.md);
 - [interface stability and internal Python API policy](docs/stability.md);
 - [v0.1 release checklist](docs/release-checklist.md);
 - [Shoal setup and explicitly opted-in system tests](docs/shoal.md).

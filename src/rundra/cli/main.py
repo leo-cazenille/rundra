@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Never
 
+from rundra.cli.agent_guide import AgentGuideValue, agent_guide_operation
 from rundra.cli.doctor import DoctorValue, doctor_operation
 from rundra.cli.operations import (
     RunValue,
@@ -24,6 +25,7 @@ from rundra.cli.operations import (
     targets_operation,
     tasks_operation,
     validate_operation,
+    wait_operation,
 )
 from rundra.cli.progress import (
     ProgressUnavailableError,
@@ -40,6 +42,7 @@ _COMMANDS = (
     "targets",
     "run",
     "submit",
+    "wait",
     "status",
     "tasks",
     "list",
@@ -49,6 +52,7 @@ _COMMANDS = (
     "cancel",
     "purge",
     "doctor",
+    "agent-guide",
 )
 
 
@@ -126,6 +130,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--destination", type=Path)
     run.add_argument("--project-file", type=Path)
     run.add_argument("--profile")
+    run.add_argument("--confirm-tasks", type=int)
     _add_preparation_arguments(run)
     _add_feedback_arguments(run)
     _add_store_option(run, use_default=False)
@@ -139,10 +144,19 @@ def build_parser() -> argparse.ArgumentParser:
     submit.add_argument("--destination", type=Path)
     submit.add_argument("--project-file", type=Path)
     submit.add_argument("--profile")
+    submit.add_argument("--confirm-tasks", type=int)
     _add_preparation_arguments(submit)
     _add_feedback_arguments(submit)
     _add_store_option(submit, use_default=False)
     _add_json_option(submit)
+
+    wait = subparsers.add_parser("wait", help="wait for a submitted Run")
+    wait.add_argument("run_id")
+    wait.add_argument("--timeout", type=float)
+    wait.add_argument("--poll-interval", type=float, default=2.0)
+    _add_feedback_arguments(wait)
+    _add_store_option(wait)
+    _add_json_option(wait)
 
     status = subparsers.add_parser("status", help="show persisted Run status")
     status.add_argument("run_id")
@@ -220,6 +234,14 @@ def build_parser() -> argparse.ArgumentParser:
     purge.add_argument("--dry-run", action="store_true")
     _add_store_option(purge)
     _add_json_option(purge)
+
+    agent_guide = subparsers.add_parser(
+        "agent-guide", help="print, install, or check agent instructions"
+    )
+    guide_action = agent_guide.add_mutually_exclusive_group()
+    guide_action.add_argument("--write", type=Path, metavar="PATH")
+    guide_action.add_argument("--check", type=Path, metavar="PATH")
+    _add_json_option(agent_guide)
     return parser
 
 
@@ -461,6 +483,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 preparation_storage=run_inputs.preparation_storage,
                 progress=progress,
                 sweep=run_inputs.sweep,
+                confirm_tasks=arguments.confirm_tasks,
             )
     elif arguments.command == "submit":
         resolved = resolve_run_inputs_operation(
@@ -501,7 +524,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 preparation_storage=submit_inputs.preparation_storage,
                 progress=progress,
                 sweep=submit_inputs.sweep,
+                confirm_tasks=arguments.confirm_tasks,
             )
+    elif arguments.command == "wait":
+        result = wait_operation(
+            arguments.run_id,
+            JsonRunStore(arguments.data_dir),
+            timeout=arguments.timeout,
+            poll_interval=arguments.poll_interval,
+            task_store=SqliteTaskStore(arguments.data_dir),
+            progress=progress,
+        )
     elif arguments.command == "status":
         result = status_operation(
             arguments.run_id,
@@ -554,6 +587,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             confirm=arguments.confirm,
             dry_run=arguments.dry_run,
         )
+    elif arguments.command == "agent-guide":
+        result = agent_guide_operation(write=arguments.write, check=arguments.check)
     else:
         raise AssertionError(f"Unhandled CLI command: {arguments.command}")
     close_progress_reporter(progress)
@@ -565,6 +600,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if isinstance(result.value, RunValue):
         return result.value.exit_code
     if isinstance(result.value, DoctorValue) and not result.value.ready:
+        return 1
+    if isinstance(result.value, AgentGuideValue) and result.value.action == "outdated":
         return 1
     return 0
 

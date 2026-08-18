@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import shlex
 from collections.abc import Mapping, Sequence
 from datetime import timedelta
 from hashlib import sha256
 from typing import Any
 
+from rundra.cli.agent_guide import AgentGuideValue
 from rundra.cli.doctor import DoctorValue
 from rundra.cli.operations import (
     CancelValue,
@@ -23,9 +25,11 @@ from rundra.cli.operations import (
     TaskStatusValue,
     TasksValue,
     ValidationValue,
+    WaitValue,
 )
 from rundra.domain.models import Artifact, Command, ResourceRequest, Target, Task
 from rundra.domain.preparation import PreparationPlan, source_recipe_identity
+from rundra.domain.states import ExecutionState, RetrievalState
 from rundra.orchestration.models import ExecutionPlan, ExecutionUnit
 from rundra.persistence import receipt_document, record_to_dict
 from rundra.results import OperationResult
@@ -99,6 +103,14 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
             document["launch"] = _launch_document(value.launch)
     elif isinstance(value, StatusValue):
         document["status"] = _status_document(value)
+    elif isinstance(value, WaitValue):
+        document["wait"] = {
+            "run_id": str(value.status.run_id),
+            "terminal": value.terminal,
+            "timed_out": value.timed_out,
+            "elapsed_seconds": value.elapsed_seconds,
+            "status": _status_document(value.status),
+        }
     elif isinstance(value, CancelValue):
         document["cancel"] = _status_document(value.status)
     elif isinstance(value, ListRunsValue):
@@ -171,6 +183,12 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
                 for item in value.tasks
             ],
         }
+    elif isinstance(value, AgentGuideValue):
+        document["agent_guide"] = {
+            "action": value.action,
+            "path": None if value.path is None else str(value.path),
+            "content": value.content,
+        }
     else:
         raise TypeError(f"No public renderer for {type(value).__name__}")
     return document
@@ -181,7 +199,9 @@ def render_human(result: OperationResult[Any]) -> str:
     if result.error is not None:
         location = result.error.details.get("source")
         prefix = f"{location}: " if location else ""
-        return f"Error [{result.error.code}]: {prefix}{result.error.message}"
+        rendered = f"Error [{result.error.code}]: {prefix}{result.error.message}"
+        hint = _error_hint(result.error.code, result.error.details)
+        return rendered if hint is None else f"{rendered}\nNext: {hint}"
     value = result.value
     if isinstance(value, ValidationValue):
         rendered = (
@@ -225,6 +245,18 @@ def render_human(result: OperationResult[Any]) -> str:
                     f"task_capacity={plan.concurrent_task_capacity}, "
                     f"lane_depth={plan.max_lane_depth}"
                 )
+                slots = plan.task_slots_per_worker or 1
+                worker_memory = (
+                    "unset"
+                    if resources.memory_bytes is None
+                    else str(resources.memory_bytes * slots)
+                )
+                rendered += (
+                    "\nWorker allocation: "
+                    f"cpus={resources.cpus_per_task * slots}, "
+                    f"memory_bytes={worker_memory}, "
+                    f"sequential_tasks_per_slot={plan.max_lane_depth}"
+                )
         if plan.array_mapping:
             mapping = _human_sequence(
                 tuple(
@@ -267,6 +299,17 @@ def render_human(result: OperationResult[Any]) -> str:
             f"Retrieval: {value.record.run.retrieval_state.value}\n"
             f"Target: {value.record.run.target.name}"
         )
+        if value.record.run.state not in {
+            ExecutionState.SUCCEEDED,
+            ExecutionState.FAILED,
+            ExecutionState.CANCELLED,
+        }:
+            rendered += f"\nNext: {_lifecycle_command('wait', value)}"
+        elif value.record.run.retrieval_state is not RetrievalState.SUCCEEDED:
+            rendered += (
+                f"\nNext: rundr fetch {shlex.quote(str(value.run_id))} "
+                "--destination PATH"
+            )
         return _with_launch(rendered, value.launch)
     if isinstance(value, StatusValue):
         counts = ", ".join(
@@ -286,6 +329,13 @@ def render_human(result: OperationResult[Any]) -> str:
                 f"job={preparation_status.scheduler_id or '-'} "
                 f"location={preparation_status.location}"
             )
+        if value.worker_count is not None and value.task_slots_per_worker is not None:
+            summary += (
+                f"\nWorker pool: workers={value.worker_count}, "
+                f"slots_per_worker={value.task_slots_per_worker}, "
+                "concurrent_capacity="
+                f"{value.worker_count * value.task_slots_per_worker}"
+            )
         if not value.task_details:
             return summary
         preview = _bounded_preview(value.task_details)
@@ -302,6 +352,21 @@ def render_human(result: OperationResult[Any]) -> str:
         if omitted:
             details += f"\n  ... {omitted} additional Task(s); use --json or tasks"
         return f"{summary}\nTask details:\n{details}"
+    if isinstance(value, WaitValue):
+        status = value.status
+        rendered = (
+            f"Run: {status.run_id}\nState: {status.state.value}\n"
+            f"Terminal: {'yes' if value.terminal else 'no'}\n"
+            f"Waited: {value.elapsed_seconds:.1f}s"
+        )
+        if value.timed_out:
+            rendered += f"\nNext: rundr wait {shlex.quote(str(status.run_id))}"
+        elif status.retrieval_state is not RetrievalState.SUCCEEDED:
+            rendered += (
+                f"\nNext: rundr fetch {shlex.quote(str(status.run_id))} "
+                "--destination PATH"
+            )
+        return rendered
     if isinstance(value, CancelValue):
         status = value.status
         return f"Run: {status.run_id}\nState after cancellation: {status.state.value}"
@@ -361,6 +426,10 @@ def render_human(result: OperationResult[Any]) -> str:
             for item in value.tasks
         )
         return header if not details else f"{header}\n{details}"
+    if isinstance(value, AgentGuideValue):
+        if value.action == "printed":
+            return value.content.rstrip("\n")
+        return f"Agent guide {value.action}: {value.path}"
     raise TypeError(f"No human renderer for {type(value).__name__}")
 
 
@@ -529,6 +598,8 @@ def _result_format_version(value: object) -> int:
         return value.format_version
     if isinstance(value, StatusValue):
         return value.format_version
+    if isinstance(value, WaitValue):
+        return value.status.format_version
     if isinstance(value, CancelValue) and value.status.preparation is not None:
         return value.status.format_version
     if isinstance(value, CancelValue):
@@ -552,6 +623,37 @@ def _result_format_version(value: object) -> int:
     ):
         return 2
     return _FORMAT_VERSION
+
+
+def _error_hint(code: str, details: Mapping[str, object]) -> str | None:
+    run_id = details.get("run_id")
+    hints = {
+        "CONFIG_NOT_FOUND": "check the reported path, then run rundr validate EXPERIMENT",
+        "CAPABILITY_CHECK_FAILED": "run rundr doctor EXPERIMENT --connect",
+        "SCHEDULER_SUBMISSION_FAILED": "review rundr plan output and target resource limits",
+        "SCHEDULER_QUERY_FAILED": (
+            f"retry rundr status {run_id}" if run_id is not None else "retry status"
+        ),
+        "RESULT_RETRIEVAL_FAILED": (
+            f"retry rundr fetch {run_id} --destination PATH"
+            if run_id is not None
+            else "retry fetch with an explicit destination"
+        ),
+        "RUN_STORE_CONFLICT": "retry the same lifecycle command",
+        "TASK_CONFIRMATION_REQUIRED": (
+            f"review the plan, then pass --confirm-tasks {details.get('task_count')}"
+        ),
+    }
+    return hints.get(code)
+
+
+def _lifecycle_command(command: str, value: RunValue) -> str:
+    argv = ["rundr", command, str(value.run_id)]
+    if value.launch is not None:
+        data_dir = value.launch.values.get("data_dir")
+        if type(data_dir) is str:
+            argv.extend(("--data-dir", data_dir))
+    return shlex.join(argv)
 
 
 def _staging_document(plan: ExecutionPlan) -> dict[str, Any]:
