@@ -1,6 +1,7 @@
 name: rundra-slurm-system
 
 x-apptainer: &apptainer
+  platform: linux/amd64
   security_opt:
     - seccomp=unconfined
     - systempaths=unconfined

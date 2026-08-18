@@ -6,8 +6,8 @@ It executes 1,000 deterministic logical Tasks while limiting scheduled workers
 and Docker CPU/memory consumption.
 The suite also covers bounded multi-array partial failure and cancellation.
 
-Run it on a Linux host with Docker Engine, Docker Compose v2, `/dev/fuse`, and
-the kernel support required by unprivileged Apptainer:
+Run it on an amd64 Linux host with Docker Engine, Docker Compose v2,
+`/dev/fuse`, and the kernel support required by unprivileged Apptainer:
 
 ```bash
 tools/run_docker_slurm_system_tests.sh
