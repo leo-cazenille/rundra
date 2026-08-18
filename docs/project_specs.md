@@ -3525,6 +3525,17 @@ Version 0.1 is done when:
 
 At that point, Rundra should already be useful as a practical deployment and experiment-execution tool, while retaining a credible path toward a broader portable research-execution framework.
 
+## M12 PyPI artifact privacy
+
+The public wheel and source distribution use explicit file allowlists and a
+separate publication README. GitHub may retain agent setup, Shoal examples,
+system tests, plans, and dated operational evidence, but those files are not
+PyPI package content. Shipped runtime code contains no Shoal host, path, or
+controller constants: remote preflight is backend-generic, and computation on
+an SSH controller is rejected by comparing the local hostname with the
+configured target host. A release contract audits both archive manifests and
+text before Trusted Publishing can upload them.
+
 ## M10.1 intra-allocation concurrency
 
 Targets version 4 extends the target-owned worker-pool policy with the required

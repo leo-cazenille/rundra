@@ -1,9 +1,10 @@
 # Changelog
 
-All notable user-visible changes are recorded here. Rundra has not yet made a
-public release; the current source version is `0.1.0.dev0`.
+All notable user-visible changes are recorded here.
 
 ## [Unreleased]
+
+## [0.1.0] - 2026-08-18
 
 ### Added
 
@@ -44,10 +45,9 @@ public release; the current source version is `0.1.0.dev0`.
 
 - Only Python 3.12 is supported.
 - Local execution is synchronous; local `submit` returns `ASYNC_UNAVAILABLE`.
-- The only remote stack is SSH/Slurm/rsync/Apptainer. Rundra requires no daemon
-  and does not implement PBS, LSF, Kubernetes, Globus, REST, or MCP.
+- The only remote execution stack is SSH/Slurm/rsync/Apptainer. Rundra requires
+  no persistent daemon and does not implement PBS, LSF, Kubernetes, or Globus.
 - Container digest/runtime-version provenance is not yet captured. Scientific
   reproducibility still depends on preserving external source, image, and
   environment inputs.
-- The `rundra` distribution is not yet published to PyPI, and `rundra.ai` and
-  `rundr.ai` are not reserved.
+- The `rundra.ai` and `rundr.ai` domains are not reserved.

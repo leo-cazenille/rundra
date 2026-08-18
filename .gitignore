@@ -216,6 +216,9 @@ tempCodeRunnerFile.py
 /.rundra/
 /examples/minimal/retrieved/
 /examples/pogosim-shoal/retrieved/
+/examples/pogosim-shoal/derived/
+/default/
+/rundra.yaml
 
 # Marimo
 marimo/_static/

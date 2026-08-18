@@ -1,17 +1,31 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["uv_build==0.12.5"]
+build-backend = "uv_build"
 
 [project]
 name = "rundra"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "Portable experiment execution for scientific computing"
-readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.12,<3.13"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Operating System :: POSIX",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Typing :: Typed",
+]
 dependencies = [
     "pyyaml>=6.0.2,<7",
     "tqdm>=4.67,<5",
 ]
+
+[project.readme]
+file = "README-PYPI.md"
+content-type = "text/markdown"
 
 [project.optional-dependencies]
 mcp = ["mcp>=2,<3"]
@@ -20,39 +34,39 @@ mcp = ["mcp>=2,<3"]
 rundr = "rundra.cli.main:main"
 rundr-mcp = "rundra.mcp_server:main"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/rundra"]
-
-[dependency-groups]
-dev = [
-  "mypy>=1.14",
-  "mcp>=2,<3",
-  "pytest>=8.3",
-  "ruff>=0.9",
-  "types-pyyaml>=6.0.12",
-]
-
-[tool.pytest.ini_options]
-addopts = ["--strict-markers", "-ra"]
-testpaths = ["tests"]
-markers = [
-  "shoal_pogosim: opt-in live Pogosim array tests on the Shoal cluster",
-  "shoal_system: opt-in tests that may access the real Shoal cluster",
-  "shoal_cpu: resource-consuming Shoal tests requiring a separate CPU opt-in",
-  "shoal_gpu: resource-consuming Shoal tests requiring a separate GPU opt-in",
-  "shoal_failure: bounded Shoal M4.5 tests requiring a separate failure opt-in",
-  "shoal_array: bounded Shoal M5.6 array test requiring a separate array opt-in",
-  "shoal_lifecycle: bounded Shoal M6.6 async lifecycle test requiring a separate opt-in",
-]
+[tool.uv.build-backend]
+module-root = "src"
+module-name = "rundra"
 
 [tool.ruff]
 line-length = 88
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["B", "E4", "E7", "E9", "F", "I", "UP"]
+select = [
+    "B",
+    "E4",
+    "E7",
+    "E9",
+    "F",
+    "I",
+    "UP",
+]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
 files = ["src"]
+
+[dependency-groups]
+dev = [
+    "bandit>=1.9,<2",
+    "mypy>=1.14",
+    "mcp>=2,<3",
+    "pip-audit>=2.9,<3",
+    "pytest>=8.3",
+    "ruff>=0.9",
+    "twine>=6.2,<7",
+    "types-pyyaml>=6.0.12",
+    "uv-build==0.12.5",
+]

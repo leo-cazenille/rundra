@@ -186,7 +186,7 @@ class RemotePreflight:
                 "target_configuration",
                 "target",
                 "Target does not select the supported remote reference path",
-                "Use SSH, Slurm, rsync, and Apptainer for the Shoal target.",
+                "Use SSH, Slurm, rsync, and Apptainer for this remote target.",
                 actual="/".join(actual),
             )
         return _passed(
@@ -261,7 +261,7 @@ class RemotePreflight:
                 "container_image",
                 "container",
                 "Preflight cannot inspect a source-relative container image before staging",
-                "For Shoal validation, use an absolute image path visible on fishvision.",
+                "Use an absolute image path visible from the remote controller.",
                 image=str(container.image),
             )
         return self._remote_check(
@@ -309,15 +309,7 @@ class RemotePreflight:
         )
 
     def _shared_filesystem_check(self) -> PreflightCheck:
-        shared_root = PurePosixPath("/shoalhome")
         workspace = PurePosixPath(self._target.workspace)
-        if not workspace.is_relative_to(shared_root) or workspace == shared_root:
-            return _failed(
-                "shared_filesystem",
-                "staging",
-                "Remote workspace is not beneath the documented /shoalhome shared root",
-                "Use a user-owned workspace below /shoalhome for the Shoal target.",
-            )
         command = Command(
             (
                 "/bin/sh",
@@ -334,7 +326,7 @@ class RemotePreflight:
                 "shared_filesystem",
                 "staging",
                 "Could not inspect the remote workspace filesystem",
-                "Verify stat is available and the /shoalhome workspace is accessible.",
+                "Verify stat is available and the configured workspace is accessible.",
             )
         file_system_type = result.stdout.strip()
         if (
@@ -345,13 +337,13 @@ class RemotePreflight:
                 "shared_filesystem",
                 "staging",
                 "Remote workspace filesystem could not be identified safely",
-                "Verify the /shoalhome mount and rerun preflight.",
+                "Verify the workspace filesystem and rerun preflight.",
                 exit_code=result.exit_code,
             )
         return _passed(
             "shared_filesystem",
             "staging",
-            "Remote workspace is beneath /shoalhome and its ancestor filesystem is readable",
+            "Remote workspace filesystem is readable and identifiable",
             filesystem_type=file_system_type,
         )
 

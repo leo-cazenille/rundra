@@ -33,12 +33,15 @@ def _shard(tmp_path: Path) -> Path:
 def test_shard_manifest_and_selected_extraction_are_verified(tmp_path: Path) -> None:
     shard = _shard(tmp_path)
 
-    index = read_shard_index(shard, hostname="bigfish")
+    index = read_shard_index(
+        shard, hostname="worker-node", controller_hostname="controller"
+    )
     extracted = extract_shard(
         shard,
         tmp_path / "retrieved",
         task_ids=("task_000001",),
-        hostname="bigfish",
+        hostname="worker-node",
+        controller_hostname="controller",
     )
 
     assert index.task_exit_codes == {"task_000000": 0, "task_000001": 7}
@@ -49,11 +52,13 @@ def test_shard_manifest_and_selected_extraction_are_verified(tmp_path: Path) -> 
     assert not (tmp_path / "retrieved/task_000000").exists()
 
 
-def test_shard_computation_is_rejected_on_fishvision(tmp_path: Path) -> None:
+def test_shard_computation_is_rejected_on_configured_controller(tmp_path: Path) -> None:
     shard = _shard(tmp_path)
 
-    with pytest.raises(ShardError, match="never fishvision"):
-        read_shard_index(shard, hostname="fishvision")
+    with pytest.raises(ShardError, match="configured remote controller"):
+        read_shard_index(
+            shard, hostname="controller", controller_hostname="controller.example"
+        )
 
 
 def test_shard_rejects_unknown_task_selection(tmp_path: Path) -> None:
@@ -64,5 +69,6 @@ def test_shard_rejects_unknown_task_selection(tmp_path: Path) -> None:
             shard,
             tmp_path / "retrieved",
             task_ids=("task_999999",),
-            hostname="bigfish",
+            hostname="worker-node",
+            controller_hostname="controller",
         )

@@ -2655,7 +2655,7 @@ def _fetch_operation_locked(
         if extract and sharded:
             artifacts = (
                 *artifacts,
-                *_extract_fetched_shards(destination, artifacts, selected),
+                *_extract_fetched_shards(record, destination, artifacts, selected),
             )
     except ValueError as error:
         if transitioning:
@@ -2947,10 +2947,13 @@ def _selected_fetch_artifacts(
 
 
 def _extract_fetched_shards(
+    record: RunRecord,
     destination: Path,
     artifacts: tuple[Artifact, ...],
     selected: tuple[TaskId, ...],
 ) -> tuple[Artifact, ...]:
+    configured_host = record.run.target.transport.options.get("host")
+    controller_hostname = configured_host if isinstance(configured_host, str) else None
     shard_paths = tuple(
         Path(artifact.path)
         for artifact in artifacts
@@ -2963,13 +2966,18 @@ def _extract_fetched_shards(
     output_root = destination / "output"
     for shard in shard_paths:
         _verify_shard_checksum(shard)
-        index = read_shard_index(shard)
+        index = read_shard_index(shard, controller_hostname=controller_hostname)
         shard_tasks = tuple(
             task_id for task_id in selected_names if task_id in index.task_exit_codes
         )
         if not shard_tasks:
             continue
-        for path in extract_shard(shard, output_root, task_ids=shard_tasks):
+        for path in extract_shard(
+            shard,
+            output_root,
+            task_ids=shard_tasks,
+            controller_hostname=controller_hostname,
+        ):
             task_id = selected_names[path.relative_to(output_root).parts[0]]
             extracted_artifacts.append(
                 Artifact(

@@ -32,21 +32,33 @@ class ShardIndex:
     members: tuple[IndexedShardMember, ...]
 
 
-def ensure_computation_host(hostname: str | None = None) -> None:
-    """Reject framework-owned computation on the Shoal SSH controller."""
+def ensure_computation_host(
+    hostname: str | None = None, *, controller_hostname: str | None = None
+) -> None:
+    """Reject framework-owned computation on the configured SSH controller."""
 
     selected = (hostname or socket.gethostname()).split(".", 1)[0].casefold()
-    if selected == "fishvision":
+    controller = (
+        controller_hostname.split(".", 1)[0].casefold()
+        if controller_hostname is not None
+        else None
+    )
+    if controller is not None and selected == controller:
         raise ShardError(
-            "Shard verification/extraction must run on bigfish or a scheduled "
-            "Shoal compute node, never fishvision"
+            "Shard verification/extraction must not run on the configured "
+            "remote controller"
         )
 
 
-def read_shard_index(path: Path, *, hostname: str | None = None) -> ShardIndex:
+def read_shard_index(
+    path: Path,
+    *,
+    hostname: str | None = None,
+    controller_hostname: str | None = None,
+) -> ShardIndex:
     """Read and validate only the bounded index member of one output shard."""
 
-    ensure_computation_host(hostname)
+    ensure_computation_host(hostname, controller_hostname=controller_hostname)
     if not path.is_file() or path.is_symlink():
         raise ShardError(f"Output shard is not a regular file: {path}")
     try:
@@ -146,10 +158,15 @@ def extract_shard(
     *,
     task_ids: Sequence[str] | None = None,
     hostname: str | None = None,
+    controller_hostname: str | None = None,
 ) -> tuple[Path, ...]:
     """Verify and extract selected ordinary files without trusting tar paths."""
 
-    index = read_shard_index(path, hostname=hostname)
+    index = read_shard_index(
+        path,
+        hostname=hostname,
+        controller_hostname=controller_hostname,
+    )
     selected = None if task_ids is None else frozenset(task_ids)
     if selected is not None:
         unknown = selected - set(index.task_exit_codes)
