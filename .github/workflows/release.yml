@@ -34,8 +34,8 @@ jobs:
         run: |
           uv build --out-dir dist-first
           uv build --out-dir dist-second
-          (cd dist-first && sha256sum *.whl *.tar.gz | sort) > /tmp/first.sha256
-          (cd dist-second && sha256sum *.whl *.tar.gz | sort) > /tmp/second.sha256
+          (cd dist-first && sha256sum -- ./*.whl ./*.tar.gz | sort) > /tmp/first.sha256
+          (cd dist-second && sha256sum -- ./*.whl ./*.tar.gz | sort) > /tmp/second.sha256
           diff -u /tmp/first.sha256 /tmp/second.sha256
       - name: Audit publication boundary and smoke-test wheel
         run: tools/check_distribution.sh dist-first/*.whl dist-first/*.tar.gz
