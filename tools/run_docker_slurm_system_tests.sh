@@ -5,6 +5,7 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 compose="$root/tests/system/docker_slurm/compose.yaml"
 state=$(mktemp -d "${TMPDIR:-/tmp}/rundra-docker-slurm.XXXXXX")
 export RUNDRA_DOCKER_STATE=$state
+ssh-keygen -q -t ed25519 -N '' -f "$state/id_ed25519"
 
 capture_diagnostics() {
     if [ -n "${RUNDRA_DOCKER_SLURM_DIAGNOSTICS:-}" ]; then

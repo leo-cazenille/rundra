@@ -71,6 +71,7 @@ docker build --build-arg "BASE_IMAGE=$base_image" \
 
 export RUNDRA_DOCKER_PBS_STATE="$temporary/state"
 mkdir -p "$RUNDRA_DOCKER_PBS_STATE"
+ssh-keygen -q -t ed25519 -N '' -f "$RUNDRA_DOCKER_PBS_STATE/id_ed25519"
 "${compose[@]}" up --detach --no-build
 started=true
 

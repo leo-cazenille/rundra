@@ -15,7 +15,9 @@ case "${1:-}" in
     init)
         umask 077
         head -c 1024 /dev/urandom > /cluster/munge.key
-        ssh-keygen -q -t ed25519 -N '' -f /state/id_ed25519
+        if [ ! -f /state/id_ed25519 ]; then
+            ssh-keygen -q -t ed25519 -N '' -f /state/id_ed25519
+        fi
         cp /state/id_ed25519.pub /cluster/authorized_keys
         install -d -o rundra -g rundra -m 0755 /workspace
         apptainer pull --disable-cache /cluster/rundra-test.sif docker://alpine:3.20

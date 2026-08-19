@@ -25,8 +25,24 @@ updates:
       timezone: Europe/Paris
     open-pull-requests-limit: 2
     groups:
-      python:
+      runtime:
         patterns:
-          - "*"
+          - pyyaml
+          - tqdm
+      typing:
+        patterns:
+          - mypy
+          - types-pyyaml
+      testing:
+        patterns:
+          - mcp
+          - pytest
+          - ruff
+      release:
+        patterns:
+          - bandit
+          - pip-audit
+          - twine
+          - uv-build
     commit-message:
       prefix: build

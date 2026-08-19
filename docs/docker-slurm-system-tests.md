@@ -48,6 +48,10 @@ enforcement is intentionally disabled inside Docker; Compose limits protect the
 host, so this is lifecycle and logical-scale validation rather than a scheduler
 performance benchmark.
 
+The host harness creates the ephemeral SSH client key before Compose starts.
+Containers receive only the resulting bind-mounted test state. This preserves
+runner ownership and mode control on both rootful CI and rootless local Docker.
+
 The test is excluded from normal `pytest` runs. GitHub Actions runs it nightly
 and also exposes a manual `docker-slurm-system` workflow. The workflow caches
 the Docker build layers, loads one shared image, and uploads the diagnostic

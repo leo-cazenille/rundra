@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -90,12 +91,14 @@ def read_yaml_text(source: Path) -> str:
 def parse_yaml_document(content: str, *, source: Path) -> Any:
     """Parse exactly one safe YAML document with unique mapping fields."""
     loader = yaml.SafeLoader(content)
+    construct_document: Callable[[yaml.Node], Any] = loader.construct_document
+    dispose: Callable[[], None] = loader.dispose
     try:
         node = loader.get_single_node()
         if node is None:
             return None
         _validate_mapping_keys(loader, node, (), set())
-        return loader.construct_document(node)  # type: ignore[no-untyped-call]
+        return construct_document(node)
     except _DuplicateFieldError as error:
         raise ConfigError(
             code="DUPLICATE_FIELD",
@@ -117,7 +120,7 @@ def parse_yaml_document(content: str, *, source: Path) -> Any:
             source=source,
         ) from error
     finally:
-        loader.dispose()  # type: ignore[no-untyped-call]
+        dispose()
 
 
 def read_yaml_document(source: Path) -> Any:

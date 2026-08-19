@@ -73,6 +73,7 @@ capabilities=$(docker run --rm --privileged \
 export RUNDRA_DOCKER_SLURM_CGROUP_SLURM_CONF="$temporary/slurm.conf"
 export RUNDRA_DOCKER_STATE="$temporary/state"
 mkdir -p "$RUNDRA_DOCKER_STATE"
+ssh-keygen -q -t ed25519 -N '' -f "$RUNDRA_DOCKER_STATE/id_ed25519"
 sed \
   -e 's|^ProctrackType=.*|ProctrackType=proctrack/cgroup|' \
   -e 's|^TaskPlugin=.*|TaskPlugin=task/cgroup|' \

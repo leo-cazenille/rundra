@@ -26,6 +26,10 @@ and removes containers, volumes, and credentials after success. On failure it
 preserves Docker logs, PBS server, node, and job state. Select a stable
 diagnostic directory with:
 
+The host harness creates the ephemeral SSH client key before Compose starts so
+rootful containers never leave a root-owned key in the runner's bind-mounted
+temporary directory.
+
 ```bash
 RUNDRA_DOCKER_PBS_DIAGNOSTICS=/path/to/diagnostics \
     tools/run_docker_pbs_system_tests.sh
