@@ -50,6 +50,23 @@ def test_resume_accepts_last_run_selector() -> None:
     assert arguments.run_id == LAST_RUN_SELECTOR
 
 
+def test_resolve_submission_requires_explicit_confirmation() -> None:
+    run_id = "run_0123456789abcdef0123456789abcdef"
+    arguments = build_parser().parse_args(
+        (
+            "resolve-submission",
+            run_id,
+            "--not-submitted",
+            "--confirm",
+            run_id,
+        )
+    )
+
+    assert arguments.run_id == run_id
+    assert arguments.not_submitted is True
+    assert arguments.confirm == run_id
+
+
 def test_list_accepts_pagination_and_explicit_task_expansion() -> None:
     arguments = build_parser().parse_args(
         ("list", "--offset", "20", "--limit", "10", "--include-tasks")

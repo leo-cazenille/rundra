@@ -21,6 +21,7 @@ from rundra.cli.operations import (
     purge_operation,
     resolve_plan_inputs_operation,
     resolve_run_inputs_operation,
+    resolve_submission_operation,
     resume_operation,
     run_operation,
     status_operation,
@@ -50,6 +51,8 @@ _COMMANDS = (
     "targets",
     "run",
     "submit",
+    "resume",
+    "resolve-submission",
     "wait",
     "status",
     "tasks",
@@ -186,6 +189,26 @@ def build_parser() -> argparse.ArgumentParser:
     _add_run_selector(resume)
     _add_store_option(resume)
     _add_json_option(resume)
+
+    resolve_submission = subparsers.add_parser(
+        "resolve-submission",
+        help="close an uncertain submission after operator verification",
+    )
+    _add_run_selector(resolve_submission)
+    resolve_submission.add_argument(
+        "--not-submitted",
+        action="store_true",
+        required=True,
+        help="assert that scheduler inspection found no submitted job",
+    )
+    resolve_submission.add_argument(
+        "--confirm",
+        required=True,
+        metavar="RUN_ID",
+        help="repeat the exact Run ID to confirm the resolution",
+    )
+    _add_store_option(resolve_submission)
+    _add_json_option(resolve_submission)
 
     wait = subparsers.add_parser("wait", help="wait for a submitted Run")
     _add_run_selector(wait)
@@ -713,6 +736,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             arguments.run_id,
             JsonRunStore(arguments.data_dir),
             SubmissionReceiptStore(arguments.data_dir),
+        )
+    elif arguments.command == "resolve-submission":
+        result = resolve_submission_operation(
+            arguments.run_id,
+            JsonRunStore(arguments.data_dir),
+            SubmissionReceiptStore(arguments.data_dir),
+            not_submitted=arguments.not_submitted,
+            confirmation=arguments.confirm,
         )
     elif arguments.command == "wait":
         result = wait_operation(

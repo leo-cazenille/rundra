@@ -47,6 +47,12 @@ GUIDE = f"""{START_MARKER}
   submission as a new Run until Rundra has resolved the recorded scheduler
   outcome; an unknown outcome intentionally blocks automatic resubmission.
   MCP clients use the equivalent `resume_submission` tool.
+- If `resume` reports an unknown outcome, inspect the scheduler through an
+  approved read-only route. Only after verifying that no job exists, close the
+  Run with `rundr resolve-submission RUN_ID --not-submitted --confirm RUN_ID`.
+  Never use this command merely because a scheduler query is inconvenient.
+  MCP clients use the equivalent `resolve_submission` tool with the same exact
+  Run-ID confirmation.
 - Use `--json` or Rundra MCP tools. Never parse scheduler-native output.
 - Use paginated `rundr list --json` Run summaries for discovery and `rundr
   tasks RUN_ID --json` for Task pages. Request `list --include-tasks` only when

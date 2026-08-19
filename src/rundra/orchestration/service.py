@@ -620,6 +620,62 @@ class OrchestrationService:
             self.store.update(updated, expected=record)
             return updated, "resumed"
 
+    def resolve_submission(
+        self,
+        run_id: RunId,
+        *,
+        confirmation: RunId,
+    ) -> RunRecord:
+        """Close an uncertain submission after explicit operator verification."""
+        if type(run_id) is not RunId or type(confirmation) is not RunId:
+            raise TypeError("resolve_submission requires RunId values")
+        if confirmation != run_id:
+            raise OrchestrationError(
+                code="SUBMISSION_CONFIRMATION_MISMATCH",
+                message=f"Confirmation must exactly match Run {run_id}",
+                run_id=run_id,
+            )
+        if self._submission_receipts is None:
+            raise OrchestrationError(
+                code="SUBMISSION_RECOVERY_UNAVAILABLE",
+                message="Scheduler submission receipts are not configured",
+                run_id=run_id,
+            )
+        with self.store.operation_lock(run_id):
+            record = self.store.load(run_id)
+            if record.run.state is not ExecutionState.STAGING:
+                raise OrchestrationError(
+                    code="SUBMISSION_NOT_RESOLVABLE",
+                    message=(
+                        f"Run {run_id} is {record.run.state.value}, not an uncertain "
+                        "scheduler submission"
+                    ),
+                    run_id=run_id,
+                )
+            if record.scheduler_job_ids or record.task_scheduler_ids:
+                raise OrchestrationError(
+                    code="SUBMISSION_IDENTITIES_PRESENT",
+                    message=(
+                        f"Run {run_id} has durable scheduler identities and cannot "
+                        "be resolved as not submitted"
+                    ),
+                    run_id=run_id,
+                )
+            try:
+                receipt = self._submission_receipts.load(run_id)
+                self._submission_receipts.resolve_not_submitted(
+                    receipt,
+                    updated_at=self._clock(),
+                )
+            except RunStoreError as error:
+                raise OrchestrationError(
+                    code="SUBMISSION_NOT_RESOLVABLE",
+                    message=str(error),
+                    run_id=run_id,
+                ) from error
+            self._fail_before_completion(record, "SUBMISSION_CONFIRMED_NOT_SUBMITTED")
+            return self.store.load(run_id)
+
     def _execute_one(
         self, request: RunExecutionRequest, *, wait: bool
     ) -> RunExecutionResult:

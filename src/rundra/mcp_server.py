@@ -30,6 +30,7 @@ from rundra.cli.operations import (
     purge_operation,
     resolve_plan_inputs_operation,
     resolve_run_inputs_operation,
+    resolve_submission_operation,
     resume_operation,
     run_operation,
     status_operation,
@@ -407,6 +408,23 @@ def build_server(
     def resume_submission(run_id: str) -> dict[str, Any]:
         """Recover an interrupted submission or find its durable scheduler IDs."""
         return document(resume_operation(run_id, store(), submission_receipts()))
+
+    @server.tool()
+    def resolve_submission(
+        run_id: str,
+        confirm_run_id: str,
+        not_submitted: bool,
+    ) -> dict[str, Any]:
+        """Close an uncertain submission after external scheduler verification."""
+        return document(
+            resolve_submission_operation(
+                run_id,
+                store(),
+                submission_receipts(),
+                not_submitted=not_submitted,
+                confirmation=confirm_run_id,
+            )
+        )
 
     @server.tool()
     def list_runs(

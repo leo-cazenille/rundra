@@ -42,6 +42,7 @@ def test_mcp_server_exposes_guarded_lifecycle_tools(tmp_path: Path) -> None:
 
     assert server.name == "Rundra"
     assert "resume_submission" in tools
+    assert "resolve_submission" in tools
     list_schema = tools["list_runs"].input_schema
     assert {"offset", "limit", "include_tasks"} <= set(list_schema["properties"])
 

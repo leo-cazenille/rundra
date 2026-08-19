@@ -261,8 +261,8 @@ class SubmissionRecoveryValue:
     def __post_init__(self) -> None:
         if type(self.record) is not RunRecord:
             raise TypeError("Submission recovery requires a RunRecord")
-        if self.action not in {"resumed", "found"}:
-            raise ValueError("Submission recovery action must be resumed or found")
+        if self.action not in {"resumed", "found", "resolved_not_submitted"}:
+            raise ValueError("Submission recovery action is unsupported")
 
 
 @dataclass(frozen=True, slots=True)
@@ -2040,6 +2040,73 @@ def resume_operation(
     except RunStoreError as store_error:
         return OperationResult.failure(
             "resume", OperationError("RUN_STORE_ERROR", str(store_error))
+        )
+
+
+def resolve_submission_operation(
+    run_id: str,
+    store: RunStore,
+    receipts: SubmissionReceiptStore,
+    *,
+    not_submitted: bool,
+    confirmation: str,
+) -> OperationResult[SubmissionRecoveryValue]:
+    """Persist an explicit operator resolution for an uncertain submission."""
+    record, error = _load_record(run_id, store)
+    if error is not None:
+        return OperationResult.failure("resolve-submission", error)
+    assert record is not None
+    if not not_submitted:
+        return OperationResult.failure(
+            "resolve-submission",
+            OperationError(
+                "SUBMISSION_RESOLUTION_REQUIRED",
+                "Resolution requires the explicit --not-submitted assertion",
+                {"run_id": str(record.run.id)},
+            ),
+        )
+    try:
+        confirmed_run_id = RunId(confirmation)
+    except (TypeError, ValueError) as confirmation_error:
+        return OperationResult.failure(
+            "resolve-submission",
+            OperationError(
+                "INVALID_CONFIRMATION_RUN_ID",
+                str(confirmation_error),
+                {"run_id": str(record.run.id)},
+            ),
+        )
+    try:
+        transport, stager, runtime, scheduler = _execution_adapters(record.run.target)
+        service = OrchestrationService(
+            store=store,
+            stager=stager,
+            runtime=runtime,
+            scheduler=scheduler,
+            transport=transport,
+            framework_version=version("rundra"),
+            submission_receipts=receipts,
+        )
+        resolved = service.resolve_submission(
+            record.run.id,
+            confirmation=confirmed_run_id,
+        )
+        return OperationResult.success(
+            "resolve-submission",
+            SubmissionRecoveryValue(resolved, "resolved_not_submitted"),
+        )
+    except OrchestrationError as resolution_error:
+        return OperationResult.failure(
+            "resolve-submission",
+            OperationError(
+                resolution_error.code,
+                resolution_error.message,
+                {"run_id": str(record.run.id)},
+            ),
+        )
+    except RunStoreError as store_error:
+        return OperationResult.failure(
+            "resolve-submission", OperationError("RUN_STORE_ERROR", str(store_error))
         )
 
 

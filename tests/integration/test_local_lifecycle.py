@@ -753,6 +753,43 @@ def test_submission_outcome_controls_durable_run_state(
         assert recovery.value.code == "SUBMISSION_OUTCOME_UNKNOWN"
 
 
+def test_operator_can_resolve_an_uncertain_submission_as_not_submitted(
+    tmp_path: Path,
+) -> None:
+    runtime = HostMappedRuntime()
+    request, _ = _request(tmp_path, exit_code=0)
+    failure = SchedulerSubmissionFailure(
+        "safe uncertain failure",
+        backend="slurm",
+        phase="scheduler_submit",
+        outcome=SchedulerSubmissionOutcome.UNCERTAIN,
+    )
+    service = _service(
+        tmp_path,
+        runtime,
+        scheduler=FailingSubmissionScheduler(failure),
+    )
+    receipts = SubmissionReceiptStore(tmp_path / "records")
+    service._submission_receipts = receipts
+    with pytest.raises(OrchestrationError):
+        service.submit_one(request)
+
+    with pytest.raises(OrchestrationError) as mismatch:
+        service.resolve_submission(
+            _RUN_ID,
+            confirmation=RunId("run_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        )
+    assert mismatch.value.code == "SUBMISSION_CONFIRMATION_MISMATCH"
+
+    resolved = service.resolve_submission(_RUN_ID, confirmation=_RUN_ID)
+
+    assert resolved.run.state is ExecutionState.FAILED
+    assert resolved.native_state == "SUBMISSION_CONFIRMED_NOT_SUBMITTED"
+    receipt = receipts.load(_RUN_ID)
+    assert receipt.outcome is SubmissionReceiptOutcome.OPERATOR_RESOLVED
+    assert receipt.failure_classification == "operator_verified_not_submitted"
+
+
 def test_available_source_provenance_is_persisted_before_execution(
     tmp_path: Path,
 ) -> None:

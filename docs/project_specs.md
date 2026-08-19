@@ -2768,16 +2768,27 @@ updates preserve the winner and return structured `RUN_STORE_CONFLICT` with an
 explicit retry action. Interrupted writes leave the previous record intact and
 remove temporary files.
 
-Asynchronous scheduler submission uses a separate atomic version-1 receipt per
-Run. Rundra writes a pending receipt before scheduler contact and completes it
-with every scheduler root and Task mapping before transitioning the RunRecord
-to `SUBMITTED`. `rundr resume RUN_ID` adopts a completed receipt after an
-interrupted client-side RunRecord update, or reports an already durable
-submission as `found`. A pending receipt with no scheduler identity is treated
-as an unknown outcome and blocks automatic resubmission; Rundra never creates a
-possible duplicate merely to make forward progress. Run registration is
-printed to stderr as soon as the initial RunRecord is durable, while structured
-stdout remains valid JSON when requested.
+Asynchronous scheduler submission uses a separate atomic receipt per Run.
+Readers support the historical version-1 pending/completed representation;
+writers use version 2 with explicit `pending`, `accepted`, `rejected`,
+`uncertain`, and `operator_resolved` outcomes plus safe backend, phase, exit
+code, and failure-classification fields. Rundra writes a pending receipt before
+scheduler contact and records every scheduler root and Task mapping as accepted
+before transitioning the RunRecord to `SUBMITTED`. A definitive scheduler
+rejection transitions the Run to `FAILED`; transport and response ambiguity
+remain `STAGING` with an uncertain receipt.
+
+`rundr resume RUN_ID` adopts an accepted receipt after an interrupted
+client-side RunRecord update, reports an already durable submission as `found`,
+and refuses to resubmit unknown outcomes. After independently inspecting the
+scheduler, an operator who has verified that no job exists may run `rundr
+resolve-submission RUN_ID --not-submitted --confirm RUN_ID`. The exact repeated
+Run ID, absent scheduler identities, uncertain/pending receipt, and `STAGING`
+state are all mandatory; the operator resolution is persisted before the Run
+becomes `FAILED`. Rundra never creates a possible duplicate merely to make
+forward progress. Run registration is printed to stderr as soon as the initial
+RunRecord is durable, while structured stdout remains valid JSON when
+requested.
 
 ---
 

@@ -269,6 +269,23 @@ class SubmissionReceiptStore:
             updated_at=updated_at,
         )
 
+    def resolve_not_submitted(
+        self,
+        receipt: SubmissionReceipt,
+        *,
+        updated_at: datetime,
+    ) -> SubmissionReceipt:
+        """Persist an operator's explicit confirmation that no job was submitted."""
+        return self._fail(
+            receipt,
+            outcome=SubmissionReceiptOutcome.OPERATOR_RESOLVED,
+            backend=receipt.backend or "legacy",
+            phase="operator_resolution",
+            failure_classification="operator_verified_not_submitted",
+            exit_code=None,
+            updated_at=updated_at,
+        )
+
     def _fail(
         self,
         pending: SubmissionReceipt,
@@ -282,7 +299,11 @@ class SubmissionReceiptStore:
     ) -> SubmissionReceipt:
         if pending.outcome is outcome:
             return pending
-        if pending.outcome is not SubmissionReceiptOutcome.PENDING:
+        resolvable = outcome is SubmissionReceiptOutcome.OPERATOR_RESOLVED and (
+            pending.outcome is SubmissionReceiptOutcome.UNCERTAIN
+            or (pending.format_version == 1 and pending.outcome is None)
+        )
+        if pending.outcome is not SubmissionReceiptOutcome.PENDING and not resolvable:
             current_outcome = pending.outcome
             if current_outcome is None:
                 raise RunStoreError(
@@ -298,7 +319,13 @@ class SubmissionReceiptStore:
             pending.task_ids,
             pending.started_at,
             completed_at=(
-                updated_at if outcome is SubmissionReceiptOutcome.REJECTED else None
+                updated_at
+                if outcome
+                in {
+                    SubmissionReceiptOutcome.REJECTED,
+                    SubmissionReceiptOutcome.OPERATOR_RESOLVED,
+                }
+                else None
             ),
             outcome=outcome,
             backend=backend,
