@@ -29,6 +29,18 @@ RUNDRA_DOCKER_SLURM_IMAGE='registry.example/rundra-slurm-system@sha256:DIGEST' \
 The prebuilt image must implement the `init`, `controller`, and `compute`
 entrypoint modes defined by the checked-in Docker harness.
 
+On failure, the harness captures Compose status and logs, Slurm queue/job/node
+state, and the test workspace before deleting the cluster. By default it creates
+a temporary directory and prints its path. Select a stable destination with:
+
+```bash
+RUNDRA_DOCKER_SLURM_DIAGNOSTICS=/path/to/diagnostics \
+    tools/run_docker_slurm_system_tests.sh
+```
+
+The diagnostic bundle contains only Docker/Slurm state and the synthetic test
+runs. The temporary SSH and Munge key state is not copied.
+
 The harness never uses Docker privileged mode. It generates temporary SSH and
 Munge keys, uses strict SSH host verification, prints Compose diagnostics on
 failure, and deletes containers, volumes, and credentials on exit. Slurm cgroup
@@ -37,4 +49,6 @@ host, so this is lifecycle and logical-scale validation rather than a scheduler
 performance benchmark.
 
 The test is excluded from normal `pytest` runs. GitHub Actions runs it nightly
-and also exposes a manual `docker-slurm-system` workflow.
+and also exposes a manual `docker-slurm-system` workflow. The workflow caches
+the Docker build layers, loads one shared image, and uploads the diagnostic
+bundle for failed runs with a 14-day retention period.

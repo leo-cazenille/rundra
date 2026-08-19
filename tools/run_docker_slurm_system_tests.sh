@@ -6,6 +6,51 @@ compose="$root/tests/system/docker_slurm/compose.yaml"
 state=$(mktemp -d "${TMPDIR:-/tmp}/rundra-docker-slurm.XXXXXX")
 export RUNDRA_DOCKER_STATE=$state
 
+capture_diagnostics() {
+    if [ -n "${RUNDRA_DOCKER_SLURM_DIAGNOSTICS:-}" ]; then
+        destination=$RUNDRA_DOCKER_SLURM_DIAGNOSTICS
+        mkdir -p "$destination"
+    else
+        destination=$(mktemp -d \
+            "${TMPDIR:-/tmp}/rundra-docker-slurm-failure.XXXXXX")
+    fi
+
+    {
+        date -u '+captured_at=%Y-%m-%dT%H:%M:%SZ'
+        printf 'image=%s\n' "$RUNDRA_DOCKER_SLURM_IMAGE"
+        docker version
+        docker compose version
+    } > "$destination/environment.txt" 2>&1 || true
+    docker compose -f "$compose" ps --all \
+        > "$destination/compose-ps.txt" 2>&1 || true
+    docker compose -f "$compose" logs --no-color --timestamps \
+        > "$destination/compose.log" 2>&1 || true
+    docker compose -f "$compose" exec -T controller squeue --all \
+        > "$destination/slurm-queue.txt" 2>&1 || true
+    docker compose -f "$compose" exec -T controller scontrol show job \
+        > "$destination/slurm-jobs.txt" 2>&1 || true
+    docker compose -f "$compose" exec -T controller scontrol show nodes \
+        > "$destination/slurm-nodes.txt" 2>&1 || true
+    mkdir -p "$destination/workspace-runs"
+    docker compose -f "$compose" cp controller:/workspace/runs/. \
+        "$destination/workspace-runs" \
+        > "$destination/workspace-copy.log" 2>&1 || true
+
+    printf 'Docker Slurm diagnostics: %s\n' "$destination" >&2
+    tail -n 200 "$destination/compose.log" >&2 || true
+}
+
+cleanup() {
+    status=$?
+    if [ "$status" -ne 0 ]; then
+        capture_diagnostics || true
+    fi
+    docker compose -f "$compose" down --volumes --remove-orphans || true
+    rm -rf "$state"
+    exit "$status"
+}
+trap cleanup EXIT INT TERM
+
 if [ -n "${RUNDRA_DOCKER_SLURM_IMAGE:-}" ]; then
     if ! docker image inspect "$RUNDRA_DOCKER_SLURM_IMAGE" >/dev/null 2>&1; then
         docker pull "$RUNDRA_DOCKER_SLURM_IMAGE"
@@ -16,18 +61,6 @@ else
     docker build --tag "$RUNDRA_DOCKER_SLURM_IMAGE" \
         "$root/tests/system/docker_slurm"
 fi
-
-cleanup() {
-    status=$?
-    if [ "$status" -ne 0 ]; then
-        docker compose -f "$compose" ps || true
-        docker compose -f "$compose" logs --no-color || true
-    fi
-    docker compose -f "$compose" down --volumes --remove-orphans || true
-    rm -rf "$state"
-    exit "$status"
-}
-trap cleanup EXIT INT TERM
 
 docker compose -f "$compose" up --detach --no-build
 
