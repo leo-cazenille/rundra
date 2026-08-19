@@ -14,7 +14,7 @@ RUN apt-get update \
     && echo "${APPTAINER_SHA256}  /tmp/apptainer.deb" | sha256sum --check - \
     && apt-get install -y --no-install-recommends /tmp/apptainer.deb \
     && rm -rf /var/lib/apt/lists/* /tmp/apptainer.deb \
-    && useradd --create-home --uid 1000 --shell /bin/bash rundra \
+    && useradd --create-home --uid 1100 --shell /bin/bash rundra \
     && install -d -m 0755 /run/sshd /var/spool/slurmctld /var/spool/slurmd \
     && chown slurm:slurm /var/spool/slurmctld /var/spool/slurmd
 
