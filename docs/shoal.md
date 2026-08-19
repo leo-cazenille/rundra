@@ -507,3 +507,25 @@ the mean MSD values were 402,824 and 34,472 respectively, with a paired mean
 ballistic/long-tumble ratio of 11.94. These results confirm the expected strong
 separation between mostly ballistic and long-tumble motion while exercising
 the complete large-scale submit, schedule, retrieve, and analysis path.
+
+## Production PyPI package acceptance
+
+On 2026-08-19, `rundra==0.1.1` was installed from production PyPI into a clean
+Python 3.12 environment and used directly for a bounded Pogosim acceptance
+Run. Connected doctor checks passed, including SSH authentication, remote
+capabilities, local access to shared target storage, and a staging round trip.
+The pure plan contained four Tasks: seeds 0 and 1 for both the ballistic and
+long-tumble parameter sets, scheduled through one four-slot worker.
+
+Run `run_b3671e709d6e42a1af4522aff62ecc95` was submitted as Slurm job `2369`.
+All four Tasks completed successfully through bundled native identity `2369_0`
+in approximately 12 seconds. Each Task produced `console.txt` and a Feather
+result between 92,450 and 92,930 bytes. Automatic retrieval reached 100% and
+published an immutable shared-filesystem reference manifest containing all
+eight expected artifact paths instead of copying target-visible data.
+
+This check proves installation, connected diagnosis, pure planning, durable
+submission, waiting, Task reconciliation, and shared-filesystem retrieval from
+the production wheel. It did not independently assert the allocated compute
+hostname; worker-to-host placement remains covered by the explicitly gated
+scaling acceptance above.
