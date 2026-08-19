@@ -58,6 +58,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="enable the bounded three-seed Pogosim test on Shoal",
     )
+    parser.addoption(
+        "--run-shoal-scaling-tests",
+        action="store_true",
+        default=False,
+        help="enable explicit 1x8, 2x20, and 8x40 Shoal scaling tests",
+    )
 
 
 def pytest_collection_modifyitems(
@@ -73,6 +79,7 @@ def pytest_collection_modifyitems(
     run_array = bool(config.getoption("--run-shoal-array-test"))
     run_lifecycle = bool(config.getoption("--run-shoal-lifecycle-test"))
     run_pogosim = bool(config.getoption("--run-shoal-pogosim-test"))
+    run_scaling = bool(config.getoption("--run-shoal-scaling-tests"))
     skip_system = pytest.mark.skip(
         reason="requires the explicit --run-shoal-system-tests opt-in"
     )
@@ -100,11 +107,16 @@ def pytest_collection_modifyitems(
     skip_pogosim = pytest.mark.skip(
         reason="requires both Shoal system and Pogosim submission opt-ins"
     )
+    skip_scaling = pytest.mark.skip(
+        reason="requires both Shoal system and explicit scaling opt-ins"
+    )
     for item in items:
         if "docker_pbs" in item.keywords and not run_docker_pbs:
             item.add_marker(skip_docker_pbs)
         elif "docker_slurm" in item.keywords and not run_docker_slurm:
             item.add_marker(skip_docker_slurm)
+        elif "shoal_scaling" in item.keywords and not (run_system and run_scaling):
+            item.add_marker(skip_scaling)
         elif "shoal_pogosim" in item.keywords and not (run_system and run_pogosim):
             item.add_marker(skip_pogosim)
         elif "shoal_lifecycle" in item.keywords and not (run_system and run_lifecycle):

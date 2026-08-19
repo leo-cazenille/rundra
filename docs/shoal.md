@@ -451,3 +451,36 @@ Ordinary `uv run pytest` skips this lifecycle test along with every other Shoal
 test. The final default run reported nine explicit skips and made no network
 connection. Retained live evidence and logs are Run-specific; inspect terminal
 records and remove only exact Run/job paths if site-approved cleanup is wanted.
+
+## Explicit worker-scaling acceptance
+
+The scaling suite verifies both conservative and full-cluster requests with a
+minimal CPU-only workload. It tests `1 x 8`, `2 x 20`, and `8 x 40` worker-slot
+layouts. The first two cases demonstrate that callers can intentionally limit
+resource use; the last case verifies all 320 logical Tasks execute through
+eight 40-CPU workers on the eight Shoal compute nodes.
+
+These tests copy the operator's version-6 target into a temporary directory and
+lower only the worker-pool activation threshold for the tiny probes. The target
+must explicitly permit eight workers, 40 slots per worker, and 320 active
+Tasks. Target scheduler/account/QOS/native options remain unchanged.
+
+The suite validates the pure plan before submission, then requires one merged
+status journal per requested worker, exact seed completion, consistent
+worker-to-host cohorts, and persisted allocated-node evidence. The `8 x 40`
+case additionally requires exactly `shoal1` through `shoal8`; run it only when
+reserving all eight nodes is acceptable. Slurm still controls placement, so the
+`2 x 20` case may legally place both workers on one 40-CPU node.
+
+The scaling suite has an independent opt-in and is never enabled by ordinary
+tests or another Shoal submission flag:
+
+```bash
+RUNDRA_SHOAL_TARGETS_FILE=~/.config/rundra/targets.yaml \
+RUNDRA_SHOAL_CPU_IMAGE=/absolute/path/to/cpu-image.sif \
+  uv run pytest tests/system/test_shoal_scaling.py \
+    -m 'shoal_system and shoal_scaling' \
+    --run-shoal-system-tests \
+    --run-shoal-scaling-tests \
+    -vv
+```
