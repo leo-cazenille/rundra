@@ -47,3 +47,13 @@ def test_resume_accepts_last_run_selector() -> None:
     arguments = build_parser().parse_args(("resume", "--last"))
 
     assert arguments.run_id == LAST_RUN_SELECTOR
+
+
+def test_list_accepts_pagination_and_explicit_task_expansion() -> None:
+    arguments = build_parser().parse_args(
+        ("list", "--offset", "20", "--limit", "10", "--include-tasks")
+    )
+
+    assert arguments.offset == 20
+    assert arguments.limit == 10
+    assert arguments.include_tasks is True

@@ -138,7 +138,19 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
     elif isinstance(value, CancelValue):
         document["cancel"] = _status_document(value.status)
     elif isinstance(value, ListRunsValue):
-        document["runs"] = [_status_document(run) for run in value.runs]
+        runs = [_status_document(run) for run in value.runs]
+        if not value.include_tasks:
+            for run in runs:
+                run.pop("task_details", None)
+        document["runs"] = runs
+        document["page"] = {
+            "offset": value.offset,
+            "limit": value.limit,
+            "returned": len(value.runs),
+            "total": value.total,
+            "next_offset": value.next_offset,
+            "task_details_included": value.include_tasks,
+        }
     elif isinstance(value, LogsValue):
         document["logs"] = {
             "run_id": str(value.run_id),
@@ -426,9 +438,13 @@ def render_human(result: OperationResult[Any]) -> str:
         status = value.status
         return f"Run: {status.run_id}\nState after cancellation: {status.state.value}"
     if isinstance(value, ListRunsValue):
+        page = (
+            f"Runs: offset={value.offset} returned={len(value.runs)} "
+            f"total={value.total}"
+        )
         if not value.runs:
-            return "No Runs found."
-        return "Known Runs:\n" + "\n".join(
+            return page
+        return page + "\n" + "\n".join(
             f"  {run.run_id}: {run.state.value} ({run.experiment} on {run.target})"
             for run in value.runs
         )
@@ -681,12 +697,8 @@ def _result_format_version(value: object) -> int:
         return value.status.format_version
     if isinstance(value, CancelValue):
         return value.status.format_version
-    if isinstance(value, ListRunsValue) and any(
-        run.preparation is not None for run in value.runs
-    ):
-        return max(run.format_version for run in value.runs)
-    if isinstance(value, ListRunsValue) and value.runs:
-        return max(run.format_version for run in value.runs)
+    if isinstance(value, ListRunsValue):
+        return value.format_version
     if isinstance(value, PreparationLogsValue):
         return value.format_version
     if isinstance(value, (LogsValue, FetchValue, PurgeValue)):

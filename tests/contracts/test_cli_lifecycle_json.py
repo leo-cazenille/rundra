@@ -151,7 +151,7 @@ _CANCELLED_STATUS = StatusValue(
         (OperationResult.success("status", _STATUS), "status-success-v1.json"),
         (
             OperationResult.success("list", ListRunsValue((_STATUS,))),
-            "list-success-v1.json",
+            "list-success-v2.json",
         ),
         (OperationResult.success("logs", _LOGS), "logs-success-v1.json"),
         (

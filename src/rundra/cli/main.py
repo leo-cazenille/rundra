@@ -208,6 +208,13 @@ def build_parser() -> argparse.ArgumentParser:
     _add_json_option(tasks)
 
     list_runs = subparsers.add_parser("list", help="list persisted Runs")
+    list_runs.add_argument("--offset", type=int, default=0)
+    list_runs.add_argument("--limit", type=int, default=100)
+    list_runs.add_argument(
+        "--include-tasks",
+        action="store_true",
+        help="include per-Task details in each Run summary",
+    )
     _add_store_option(list_runs)
     _add_json_option(list_runs)
 
@@ -732,6 +739,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = list_runs_operation(
             JsonRunStore(arguments.data_dir),
             task_store=SqliteTaskStore(arguments.data_dir),
+            offset=arguments.offset,
+            limit=arguments.limit,
+            include_tasks=arguments.include_tasks,
         )
     elif arguments.command == "logs":
         result = logs_operation(

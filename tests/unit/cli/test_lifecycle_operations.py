@@ -183,12 +183,43 @@ def test_persisted_status_list_and_inspect_share_typed_record_values(
     assert status.value.retrieval_state is RetrievalState.SUCCEEDED
     assert status.value.task_counts == {"SUCCEEDED": 1}
     assert listed.ok and isinstance(listed.value, ListRunsValue)
-    assert listed.value.runs == (status.value,)
+    assert listed.value.runs == (replace(status.value, task_details=()),)
+    assert listed.value.total == 1
+    assert listed.value.next_offset is None
     assert inspected.ok and isinstance(inspected.value, InspectValue)
     assert inspected.value.record == store.load(inspected.value.record.run.id)
     assert result_document(status)["status"]["run_id"] == run_id
     assert result_document(listed)["runs"][0]["state"] == "SUCCEEDED"
     assert result_document(inspected)["record"]["format_version"] == 1
+
+
+def test_list_task_expansion_is_explicit_and_bounds_are_validated(
+    tmp_path: Path,
+) -> None:
+    store, run_id = _stored_record(tmp_path)
+
+    compact = list_runs_operation(store, offset=0, limit=1)
+    expanded = list_runs_operation(store, include_tasks=True)
+    bad_offset = list_runs_operation(store, offset=-1)
+    bad_limit = list_runs_operation(store, limit=1001)
+
+    assert compact.ok and compact.value is not None
+    assert compact.value.runs[0].task_details == ()
+    assert result_document(compact)["page"] == {
+        "offset": 0,
+        "limit": 1,
+        "returned": 1,
+        "total": 1,
+        "next_offset": None,
+        "task_details_included": False,
+    }
+    assert expanded.ok and expanded.value is not None
+    assert expanded.value.runs[0].task_details[0].task_id.value == "task_000000"
+    assert str(expanded.value.runs[0].run_id) == run_id
+    assert bad_offset.error is not None
+    assert bad_offset.error.code == "INVALID_RUN_OFFSET"
+    assert bad_limit.error is not None
+    assert bad_limit.error.code == "INVALID_RUN_LIMIT"
 
 
 def test_wait_returns_terminal_status_without_fetching(tmp_path: Path) -> None:

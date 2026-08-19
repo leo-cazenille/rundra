@@ -87,6 +87,11 @@ uv run rundr fetch "$RUN_ID" \
   --json | python3 -m json.tool
 ```
 
+`list --json` returns compact Run summaries and pagination metadata by default.
+Use `--offset N --limit N` to advance through Runs. Prefer `rundr tasks RUN_ID`
+for Task pages; `--include-tasks` is available only when an expanded Run list is
+specifically required.
+
 `--task` accepts a stable Task ID or zero-based ordinal and may be repeated.
 Without it, `logs` requires a single-Task Run and `fetch` selects every Task.
 Repeated fetches are safe and update the same selected destination files.

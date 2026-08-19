@@ -46,6 +46,9 @@ GUIDE = f"""{START_MARKER}
   submission as a new Run until Rundra has resolved the recorded scheduler
   outcome; an unknown outcome intentionally blocks automatic resubmission.
 - Use `--json` or Rundra MCP tools. Never parse scheduler-native output.
+- Use paginated `rundr list --json` Run summaries for discovery and `rundr
+  tasks RUN_ID --json` for Task pages. Request `list --include-tasks` only when
+  an expanded cross-Run response is specifically needed.
 - Run scientific and analysis workloads on the configured execution target or
   an approved workstation, never on a login/controller host.
 - Keep raw retrieved results separate from derived analysis outputs.

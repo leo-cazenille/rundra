@@ -165,11 +165,19 @@ def test_successful_empty_list_has_human_and_json_views(tmp_path: Path) -> None:
 
     assert human.returncode == machine.returncode == 0
     assert human.stderr == machine.stderr == ""
-    assert human.stdout == "No Runs found.\n"
+    assert human.stdout == "Runs: offset=0 returned=0 total=0\n"
     assert json.loads(machine.stdout) == {
-        "format_version": 1,
+        "format_version": 2,
         "ok": True,
         "operation": "list",
+        "page": {
+            "limit": 100,
+            "next_offset": None,
+            "offset": 0,
+            "returned": 0,
+            "task_details_included": False,
+            "total": 0,
+        },
         "runs": [],
     }
 

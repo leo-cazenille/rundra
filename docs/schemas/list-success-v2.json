@@ -1,0 +1,30 @@
+{
+  "format_version": 2,
+  "ok": true,
+  "operation": "list",
+  "page": {
+    "limit": 100,
+    "next_offset": null,
+    "offset": 0,
+    "returned": 1,
+    "task_details_included": false,
+    "total": 1
+  },
+  "runs": [
+    {
+      "experiment": "minimal",
+      "native_state": "EXITED",
+      "retrieval_state": "SUCCEEDED",
+      "run_id": "run_0123456789abcdef0123456789abcdef",
+      "scheduler_job_ids": [
+        "local-0123456789abcdef0123456789abcdef"
+      ],
+      "state": "SUCCEEDED",
+      "target": "local",
+      "tasks": {
+        "succeeded": 1,
+        "total": 1
+      }
+    }
+  ]
+}

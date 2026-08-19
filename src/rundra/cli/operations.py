@@ -354,6 +354,35 @@ class CancelValue:
 @dataclass(frozen=True, slots=True)
 class ListRunsValue:
     runs: tuple[StatusValue, ...]
+    offset: int = 0
+    limit: int = 100
+    total: int | None = None
+    include_tasks: bool = False
+    format_version: int = 2
+
+    def __post_init__(self) -> None:
+        runs = tuple(self.runs)
+        if any(type(item) is not StatusValue for item in runs):
+            raise TypeError("ListRunsValue runs must contain StatusValues")
+        if type(self.offset) is not int or self.offset < 0:
+            raise ValueError("Run list offset must be non-negative")
+        if type(self.limit) is not int or not 1 <= self.limit <= 1000:
+            raise ValueError("Run list limit must be between 1 and 1000")
+        total = len(runs) if self.total is None else self.total
+        if type(total) is not int or total < len(runs):
+            raise ValueError("Run list total must cover the returned page")
+        if type(self.include_tasks) is not bool:
+            raise TypeError("Run list include_tasks must be bool")
+        if self.format_version != 2:
+            raise ValueError("Run list format_version must be 2")
+        object.__setattr__(self, "runs", runs)
+        object.__setattr__(self, "total", total)
+
+    @property
+    def next_offset(self) -> int | None:
+        next_offset = self.offset + len(self.runs)
+        assert self.total is not None
+        return next_offset if next_offset < self.total else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -2211,23 +2240,50 @@ def cancel_operation(
 
 
 def list_runs_operation(
-    store: RunStore, *, task_store: SqliteTaskStore | None = None
+    store: RunStore,
+    *,
+    task_store: SqliteTaskStore | None = None,
+    offset: int = 0,
+    limit: int = 100,
+    include_tasks: bool = False,
 ) -> OperationResult[ListRunsValue]:
+    if type(offset) is not int or offset < 0:
+        return OperationResult.failure(
+            "list",
+            OperationError("INVALID_RUN_OFFSET", "Run offset must be non-negative"),
+        )
+    if type(limit) is not int or not 1 <= limit <= 1000:
+        return OperationResult.failure(
+            "list",
+            OperationError("INVALID_RUN_LIMIT", "Run limit must be between 1 and 1000"),
+        )
     try:
+        records = store.list()
+        page = records[offset : offset + limit]
         return OperationResult.success(
             "list",
             ListRunsValue(
                 tuple(
-                    _status_value(
-                        record,
-                        (
-                            task_store.counts(record.run.id).execution
-                            if record.format_version == 4 and task_store is not None
-                            else None
-                        ),
+                    status
+                    if include_tasks
+                    else replace(status, task_details=())
+                    for status in (
+                        _status_value(
+                            record,
+                            (
+                                task_store.counts(record.run.id).execution
+                                if record.format_version == 4
+                                and task_store is not None
+                                else None
+                            ),
+                        )
+                        for record in page
                     )
-                    for record in store.list()
-                )
+                ),
+                offset,
+                limit,
+                len(records),
+                include_tasks,
             ),
         )
     except RunStoreError as error:

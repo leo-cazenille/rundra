@@ -43,7 +43,7 @@ cluster paths locally. A failed required local probe makes `ready` false and
 the generated Codex profile includes the missing paths.
 | `status` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Reconcile scheduler state and return portable Run/Task status. |
 | `tasks` | `RUN_ID` or `--last` | `--offset`, `--limit`, `--data-dir`, `--json` | Return one bounded page from materialized Run tasks or a compact version-4 TaskSpace sidecar. |
-| `list` | none | `--data-dir`, `--json` | List persisted Runs in deterministic order. |
+| `list` | none | `--offset`, `--limit`, `--include-tasks`, `--data-dir`, `--json` | Page through compact persisted Run summaries; include per-Task details only when explicitly requested. |
 | `logs` | `RUN_ID` or `--last` | `--task`, `--data-dir`, `--json` | Read one Task's framework-managed stdout/stderr. |
 | `fetch` | `RUN_ID` or `--last` | optional `--destination`; repeatable `--task`; `--verbose`, `--progress`, `--data-dir`, `--json` | Idempotently retrieve all or selected Task artifacts. Defaults to `retrieved/<config-stem>` and reports task-scaled retrieval progress when requested. |
 | `inspect` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Return the complete persisted RunRecord. |

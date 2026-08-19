@@ -1692,6 +1692,14 @@ rundr list
 
 Lists known Runs.
 
+The default human and JSON forms return compact Run summaries in deterministic
+pages of at most 100 Runs. `--offset` and `--limit` select a page, with a hard
+limit of 1,000, and the JSON page envelope reports the total and next offset.
+Per-Task details are omitted unless `--include-tasks` is explicit; agents should
+normally use the paginated `tasks RUN_ID` command instead.
+This paginated list document is format version 2; readers may continue to
+accept the retained unpaginated version-1 contract.
+
 Filtering by state, target, experiment, or recency may be added later.
 
 ---
