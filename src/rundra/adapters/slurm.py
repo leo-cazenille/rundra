@@ -20,6 +20,8 @@ from rundra.ports import (
     SchedulerObservation,
     SchedulerReference,
     SchedulerSubmission,
+    SchedulerSubmissionFailure,
+    SchedulerSubmissionOutcome,
     Transport,
 )
 
@@ -146,8 +148,24 @@ class SlurmScriptError(ValueError):
     """Raised when a normalized group cannot be represented as an sbatch script."""
 
 
-class SlurmSubmissionError(RuntimeError):
+class SlurmSubmissionError(SchedulerSubmissionFailure):
     """Raised when sbatch submission fails or returns invalid structured output."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        outcome: SchedulerSubmissionOutcome = SchedulerSubmissionOutcome.UNCERTAIN,
+        phase: str = "scheduler_submit",
+        exit_code: int | None = None,
+    ) -> None:
+        super().__init__(
+            message,
+            backend="slurm",
+            phase=phase,
+            outcome=outcome,
+            exit_code=exit_code,
+        )
 
 
 class SlurmQueryError(RuntimeError):
@@ -302,7 +320,9 @@ class SlurmScheduler:
         if type(group) is SchedulerGroup and len(group.units) != 1:
             raise SlurmSubmissionError(
                 "M5.3 array submission is not available until per-Task "
-                "reconciliation is implemented"
+                "reconciliation is implemented",
+                outcome=SchedulerSubmissionOutcome.REJECTED,
+                phase="request_validation",
             )
         stdout_path, stderr_path = self._log_paths("%j")
         script = render_sbatch_script(
@@ -334,7 +354,9 @@ class SlurmScheduler:
         if result.exit_code != 0:
             raise SlurmSubmissionError(
                 f"sbatch failed with exit code {result.exit_code}; "
-                "scheduler diagnostic redacted"
+                "scheduler diagnostic redacted",
+                outcome=SchedulerSubmissionOutcome.REJECTED,
+                exit_code=result.exit_code,
             )
         output = result.stdout.strip()
         match = _PARSABLE_SUBMISSION.fullmatch(output)
@@ -450,7 +472,9 @@ class SlurmScheduler:
     ) -> SchedulerSubmission:
         if self._log_directory is None:
             raise SlurmSubmissionError(
-                "Slurm bundle submission requires a configured log directory"
+                "Slurm bundle submission requires a configured log directory",
+                outcome=SchedulerSubmissionOutcome.REJECTED,
+                phase="request_validation",
             )
         limits = tuple(
             limit
@@ -459,7 +483,9 @@ class SlurmScheduler:
         )
         if not limits:
             raise SlurmSubmissionError(
-                "Slurm bundle submission requires an explicit worker limit"
+                "Slurm bundle submission requires an explicit worker limit",
+                outcome=SchedulerSubmissionOutcome.REJECTED,
+                phase="request_validation",
             )
         task_slots = min(request.task_slots_per_worker, len(request.mapping))
         worker_count = min(
@@ -630,13 +656,18 @@ class SlurmScheduler:
                 if result.exit_code != 0:
                     raise SlurmSubmissionError(
                         "Bundle manifest chunk persistence failed with "
-                        f"exit code {result.exit_code}; diagnostic redacted"
+                        f"exit code {result.exit_code}; diagnostic redacted",
+                        outcome=SchedulerSubmissionOutcome.REJECTED,
+                        phase="manifest_persistence",
+                        exit_code=result.exit_code,
                     )
         except SlurmSubmissionError:
             raise
         except Exception as error:
             raise SlurmSubmissionError(
-                "Could not persist the bundle manifest chunks"
+                "Could not persist the bundle manifest chunks",
+                outcome=SchedulerSubmissionOutcome.REJECTED,
+                phase="manifest_persistence",
             ) from error
         command = Command(
             (
@@ -661,7 +692,10 @@ class SlurmScheduler:
         if result.exit_code != 0:
             raise SlurmSubmissionError(
                 "Bundle manifest persistence or sbatch submission failed with "
-                f"exit code {result.exit_code}; scheduler diagnostic redacted"
+                f"exit code {result.exit_code}; scheduler diagnostic redacted",
+                outcome=SchedulerSubmissionOutcome.REJECTED,
+                phase="scheduler_submit",
+                exit_code=result.exit_code,
             )
         output = result.stdout.strip()
         match = _PARSABLE_SUBMISSION.fullmatch(output)

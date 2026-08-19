@@ -4,7 +4,9 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 
-from rundra.adapters.pbs import OpenPBSScheduler, render_qsub_script
+import pytest
+
+from rundra.adapters.pbs import OpenPBSScheduler, PBSSubmissionError, render_qsub_script
 from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import Command, ResourceRequest, TaskId
 from rundra.domain.states import ExecutionState
@@ -14,6 +16,7 @@ from rundra.ports import (
     SchedulerArrayRequest,
     SchedulerGroup,
     SchedulerReference,
+    SchedulerSubmissionOutcome,
     SchedulerUnit,
 )
 
@@ -80,6 +83,26 @@ def test_submit_array_maps_openpbs_subjob_ids() -> None:
         units[1].task_id: "42[1].server",
     }
     assert "#PBS -J 0-1%1" in transport.commands[0].argv[5]
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "stdout", "outcome"),
+    [
+        (1, "", SchedulerSubmissionOutcome.REJECTED),
+        (0, "not-a-job", SchedulerSubmissionOutcome.UNCERTAIN),
+    ],
+)
+def test_openpbs_classifies_submission_outcomes(
+    exit_code: int,
+    stdout: str,
+    outcome: SchedulerSubmissionOutcome,
+) -> None:
+    scheduler = OpenPBSScheduler(FakeTransport([(exit_code, stdout)]))
+
+    with pytest.raises(PBSSubmissionError) as caught:
+        scheduler.submit(SchedulerGroup((_unit(),)))
+
+    assert caught.value.outcome is outcome
 
 
 def test_query_maps_json_history_and_log_metadata() -> None:

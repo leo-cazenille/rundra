@@ -17,6 +17,8 @@ from rundra.ports import (
     SchedulerObservation,
     SchedulerReference,
     SchedulerSubmission,
+    SchedulerSubmissionFailure,
+    SchedulerSubmissionOutcome,
     Transport,
 )
 
@@ -66,8 +68,23 @@ class PBSSchedulerError(RuntimeError):
     """Base error for the OpenPBS adapter."""
 
 
-class PBSSubmissionError(PBSSchedulerError):
-    pass
+class PBSSubmissionError(PBSSchedulerError, SchedulerSubmissionFailure):
+    def __init__(
+        self,
+        message: str,
+        *,
+        outcome: SchedulerSubmissionOutcome = SchedulerSubmissionOutcome.UNCERTAIN,
+        phase: str = "scheduler_submit",
+        exit_code: int | None = None,
+    ) -> None:
+        SchedulerSubmissionFailure.__init__(
+            self,
+            message,
+            backend="pbs",
+            phase=phase,
+            outcome=outcome,
+            exit_code=exit_code,
+        )
 
 
 class PBSQueryError(PBSSchedulerError):
@@ -127,7 +144,11 @@ class OpenPBSScheduler:
         self, group: SchedulerGroup, *, dependency: str | None
     ) -> SchedulerSubmission:
         if type(group) is not SchedulerGroup or len(group.units) != 1:
-            raise PBSSubmissionError("OpenPBS single submission requires one Task")
+            raise PBSSubmissionError(
+                "OpenPBS single submission requires one Task",
+                outcome=SchedulerSubmissionOutcome.REJECTED,
+                phase="request_validation",
+            )
         script = render_qsub_script(group, log_directory=self._log_directory)
         command = Command(
             (
@@ -310,9 +331,17 @@ class OpenPBSScheduler:
         except Exception as error:
             raise error_type(f"Could not start {action}") from error
         if result.exit_code != 0 and not allow_failure:
-            raise error_type(
-                f"{action} failed with exit code {result.exit_code}; scheduler diagnostic redacted"
+            message = (
+                f"{action} failed with exit code {result.exit_code}; "
+                "scheduler diagnostic redacted"
             )
+            if error_type is PBSSubmissionError:
+                raise PBSSubmissionError(
+                    message,
+                    outcome=SchedulerSubmissionOutcome.REJECTED,
+                    exit_code=result.exit_code,
+                )
+            raise error_type(message)
         return result
 
 

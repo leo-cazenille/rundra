@@ -43,7 +43,10 @@ from rundra.orchestration.preparation import (
 from rundra.orchestration.progress import ProgressEvent, ProgressObserver, ProgressPhase
 from rundra.persistence.base import RunStore
 from rundra.persistence.errors import RunStoreError
-from rundra.persistence.submission_store import SubmissionReceiptStore
+from rundra.persistence.submission_store import (
+    SubmissionReceiptOutcome,
+    SubmissionReceiptStore,
+)
 from rundra.ports import (
     ArrayScheduler,
     BindMount,
@@ -56,6 +59,8 @@ from rundra.ports import (
     SchedulerGroup,
     SchedulerObservation,
     SchedulerReference,
+    SchedulerSubmissionFailure,
+    SchedulerSubmissionOutcome,
     SchedulerUnit,
     StagedWorkspace,
     Stager,
@@ -554,6 +559,28 @@ class OrchestrationService:
             record = self.store.load(run_id)
             if record.scheduler_job_ids:
                 return record, "found"
+            try:
+                receipt = self._submission_receipts.load(run_id)
+            except RunStoreError as error:
+                raise OrchestrationError(
+                    code="SUBMISSION_RECEIPT_NOT_FOUND",
+                    message=str(error),
+                    run_id=run_id,
+                ) from error
+            if receipt.outcome is SubmissionReceiptOutcome.REJECTED:
+                if record.run.state is ExecutionState.STAGING:
+                    self._fail_before_completion(record, "SCHEDULER_SUBMISSION_FAILED")
+                    record = self.store.load(run_id)
+                if record.run.state is ExecutionState.FAILED:
+                    return record, "rejected"
+                raise OrchestrationError(
+                    code="SUBMISSION_RECEIPT_MISMATCH",
+                    message=(
+                        f"Run {run_id} has a rejected receipt but is "
+                        f"{record.run.state.value}"
+                    ),
+                    run_id=run_id,
+                )
             if record.run.state is not ExecutionState.STAGING:
                 raise OrchestrationError(
                     code="SUBMISSION_NOT_RECOVERABLE",
@@ -563,21 +590,17 @@ class OrchestrationService:
                     ),
                     run_id=run_id,
                 )
-            try:
-                receipt = self._submission_receipts.load(run_id)
-            except RunStoreError as error:
-                raise OrchestrationError(
-                    code="SUBMISSION_RECEIPT_NOT_FOUND",
-                    message=str(error),
-                    run_id=run_id,
-                ) from error
             if not receipt.completed:
+                description = (
+                    "has an uncertain scheduler submission outcome"
+                    if receipt.outcome is SubmissionReceiptOutcome.UNCERTAIN
+                    else "has a pending legacy or interrupted submission receipt"
+                )
                 raise OrchestrationError(
                     code="SUBMISSION_OUTCOME_UNKNOWN",
                     message=(
-                        f"Run {run_id} reached the scheduler but has no completed "
-                        "receipt. Rundra will not submit it again; inspect the "
-                        "scheduler before taking manual action."
+                        f"Run {run_id} {description}. Rundra will not submit it "
+                        "again; inspect the scheduler before taking manual action."
                     ),
                     run_id=run_id,
                 )
@@ -809,6 +832,7 @@ class OrchestrationService:
                 run_id,
                 tuple(unit.task_id for unit in units),
                 submission_started_at,
+                backend=record.run.target.scheduler.kind,
             )
             if submission_receipts is not None
             else None
@@ -869,6 +893,10 @@ class OrchestrationService:
                     if preparation_reference is not None
                     else self._scheduler.submit(scheduler_group)
                 )
+            if set(submission.task_native_ids) != {unit.task_id for unit in units}:
+                raise ValueError(
+                    "Scheduler submission did not map every planned Task exactly"
+                )
             if pending_receipt is not None:
                 assert submission_receipts is not None
                 submission_receipts.complete(
@@ -877,12 +905,59 @@ class OrchestrationService:
                     submission.task_native_ids,
                     self._clock(),
                 )
-            if set(submission.task_native_ids) != {unit.task_id for unit in units}:
-                raise ValueError(
-                    "Scheduler submission did not map every planned Task exactly"
+        except SchedulerSubmissionFailure as error:
+            if error.outcome is SchedulerSubmissionOutcome.REJECTED:
+                if pending_receipt is not None:
+                    assert submission_receipts is not None
+                    try:
+                        submission_receipts.reject(
+                            pending_receipt,
+                            backend=error.backend,
+                            phase=error.phase,
+                            failure_classification="scheduler_rejected",
+                            exit_code=error.exit_code,
+                            updated_at=self._clock(),
+                        )
+                    finally:
+                        self._fail_before_completion(
+                            record, "SCHEDULER_SUBMISSION_FAILED"
+                        )
+                else:
+                    self._fail_before_completion(record, "SCHEDULER_SUBMISSION_FAILED")
+                raise OrchestrationError(
+                    code="SCHEDULER_SUBMISSION_FAILED",
+                    message=f"Run {run_id} scheduler submission failed: {error}",
+                    run_id=run_id,
+                ) from error
+            if pending_receipt is not None:
+                assert submission_receipts is not None
+                submission_receipts.mark_uncertain(
+                    pending_receipt,
+                    backend=error.backend,
+                    phase=error.phase,
+                    failure_classification="scheduler_outcome_uncertain",
+                    exit_code=error.exit_code,
+                    updated_at=self._clock(),
                 )
+            raise OrchestrationError(
+                code="SUBMISSION_OUTCOME_UNKNOWN",
+                message=(
+                    f"Run {run_id} scheduler submission outcome is unknown: "
+                    f"{error}. Retry only with 'rundr resume {run_id}'."
+                ),
+                run_id=run_id,
+            ) from error
         except Exception as error:
             if pending_receipt is not None:
+                assert submission_receipts is not None
+                submission_receipts.mark_uncertain(
+                    pending_receipt,
+                    backend=record.run.target.scheduler.kind,
+                    phase="orchestration",
+                    failure_classification="unclassified_exception",
+                    exit_code=None,
+                    updated_at=self._clock(),
+                )
                 raise OrchestrationError(
                     code="SUBMISSION_OUTCOME_UNKNOWN",
                     message=(

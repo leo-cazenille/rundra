@@ -39,7 +39,11 @@ from rundra.orchestration.service import (
     OrchestrationService,
     RunExecutionRequest,
 )
-from rundra.persistence import JsonRunStore, SubmissionReceiptStore
+from rundra.persistence import (
+    JsonRunStore,
+    SubmissionReceiptOutcome,
+    SubmissionReceiptStore,
+)
 from rundra.persistence.errors import RunStoreError
 from rundra.ports import (
     CapabilityCheck,
@@ -51,6 +55,8 @@ from rundra.ports import (
     SchedulerObservation,
     SchedulerReference,
     SchedulerSubmission,
+    SchedulerSubmissionFailure,
+    SchedulerSubmissionOutcome,
     StagedWorkspace,
     StageRequest,
 )
@@ -132,6 +138,24 @@ class QueryFailScheduler:
         self, references: tuple[SchedulerReference, ...]
     ) -> tuple[SchedulerObservation, ...]:
         raise AssertionError("cancel must not be called")
+
+
+class FailingSubmissionScheduler:
+    def __init__(self, failure: SchedulerSubmissionFailure) -> None:
+        self.failure = failure
+
+    def submit(self, group: SchedulerGroup) -> SchedulerSubmission:
+        raise self.failure
+
+    def query(
+        self, references: tuple[SchedulerReference, ...]
+    ) -> tuple[SchedulerObservation, ...]:
+        raise AssertionError("query must not follow failed submission")
+
+    def cancel(
+        self, references: tuple[SchedulerReference, ...]
+    ) -> tuple[SchedulerObservation, ...]:
+        raise AssertionError("cancel must not follow failed submission")
 
 
 class DependencyLocalScheduler:
@@ -668,6 +692,65 @@ def test_recovery_finds_an_already_durable_submission(tmp_path: Path) -> None:
 
     assert action == "found"
     assert found == submitted
+
+
+@pytest.mark.parametrize(
+    ("outcome", "error_code", "run_state", "receipt_outcome"),
+    [
+        (
+            SchedulerSubmissionOutcome.REJECTED,
+            "SCHEDULER_SUBMISSION_FAILED",
+            ExecutionState.FAILED,
+            SubmissionReceiptOutcome.REJECTED,
+        ),
+        (
+            SchedulerSubmissionOutcome.UNCERTAIN,
+            "SUBMISSION_OUTCOME_UNKNOWN",
+            ExecutionState.STAGING,
+            SubmissionReceiptOutcome.UNCERTAIN,
+        ),
+    ],
+)
+def test_submission_outcome_controls_durable_run_state(
+    tmp_path: Path,
+    outcome: SchedulerSubmissionOutcome,
+    error_code: str,
+    run_state: ExecutionState,
+    receipt_outcome: SubmissionReceiptOutcome,
+) -> None:
+    runtime = HostMappedRuntime()
+    request, _ = _request(tmp_path, exit_code=0)
+    failure = SchedulerSubmissionFailure(
+        "safe scheduler failure",
+        backend="slurm",
+        phase="scheduler_submit",
+        outcome=outcome,
+        exit_code=1 if outcome is SchedulerSubmissionOutcome.REJECTED else None,
+    )
+    service = _service(
+        tmp_path,
+        runtime,
+        scheduler=FailingSubmissionScheduler(failure),
+    )
+    receipts = SubmissionReceiptStore(tmp_path / "records")
+    service._submission_receipts = receipts
+
+    with pytest.raises(OrchestrationError) as caught:
+        service.submit_one(request)
+
+    record = service.store.load(_RUN_ID)
+    receipt = receipts.load(_RUN_ID)
+    assert caught.value.code == error_code
+    assert record.run.state is run_state
+    assert receipt.outcome is receipt_outcome
+    if outcome is SchedulerSubmissionOutcome.REJECTED:
+        recovered, action = service.recover_submission(_RUN_ID)
+        assert action == "rejected"
+        assert recovered.run.state is ExecutionState.FAILED
+    else:
+        with pytest.raises(OrchestrationError) as recovery:
+            service.recover_submission(_RUN_ID)
+        assert recovery.value.code == "SUBMISSION_OUTCOME_UNKNOWN"
 
 
 def test_available_source_provenance_is_persisted_before_execution(

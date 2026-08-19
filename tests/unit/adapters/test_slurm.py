@@ -31,6 +31,7 @@ from rundra.ports import (
     SchedulerArrayRequest,
     SchedulerGroup,
     SchedulerReference,
+    SchedulerSubmissionOutcome,
     SchedulerUnit,
 )
 
@@ -1014,16 +1015,32 @@ def test_slurm_submission_creates_and_uses_configured_log_directory() -> None:
 
 
 @pytest.mark.parametrize(
-    ("exit_code", "stdout", "stderr", "message"),
+    ("exit_code", "stdout", "stderr", "message", "outcome"),
     [
-        (1, "", "invalid account", "exit code 1"),
-        (0, "Submitted batch job 123", "", "invalid parsable"),
-        (0, "123\nextra", "", "invalid parsable"),
-        (0, "123;cluster;extra", "", "invalid parsable"),
+        (1, "", "invalid account", "exit code 1", SchedulerSubmissionOutcome.REJECTED),
+        (
+            0,
+            "Submitted batch job 123",
+            "",
+            "invalid parsable",
+            SchedulerSubmissionOutcome.UNCERTAIN,
+        ),
+        (0, "123\nextra", "", "invalid parsable", SchedulerSubmissionOutcome.UNCERTAIN),
+        (
+            0,
+            "123;cluster;extra",
+            "",
+            "invalid parsable",
+            SchedulerSubmissionOutcome.UNCERTAIN,
+        ),
     ],
 )
 def test_slurm_submission_rejects_failures_and_nonparsable_output(
-    exit_code: int, stdout: str, stderr: str, message: str
+    exit_code: int,
+    stdout: str,
+    stderr: str,
+    message: str,
+    outcome: SchedulerSubmissionOutcome,
 ) -> None:
     transport = ScriptedTransport(deque([]))
     scheduler = SlurmScheduler(transport)
@@ -1044,15 +1061,20 @@ def test_slurm_submission_rejects_failures_and_nonparsable_output(
     )
     transport.results.append(_command_result(expected, exit_code, stdout, stderr))
 
-    with pytest.raises(SlurmSubmissionError, match=message):
+    with pytest.raises(SlurmSubmissionError, match=message) as caught:
         scheduler.submit(group)
+
+    assert caught.value.outcome is outcome
+    assert caught.value.exit_code == (exit_code if exit_code else None)
 
 
 def test_slurm_submission_normalizes_transport_start_failure() -> None:
     transport = ScriptedTransport(deque([RuntimeError("connection lost")]))
 
-    with pytest.raises(SlurmSubmissionError, match="Could not start"):
+    with pytest.raises(SlurmSubmissionError, match="Could not start") as caught:
         SlurmScheduler(transport).submit(_group())
+
+    assert caught.value.outcome is SchedulerSubmissionOutcome.UNCERTAIN
 
 
 def test_slurm_query_combines_queue_and_accounting_in_request_order() -> None:

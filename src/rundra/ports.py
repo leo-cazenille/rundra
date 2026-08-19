@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
 from math import isfinite
 from pathlib import PurePath
 from types import MappingProxyType
@@ -21,6 +22,43 @@ from rundra.domain.models import (
     TaskId,
 )
 from rundra.domain.states import ExecutionState
+
+
+class SchedulerSubmissionOutcome(StrEnum):
+    """Portable classification for a failed scheduler submission attempt."""
+
+    REJECTED = "rejected"
+    UNCERTAIN = "uncertain"
+
+
+class SchedulerSubmissionFailure(RuntimeError):
+    """Safe scheduler-submission failure exposed across adapter boundaries."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        backend: str,
+        phase: str,
+        outcome: SchedulerSubmissionOutcome,
+        exit_code: int | None = None,
+    ) -> None:
+        if type(message) is not str or not message.strip():
+            raise ValueError("Scheduler submission failure message must be nonblank")
+        for name, value in (("backend", backend), ("phase", phase)):
+            if type(value) is not str or not value.strip() or "\x00" in value:
+                raise ValueError(
+                    f"Scheduler submission failure {name} must be nonblank and safe"
+                )
+        if type(outcome) is not SchedulerSubmissionOutcome:
+            raise TypeError("Scheduler submission outcome must be portable")
+        if exit_code is not None and type(exit_code) is not int:
+            raise TypeError("Scheduler submission exit_code must be an integer or None")
+        self.backend = backend
+        self.phase = phase
+        self.outcome = outcome
+        self.exit_code = exit_code
+        super().__init__(message)
 
 
 def _freeze_metadata(

@@ -6,11 +6,22 @@ import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
 
 from rundra.domain.models import RunId, TaskId
 from rundra.persistence.errors import RunStoreError
+
+
+class SubmissionReceiptOutcome(StrEnum):
+    """Durable scheduler-submission attempt outcome."""
+
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    UNCERTAIN = "uncertain"
+    OPERATOR_RESOLVED = "operator_resolved"
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,10 +35,16 @@ class SubmissionReceipt:
     scheduler_job_ids: tuple[str, ...] = ()
     task_scheduler_ids: Mapping[TaskId, str] | None = None
     completed_at: datetime | None = None
+    outcome: SubmissionReceiptOutcome | None = None
+    backend: str | None = None
+    phase: str | None = None
+    failure_classification: str | None = None
+    exit_code: int | None = None
+    updated_at: datetime | None = None
 
     def __post_init__(self) -> None:
-        if self.format_version != 1:
-            raise ValueError("Submission receipt format_version must be 1")
+        if self.format_version not in {1, 2}:
+            raise ValueError("Submission receipt format_version must be 1 or 2")
         if type(self.run_id) is not RunId:
             raise TypeError("Submission receipt run_id must be a RunId")
         task_ids = tuple(self.task_ids)
@@ -40,6 +57,36 @@ class SubmissionReceipt:
             or self.started_at.utcoffset() is None
         ):
             raise ValueError("Submission receipt started_at must be timezone-aware")
+        outcome = self.outcome
+        updated_at = self.updated_at
+        if self.format_version == 1:
+            if any(
+                value is not None
+                for value in (
+                    outcome,
+                    self.backend,
+                    self.phase,
+                    self.failure_classification,
+                    self.exit_code,
+                    updated_at,
+                )
+            ):
+                raise ValueError("Version-1 receipt cannot contain version-2 fields")
+            outcome = (
+                SubmissionReceiptOutcome.ACCEPTED
+                if self.completed_at is not None
+                else SubmissionReceiptOutcome.PENDING
+            )
+            updated_at = self.completed_at or self.started_at
+        else:
+            if type(outcome) is not SubmissionReceiptOutcome:
+                raise TypeError("Version-2 receipt outcome must be explicit")
+            if (
+                not isinstance(updated_at, datetime)
+                or updated_at.utcoffset() is None
+                or updated_at < self.started_at
+            ):
+                raise ValueError("Version-2 receipt updated_at is invalid")
         jobs = tuple(self.scheduler_job_ids)
         if any(type(item) is not str or not item.strip() for item in jobs):
             raise ValueError("Submission receipt scheduler IDs must be nonblank")
@@ -51,27 +98,69 @@ class SubmissionReceipt:
             for task_id, native_id in mapping.items()
         ):
             raise TypeError("Submission receipt Task mapping is invalid")
-        if self.completed_at is None:
-            if jobs or mapping:
-                raise ValueError(
-                    "Pending submission receipt cannot contain scheduler IDs"
-                )
-        else:
+        accepted = outcome is SubmissionReceiptOutcome.ACCEPTED
+        if accepted:
             if (
-                not isinstance(self.completed_at, datetime)
+                self.completed_at is None
+                or not isinstance(self.completed_at, datetime)
                 or self.completed_at.utcoffset() is None
                 or self.completed_at < self.started_at
             ):
                 raise ValueError("Submission receipt completed_at is invalid")
             if not jobs or set(mapping) != set(task_ids):
-                raise ValueError("Completed submission receipt must map every Task")
+                raise ValueError("Accepted submission receipt must map every Task")
+        elif jobs or mapping:
+            raise ValueError("Non-accepted receipt cannot contain scheduler IDs")
+        if outcome in {
+            SubmissionReceiptOutcome.REJECTED,
+            SubmissionReceiptOutcome.OPERATOR_RESOLVED,
+        }:
+            if (
+                self.completed_at is None
+                or not isinstance(self.completed_at, datetime)
+                or self.completed_at.utcoffset() is None
+                or self.completed_at < self.started_at
+            ):
+                raise ValueError("Terminal submission receipt completed_at is invalid")
+        elif not accepted and self.completed_at is not None:
+            raise ValueError("Pending or uncertain receipt cannot be completed")
+        failure = outcome in {
+            SubmissionReceiptOutcome.REJECTED,
+            SubmissionReceiptOutcome.UNCERTAIN,
+            SubmissionReceiptOutcome.OPERATOR_RESOLVED,
+        }
+        details = (self.backend, self.phase, self.failure_classification)
+        if failure:
+            if any(
+                type(value) is not str or not value.strip() or "\x00" in value
+                for value in details
+            ):
+                raise ValueError("Submission receipt failure details must be safe")
+        elif any(value is not None for value in details):
+            raise ValueError(
+                "Pending or accepted receipt cannot contain failure details"
+            )
+        if self.exit_code is not None and type(self.exit_code) is not int:
+            raise TypeError("Submission receipt exit_code must be an integer or None")
+        if not failure and self.exit_code is not None:
+            raise ValueError("Only failed submission outcomes can contain exit_code")
         object.__setattr__(self, "task_ids", task_ids)
         object.__setattr__(self, "scheduler_job_ids", jobs)
         object.__setattr__(self, "task_scheduler_ids", MappingProxyType(mapping))
+        object.__setattr__(self, "outcome", outcome)
+        object.__setattr__(self, "updated_at", updated_at)
 
     @property
     def completed(self) -> bool:
-        return self.completed_at is not None
+        return self.outcome is SubmissionReceiptOutcome.ACCEPTED
+
+    @property
+    def terminal(self) -> bool:
+        return self.outcome in {
+            SubmissionReceiptOutcome.ACCEPTED,
+            SubmissionReceiptOutcome.REJECTED,
+            SubmissionReceiptOutcome.OPERATOR_RESOLVED,
+        }
 
 
 class SubmissionReceiptStore:
@@ -83,9 +172,22 @@ class SubmissionReceiptStore:
         self._root = root / "submission-receipts"
 
     def begin(
-        self, run_id: RunId, task_ids: Sequence[TaskId], started_at: datetime
+        self,
+        run_id: RunId,
+        task_ids: Sequence[TaskId],
+        started_at: datetime,
+        *,
+        backend: str | None = None,
     ) -> SubmissionReceipt:
-        receipt = SubmissionReceipt(1, run_id, tuple(task_ids), started_at)
+        del backend
+        receipt = SubmissionReceipt(
+            2,
+            run_id,
+            tuple(task_ids),
+            started_at,
+            outcome=SubmissionReceiptOutcome.PENDING,
+            updated_at=started_at,
+        )
         path = self.path(run_id)
         if path.exists():
             previous = self.load(run_id)
@@ -107,13 +209,103 @@ class SubmissionReceiptStore:
         if pending.completed:
             return pending
         receipt = SubmissionReceipt(
-            1,
+            2,
             pending.run_id,
             pending.task_ids,
             pending.started_at,
             tuple(scheduler_job_ids),
             task_scheduler_ids,
             completed_at,
+            SubmissionReceiptOutcome.ACCEPTED,
+            updated_at=completed_at,
+        )
+        current = self.load(pending.run_id)
+        if current == receipt:
+            return current
+        if current != pending:
+            raise RunStoreError(
+                f"Run {pending.run_id} submission receipt changed concurrently"
+            )
+        self._write(receipt, replace=True)
+        return receipt
+
+    def reject(
+        self,
+        pending: SubmissionReceipt,
+        *,
+        backend: str,
+        phase: str,
+        failure_classification: str,
+        exit_code: int | None,
+        updated_at: datetime,
+    ) -> SubmissionReceipt:
+        return self._fail(
+            pending,
+            outcome=SubmissionReceiptOutcome.REJECTED,
+            backend=backend,
+            phase=phase,
+            failure_classification=failure_classification,
+            exit_code=exit_code,
+            updated_at=updated_at,
+        )
+
+    def mark_uncertain(
+        self,
+        pending: SubmissionReceipt,
+        *,
+        backend: str,
+        phase: str,
+        failure_classification: str,
+        exit_code: int | None,
+        updated_at: datetime,
+    ) -> SubmissionReceipt:
+        return self._fail(
+            pending,
+            outcome=SubmissionReceiptOutcome.UNCERTAIN,
+            backend=backend,
+            phase=phase,
+            failure_classification=failure_classification,
+            exit_code=exit_code,
+            updated_at=updated_at,
+        )
+
+    def _fail(
+        self,
+        pending: SubmissionReceipt,
+        *,
+        outcome: SubmissionReceiptOutcome,
+        backend: str,
+        phase: str,
+        failure_classification: str,
+        exit_code: int | None,
+        updated_at: datetime,
+    ) -> SubmissionReceipt:
+        if pending.outcome is outcome:
+            return pending
+        if pending.outcome is not SubmissionReceiptOutcome.PENDING:
+            current_outcome = pending.outcome
+            if current_outcome is None:
+                raise RunStoreError(
+                    f"Run {pending.run_id} has a legacy submission receipt"
+                )
+            raise RunStoreError(
+                f"Run {pending.run_id} submission receipt is already "
+                f"{current_outcome.value}"
+            )
+        receipt = SubmissionReceipt(
+            2,
+            pending.run_id,
+            pending.task_ids,
+            pending.started_at,
+            completed_at=(
+                updated_at if outcome is SubmissionReceiptOutcome.REJECTED else None
+            ),
+            outcome=outcome,
+            backend=backend,
+            phase=phase,
+            failure_classification=failure_classification,
+            exit_code=exit_code,
+            updated_at=updated_at,
         )
         current = self.load(pending.run_id)
         if current == receipt:
@@ -189,7 +381,7 @@ class SubmissionReceiptStore:
 
 
 def _receipt_document(receipt: SubmissionReceipt) -> dict[str, object]:
-    return {
+    document: dict[str, object] = {
         "format_version": receipt.format_version,
         "run_id": str(receipt.run_id),
         "task_ids": [str(item) for item in receipt.task_ids],
@@ -202,10 +394,24 @@ def _receipt_document(receipt: SubmissionReceipt) -> dict[str, object]:
             None if receipt.completed_at is None else receipt.completed_at.isoformat()
         ),
     }
+    if receipt.format_version == 2:
+        if receipt.outcome is None or receipt.updated_at is None:
+            raise ValueError("version-2 receipt is missing outcome metadata")
+        document.update(
+            {
+                "outcome": receipt.outcome.value,
+                "backend": receipt.backend,
+                "phase": receipt.phase,
+                "failure_classification": receipt.failure_classification,
+                "exit_code": receipt.exit_code,
+                "updated_at": receipt.updated_at.isoformat(),
+            }
+        )
+    return document
 
 
 def _receipt_from_document(value: object, run_id: RunId) -> SubmissionReceipt:
-    if not isinstance(value, dict) or set(value) != {
+    common = {
         "format_version",
         "run_id",
         "task_ids",
@@ -213,7 +419,22 @@ def _receipt_from_document(value: object, run_id: RunId) -> SubmissionReceipt:
         "scheduler_job_ids",
         "task_scheduler_ids",
         "completed_at",
-    }:
+    }
+    version_two = {
+        "outcome",
+        "backend",
+        "phase",
+        "failure_classification",
+        "exit_code",
+        "updated_at",
+    }
+    if not isinstance(value, dict):
+        raise ValueError("invalid receipt fields")
+    version = value.get("format_version")
+    if version not in (1, 2):
+        raise ValueError("unsupported receipt format version")
+    expected = common if version == 1 else common | version_two
+    if set(value) != expected:
         raise ValueError("invalid receipt fields")
     if value["run_id"] != str(run_id):
         raise ValueError("receipt Run ID mismatch")
@@ -228,11 +449,17 @@ def _receipt_from_document(value: object, run_id: RunId) -> SubmissionReceipt:
         raise TypeError("invalid receipt collections")
     completed = value["completed_at"]
     return SubmissionReceipt(
-        value["format_version"],
+        version,
         run_id,
         tuple(TaskId(item) for item in task_ids),
         datetime.fromisoformat(value["started_at"]),
         tuple(jobs),
         {TaskId(key): item for key, item in mapping.items()},
         None if completed is None else datetime.fromisoformat(completed),
+        (None if version == 1 else SubmissionReceiptOutcome(value["outcome"])),
+        None if version == 1 else value["backend"],
+        None if version == 1 else value["phase"],
+        None if version == 1 else value["failure_classification"],
+        None if version == 1 else value["exit_code"],
+        None if version == 1 else datetime.fromisoformat(value["updated_at"]),
     )

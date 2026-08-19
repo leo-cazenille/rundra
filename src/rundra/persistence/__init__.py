@@ -13,6 +13,7 @@ from rundra.persistence.purge_store import PurgeReceiptStore, receipt_document
 from rundra.persistence.serialization import record_from_dict, record_to_dict
 from rundra.persistence.submission_store import (
     SubmissionReceipt,
+    SubmissionReceiptOutcome,
     SubmissionReceiptStore,
 )
 from rundra.persistence.task_store import (
@@ -32,6 +33,7 @@ __all__ = [
     "RunStore",
     "RunStoreError",
     "SubmissionReceipt",
+    "SubmissionReceiptOutcome",
     "SubmissionReceiptStore",
     "SqliteTaskStore",
     "TaskState",
