@@ -486,3 +486,24 @@ RUNDRA_SHOAL_CPU_IMAGE=/absolute/path/to/cpu-image.sif \
     --run-shoal-scaling-tests \
     -vv
 ```
+
+### Recorded full-scale acceptance
+
+On 2026-08-19, Run `run_5a35e6d87d8a4cb6964d9febba988158`
+executed 5,000 Pogosim tasks through Slurm job `2360`. The worker pool used
+eight array workers with 40 CPU slots each, and the live scheduler state showed
+one worker on each of `shoal1` through `shoal8`. This provided 320 concurrent
+single-threaded Pogosim slots without creating 5,000 scheduler jobs. All 5,000
+tasks succeeded.
+
+Reference-mode retrieval indexed the complete run in approximately 31 seconds
+without copying the result payload already visible through the shared NFS
+filesystem. Analysis was run locally on `bigfish`, never on `fishvision`, and
+used 2,500 paired seeds for each of the ballistic and long-tumble regimes.
+
+The measured early-time MSD log-log slopes over 1--10 seconds were 1.447 for
+the ballistic regime and 0.147 for the long-tumble regime. At 119.18 seconds,
+the mean MSD values were 402,824 and 34,472 respectively, with a paired mean
+ballistic/long-tumble ratio of 11.94. These results confirm the expected strong
+separation between mostly ballistic and long-tumble motion while exercising
+the complete large-scale submit, schedule, retrieve, and analysis path.
