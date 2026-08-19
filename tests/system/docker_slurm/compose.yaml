@@ -1,6 +1,7 @@
 name: rundra-slurm-system
 
 x-apptainer: &apptainer
+  image: ${RUNDRA_DOCKER_SLURM_IMAGE:?set RUNDRA_DOCKER_SLURM_IMAGE}
   platform: linux/amd64
   security_opt:
     - seccomp=unconfined
@@ -16,7 +17,6 @@ x-volumes: &cluster-volumes
 services:
   init:
     <<: [*apptainer, *cluster-volumes]
-    build: .
     command: [init]
     volumes:
       - cluster-config:/cluster
@@ -25,7 +25,6 @@ services:
 
   controller:
     <<: [*apptainer, *cluster-volumes]
-    build: .
     hostname: controller
     command: [controller]
     depends_on:
@@ -43,7 +42,6 @@ services:
 
   compute1:
     <<: [*apptainer, *cluster-volumes]
-    build: .
     hostname: compute1
     command: [compute]
     depends_on:
@@ -54,7 +52,6 @@ services:
 
   compute2:
     <<: [*apptainer, *cluster-volumes]
-    build: .
     hostname: compute2
     command: [compute]
     depends_on:

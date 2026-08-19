@@ -6,6 +6,17 @@ compose="$root/tests/system/docker_slurm/compose.yaml"
 state=$(mktemp -d "${TMPDIR:-/tmp}/rundra-docker-slurm.XXXXXX")
 export RUNDRA_DOCKER_STATE=$state
 
+if [ -n "${RUNDRA_DOCKER_SLURM_IMAGE:-}" ]; then
+    if ! docker image inspect "$RUNDRA_DOCKER_SLURM_IMAGE" >/dev/null 2>&1; then
+        docker pull "$RUNDRA_DOCKER_SLURM_IMAGE"
+    fi
+else
+    RUNDRA_DOCKER_SLURM_IMAGE=rundra-slurm-system:local
+    export RUNDRA_DOCKER_SLURM_IMAGE
+    docker build --tag "$RUNDRA_DOCKER_SLURM_IMAGE" \
+        "$root/tests/system/docker_slurm"
+fi
+
 cleanup() {
     status=$?
     if [ "$status" -ne 0 ]; then
@@ -18,7 +29,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-docker compose -f "$compose" up --build --detach
+docker compose -f "$compose" up --detach --no-build
 
 attempt=0
 until ssh-keyscan -p 2222 127.0.0.1 > "$state/known_hosts" 2>/dev/null; do
