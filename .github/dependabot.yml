@@ -4,11 +4,10 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: "04:00"
       timezone: Europe/Paris
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 1
     groups:
       actions:
         patterns:
@@ -19,30 +18,13 @@ updates:
   - package-ecosystem: uv
     directory: /
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: "04:30"
       timezone: Europe/Paris
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 1
     groups:
-      runtime:
+      python:
         patterns:
-          - pyyaml
-          - tqdm
-      typing:
-        patterns:
-          - mypy
-          - types-pyyaml
-      testing:
-        patterns:
-          - mcp
-          - pytest
-          - ruff
-      release:
-        patterns:
-          - bandit
-          - pip-audit
-          - twine
-          - uv-build
+          - "*"
     commit-message:
       prefix: build

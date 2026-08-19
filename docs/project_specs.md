@@ -2948,9 +2948,10 @@ publication checks.
 
 The quality gate also runs actionlint across every GitHub Actions definition so
 workflow syntax and expression-context mistakes fail a still-valid commit
-workflow. Weekly grouped Dependabot proposals cover pinned GitHub Actions and
-the `uv` dependency set; they are never merged without passing normal checks
-and review.
+workflow. Monthly Dependabot proposals cover pinned GitHub Actions and the `uv`
+dependency set, with one grouped pull request permitted per ecosystem. They are
+never merged without passing normal checks and review. Security updates may be
+proposed independently of the routine version-update schedule.
 
 Containerized scheduler boundaries remain separate from commit gates. The
 Docker Slurm lifecycle suite runs nightly and manually, while Docker OpenPBS

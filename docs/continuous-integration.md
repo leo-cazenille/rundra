@@ -51,13 +51,13 @@ failure.
 
 ## Dependency updates
 
-Dependabot checks pinned GitHub Actions each Monday and Python dependencies
-managed by `uv` shortly afterward. Action updates are grouped together. Python
-updates are separated into runtime, typing, testing, and release-tool groups so
-one incompatible stub or publishing-tool upgrade does not block unrelated
-runtime updates. Dependabot does not merge changes: every proposed upgrade must
-pass the same `quality` and `package` checks and remains subject to normal
-review.
+Dependabot checks pinned GitHub Actions monthly and checks Python dependencies
+managed by `uv` shortly afterward. Each ecosystem produces one grouped update
+with at most one open pull request, limiting routine dependency maintenance to
+two PRs per month. Dependabot does not merge changes: every proposed upgrade
+must pass the same `quality` and `package` checks and remains subject to normal
+review. Security updates may still be proposed independently of this version
+update schedule.
 
 ## Release workflow
 
