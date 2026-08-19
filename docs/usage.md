@@ -211,6 +211,8 @@ matching prose.
 | `CAPABILITY_CHECK_FAILED` | Check local `ssh`, `rsync`, or `apptainer`; remotely check rsync, selected scheduler clients, Apptainer, image readability, and normal SSH authentication/host verification. |
 | `STAGING_FAILED` | Verify the configured workspace's nearest existing ancestor is writable and shared, the source exists, rsync is available, and no destination component is a symlink. |
 | `SCHEDULER_SUBMISSION_FAILED` | Re-run `plan`, then inspect account/partition/QOS/constraint, time/memory/GPU requests, and site policy. Rundra intentionally redacts scheduler stderr. |
+| `SUBMISSION_OUTCOME_UNKNOWN` | Do not submit a duplicate. Run `resume` first. If it remains unknown, inspect the scheduler through an approved read-only route; only after proving no job exists use `resolve-submission RUN_ID --not-submitted --confirm RUN_ID`. |
+| `WORKER_MEMORY_LIMIT_EXCEEDED` | Aggregate declared Task memory and slots exceed the target's per-worker ceiling. Reduce slots or correct the per-Task memory request; the site ceiling cannot be overridden by a launch. |
 | `SCHEDULER_QUERY_FAILED` or `ACCOUNTING_PENDING` | Retry `status`; verify the configured scheduler's query commands. For Slurm, `sacct` is optional and `squeue`/`scontrol` provide fallback paths; for OpenPBS, verify `qstat`. |
 | `LOGS_UNAVAILABLE` | Select a Task for a multi-Task Run and wait until scheduler log paths or terminal artifacts exist. |
 | `RESULT_RETRIEVAL_FAILED` | Preserve computation state, correct connectivity/path/permissions, and retry `fetch`; retrieval state is independent and retryable. |

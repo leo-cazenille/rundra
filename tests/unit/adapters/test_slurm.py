@@ -588,9 +588,12 @@ def test_slurm_afterok_rejects_non_root_job_ids(native_id: str) -> None:
 def test_slurm_array_submission_requires_durable_log_paths() -> None:
     transport = ScriptedTransport(deque([]))
 
-    with pytest.raises(SlurmSubmissionError, match="configured log directory"):
+    with pytest.raises(
+        SlurmSubmissionError, match="configured log directory"
+    ) as caught:
         SlurmScheduler(transport).submit_bounded_array(_array_request(count=2))
 
+    assert caught.value.outcome is SchedulerSubmissionOutcome.REJECTED
     assert transport.run_calls == []
 
 
@@ -611,8 +614,15 @@ def test_slurm_array_submission_normalizes_remote_failures(
         transport, log_directory=PurePosixPath("/remote/run/logs")
     )
 
-    with pytest.raises(SlurmSubmissionError, match=message):
+    with pytest.raises(SlurmSubmissionError, match=message) as caught:
         scheduler.submit_bounded_array(_array_request(count=2))
+
+    expected = (
+        SchedulerSubmissionOutcome.REJECTED
+        if exit_code != 0
+        else SchedulerSubmissionOutcome.UNCERTAIN
+    )
+    assert caught.value.outcome is expected
 
 
 def test_slurm_scheduler_discovers_bound_for_portable_array_request() -> None:
@@ -693,9 +703,10 @@ def test_slurm_scheduler_cancels_submitted_roots_after_partial_chunk_failure() -
         )
     )
 
-    with pytest.raises(SlurmSubmissionError, match="exit code 1"):
+    with pytest.raises(SlurmSubmissionError, match="partial Slurm") as caught:
         scheduler.submit_array(portable)
 
+    assert caught.value.outcome is SchedulerSubmissionOutcome.UNCERTAIN
     assert transport.run_calls[-1] == Command(("scancel", "--", "601"))
 
 

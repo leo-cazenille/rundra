@@ -4,11 +4,26 @@ All notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
+### Added
+
+- Submission receipts record explicit accepted, rejected, uncertain, and
+  operator-resolved outcomes. `rundr resolve-submission` and the equivalent MCP
+  tool can close an uncertain Run only after exact operator confirmation that
+  no scheduler job exists.
+- Target schema version 7 can enforce a site-owned aggregate
+  `max_memory_per_worker` ceiling during pure planning.
+
 ### Changed
 
 - Portable lifecycle help, target errors, setup guidance, and agent instructions
   now describe both Slurm and OpenPBS without renaming backend-specific strategy
   or native-resource fields.
+
+### Fixed
+
+- Definitive Slurm and OpenPBS submission rejection now fails the registered
+  Run instead of stranding it as an unknown outcome; genuinely ambiguous and
+  partial submissions remain blocked against duplicate retry.
 
 ## [0.1.1] - 2026-08-19
 

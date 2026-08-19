@@ -788,6 +788,7 @@ def test_operator_can_resolve_an_uncertain_submission_as_not_submitted(
     receipt = receipts.load(_RUN_ID)
     assert receipt.outcome is SubmissionReceiptOutcome.OPERATOR_RESOLVED
     assert receipt.failure_classification == "operator_verified_not_submitted"
+    assert service.resolve_submission(_RUN_ID, confirmation=_RUN_ID) == resolved
 
 
 def test_available_source_provenance_is_persisted_before_execution(

@@ -436,7 +436,7 @@ class SlurmScheduler:
                 submissions.append(
                     self._submit_bounded_array(bounded, dependency=dependency)
                 )
-        except Exception:
+        except Exception as error:
             if submissions:
                 try:
                     self._transport.run(
@@ -450,6 +450,11 @@ class SlurmScheduler:
                     )
                 except Exception:
                     pass
+                raise SlurmSubmissionError(
+                    "A partial Slurm submission required cleanup; scheduler "
+                    "outcome is uncertain",
+                    phase="partial_submission_cleanup",
+                ) from error
             raise
 
         primary, *additional = submissions
@@ -719,7 +724,9 @@ class SlurmScheduler:
             )
         if self._log_directory is None:
             raise SlurmSubmissionError(
-                "Slurm array submission requires a configured log directory"
+                "Slurm array submission requires a configured log directory",
+                outcome=SchedulerSubmissionOutcome.REJECTED,
+                phase="request_validation",
             )
         manifest = render_slurm_array_manifest(request)
         stdout_path, stderr_path = self._log_paths("%A_%a")
@@ -754,7 +761,10 @@ class SlurmScheduler:
         if result.exit_code != 0:
             raise SlurmSubmissionError(
                 "Array manifest persistence or sbatch submission failed with "
-                f"exit code {result.exit_code}; scheduler diagnostic redacted"
+                f"exit code {result.exit_code}; scheduler diagnostic redacted",
+                outcome=SchedulerSubmissionOutcome.REJECTED,
+                phase="scheduler_submit",
+                exit_code=result.exit_code,
             )
         output = result.stdout.strip()
         match = _PARSABLE_SUBMISSION.fullmatch(output)
@@ -1356,7 +1366,9 @@ def _dependency(reference: SchedulerReference) -> str:
         raise TypeError("Slurm dependency must be a SchedulerReference")
     if re.fullmatch(r"[0-9]+", reference.native_id) is None:
         raise SlurmSubmissionError(
-            "Slurm afterok dependency must be one root numeric job ID"
+            "Slurm afterok dependency must be one root numeric job ID",
+            outcome=SchedulerSubmissionOutcome.REJECTED,
+            phase="request_validation",
         )
     return f"afterok:{reference.native_id}"
 

@@ -643,15 +643,6 @@ class OrchestrationService:
             )
         with self.store.operation_lock(run_id):
             record = self.store.load(run_id)
-            if record.run.state is not ExecutionState.STAGING:
-                raise OrchestrationError(
-                    code="SUBMISSION_NOT_RESOLVABLE",
-                    message=(
-                        f"Run {run_id} is {record.run.state.value}, not an uncertain "
-                        "scheduler submission"
-                    ),
-                    run_id=run_id,
-                )
             if record.scheduler_job_ids or record.task_scheduler_ids:
                 raise OrchestrationError(
                     code="SUBMISSION_IDENTITIES_PRESENT",
@@ -663,6 +654,20 @@ class OrchestrationService:
                 )
             try:
                 receipt = self._submission_receipts.load(run_id)
+                if receipt.outcome is SubmissionReceiptOutcome.OPERATOR_RESOLVED:
+                    if (
+                        record.run.state is ExecutionState.FAILED
+                        and record.native_state == "SUBMISSION_CONFIRMED_NOT_SUBMITTED"
+                    ):
+                        return record
+                    raise RunStoreError(
+                        f"Run {run_id} operator resolution does not match its state"
+                    )
+                if record.run.state is not ExecutionState.STAGING:
+                    raise RunStoreError(
+                        f"Run {run_id} is {record.run.state.value}, not an uncertain "
+                        "scheduler submission"
+                    )
                 self._submission_receipts.resolve_not_submitted(
                     receipt,
                     updated_at=self._clock(),
