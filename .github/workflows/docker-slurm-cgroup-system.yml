@@ -17,7 +17,6 @@ jobs:
     timeout-minutes: 30
     env:
       RUNDRA_DOCKER_SLURM_IMAGE: rundra-slurm-system:cgroup-ci
-      RUNDRA_DOCKER_SLURM_CGROUP_DIAGNOSTICS: ${{ runner.temp }}/rundra-slurm-cgroup-diagnostics
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -51,6 +50,8 @@ jobs:
 
       - name: Run Rundra through Slurm cgroup memory enforcement
         run: tools/run_docker_slurm_cgroup_tests.sh
+        env:
+          RUNDRA_DOCKER_SLURM_CGROUP_DIAGNOSTICS: ${{ runner.temp }}/rundra-slurm-cgroup-diagnostics
 
       - name: Upload cgroup diagnostics
         if: failure()
