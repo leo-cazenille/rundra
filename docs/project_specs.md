@@ -742,6 +742,12 @@ targets:
       # ...
 ```
 
+Version 6 separates conservative worker defaults from site-owned worker and
+slot ceilings. Version 7 adds optional `max_memory_per_worker`, expressed with
+the same `B`, `KiB`, `MiB`, `GiB`, or `TiB` syntax as experiment resources.
+Planning rejects aggregate worker memory above this ceiling before staging or
+scheduler contact. Older target versions retain their existing behavior.
+
 The shared root must be absolute and non-root. Rundra resolves staged source,
 workspace, and retrieval destinations beneath it and rejects symlink escapes.
 Scheduling and container commands still use the configured SSH and Slurm
@@ -3718,6 +3724,15 @@ overcommit declared Task memory.
 Targets versions 1 through 5 retain their parsing and default semantics. Their
 launches nevertheless use the same scalable decision as `plan`, fixing the
 previous loss of `task_slots_per_worker` between planning and submission.
+
+## M16 durable submission outcomes and worker memory policy
+
+Target version 7 adds the optional, site-owned `max_memory_per_worker` ceiling.
+The scalable planner compares it to the exact worker allocation memory after
+effective slot selection. Exceeding the ceiling returns
+`WORKER_MEMORY_LIMIT_EXCEEDED` with logical Task memory, slots, aggregate
+worker memory, and the configured ceiling. Rundra does not infer topology,
+exclusive-node policy, or partition capacity.
 
 ## M13 OpenPBS scheduler backend
 

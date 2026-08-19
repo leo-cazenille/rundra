@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
@@ -32,6 +33,15 @@ _TARGET_V3_FIELDS = _TARGET_V2_FIELDS | {"execution"}
 _TARGET_V4_FIELDS = _TARGET_V3_FIELDS
 _TARGET_V5_FIELDS = _TARGET_V4_FIELDS
 _TARGET_V6_FIELDS = _TARGET_V5_FIELDS
+_TARGET_V7_FIELDS = _TARGET_V6_FIELDS
+_MEMORY_PATTERN = re.compile(r"([1-9][0-9]*)(B|KiB|MiB|GiB|TiB)\Z")
+_MEMORY_FACTORS = {
+    "B": 1,
+    "KiB": 1024,
+    "MiB": 1024**2,
+    "GiB": 1024**3,
+    "TiB": 1024**4,
+}
 _BACKENDS_BY_ROLE = {
     "transport": frozenset({"local", "ssh"}),
     "scheduler": frozenset({"local", "pbs", "slurm"}),
@@ -58,8 +68,8 @@ class TargetsConfig:
     execution: Mapping[str, ExecutionPolicy] = dataclass_field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.version not in {1, 2, 3, 4, 5, 6}:
-            raise ValueError("TargetsConfig version must be 1 through 6")
+        if self.version not in {1, 2, 3, 4, 5, 6, 7}:
+            raise ValueError("TargetsConfig version must be 1 through 7")
         object.__setattr__(self, "targets", MappingProxyType(dict(self.targets)))
         object.__setattr__(
             self, "preparation", MappingProxyType(dict(self.preparation))
@@ -85,12 +95,12 @@ def load_targets_config(source: Path) -> TargetsConfig:
     version = expect_integer(
         document["version"], source=source, path=("version",), minimum=1
     )
-    if version not in {1, 2, 3, 4, 5, 6}:
+    if version not in {1, 2, 3, 4, 5, 6, 7}:
         fail(
             source=source,
             path=("version",),
             code="UNSUPPORTED_VERSION",
-            message=("Unsupported targets version; supported versions are 1 through 6"),
+            message=("Unsupported targets version; supported versions are 1 through 7"),
         )
     raw_targets = expect_mapping(document["targets"], source=source, path=("targets",))
     targets: dict[str, Target] = {}
@@ -115,7 +125,13 @@ def load_targets_config(source: Path) -> TargetsConfig:
                             _TARGET_V4_FIELDS
                             if version == 4
                             else (
-                                _TARGET_V5_FIELDS if version == 5 else _TARGET_V6_FIELDS
+                                _TARGET_V5_FIELDS
+                                if version == 5
+                                else (
+                                    _TARGET_V6_FIELDS
+                                    if version == 6
+                                    else _TARGET_V7_FIELDS
+                                )
                             )
                         )
                     )
@@ -209,6 +225,8 @@ def _execution_policy(
             "worker_pool",
         }
     )
+    if version >= 7:
+        fields |= {"max_memory_per_worker"}
     check_fields(
         section,
         allowed=fields,
@@ -335,6 +353,15 @@ def _execution_policy(
                 path=(*path, "max_concurrent_jobs"),
                 minimum=1,
             ),
+            max_memory_per_worker=(
+                _parse_memory(
+                    section["max_memory_per_worker"],
+                    source,
+                    (*path, "max_memory_per_worker"),
+                )
+                if version >= 7 and "max_memory_per_worker" in section
+                else None
+            ),
         )
     except (TypeError, ValueError) as error:
         fail(
@@ -343,6 +370,22 @@ def _execution_policy(
             code="INVALID_EXECUTION_POLICY",
             message=str(error),
         )
+
+
+def _parse_memory(value: object, source: Path, path: tuple[str, ...]) -> int:
+    text = expect_string(value, source=source, path=path)
+    match = _MEMORY_PATTERN.fullmatch(text)
+    if match is None:
+        fail(
+            source=source,
+            path=path,
+            code="INVALID_VALUE",
+            message=(
+                "Memory must be a positive integer followed by B, KiB, MiB, GiB, or TiB"
+            ),
+        )
+    amount, unit = match.groups()
+    return int(amount) * _MEMORY_FACTORS[unit]
 
 
 def _preparation_storage(

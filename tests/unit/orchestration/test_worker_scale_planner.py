@@ -103,3 +103,65 @@ def test_v6_rejects_scale_above_target_policy() -> None:
         )
 
     assert caught.value.code == "WORKER_LIMIT_EXCEEDED"
+
+
+@pytest.mark.parametrize("slots", (1, 40))
+def test_v7_enforces_exact_worker_memory_ceiling(slots: int) -> None:
+    policy = _policy()
+    policy = ExecutionPolicy(
+        hard_task_limit=policy.hard_task_limit,
+        confirmation_threshold=policy.confirmation_threshold,
+        max_active_tasks=policy.max_active_tasks,
+        max_array_size=policy.max_array_size,
+        output_shard_tasks=policy.output_shard_tasks,
+        automatic_retrieval_threshold=policy.automatic_retrieval_threshold,
+        worker_pool=policy.worker_pool,
+        max_concurrent_jobs=policy.max_concurrent_jobs,
+        max_memory_per_worker=slots * 1024**3,
+    )
+    plan = create_scalable_plan(
+        _spec(),
+        (ExpandedConfig(ConfigSnapshot(PurePosixPath("config.yaml"), "x: 1\n")),),
+        _target(),
+        seeds=SeedRange(0, 99),
+        policy=policy,
+        version=7,
+        workers=1,
+        task_slots_per_worker=slots,
+    )
+    assert plan.worker_resources is not None
+    assert plan.worker_resources.memory_bytes == policy.max_memory_per_worker
+
+
+def test_v7_rejects_worker_memory_above_ceiling() -> None:
+    policy = _policy()
+    policy = ExecutionPolicy(
+        hard_task_limit=policy.hard_task_limit,
+        confirmation_threshold=policy.confirmation_threshold,
+        max_active_tasks=policy.max_active_tasks,
+        max_array_size=policy.max_array_size,
+        output_shard_tasks=policy.output_shard_tasks,
+        automatic_retrieval_threshold=policy.automatic_retrieval_threshold,
+        worker_pool=policy.worker_pool,
+        max_concurrent_jobs=policy.max_concurrent_jobs,
+        max_memory_per_worker=39 * 1024**3,
+    )
+    with pytest.raises(PlanningError) as caught:
+        create_scalable_plan(
+            _spec(),
+            (ExpandedConfig(ConfigSnapshot(PurePosixPath("config.yaml"), "x: 1\n")),),
+            _target(),
+            seeds=SeedRange(0, 99),
+            policy=policy,
+            version=7,
+            workers=1,
+            task_slots_per_worker=40,
+        )
+
+    assert caught.value.code == "WORKER_MEMORY_LIMIT_EXCEEDED"
+    assert caught.value.details == {
+        "logical_task_memory_bytes": 1024**3,
+        "task_slots_per_worker": 40,
+        "worker_memory_bytes": 40 * 1024**3,
+        "max_memory_per_worker": 39 * 1024**3,
+    }

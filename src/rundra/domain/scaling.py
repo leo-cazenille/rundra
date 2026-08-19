@@ -182,6 +182,7 @@ class ExecutionPolicy:
     automatic_retrieval_threshold: int
     worker_pool: WorkerPoolPolicy
     max_concurrent_jobs: int = DEFAULT_MAX_CONCURRENT_JOBS
+    max_memory_per_worker: int | None = None
 
     def __post_init__(self) -> None:
         _integer_at_least(self.hard_task_limit, 1, "hard_task_limit")
@@ -193,6 +194,12 @@ class ExecutionPolicy:
             self.automatic_retrieval_threshold, 0, "automatic_retrieval_threshold"
         )
         _integer_at_least(self.max_concurrent_jobs, 1, "max_concurrent_jobs")
+        if self.max_memory_per_worker is not None:
+            _integer_at_least(
+                self.max_memory_per_worker,
+                1,
+                "max_memory_per_worker",
+            )
         if type(self.worker_pool) is not WorkerPoolPolicy:
             raise TypeError("worker_pool must be a WorkerPoolPolicy")
         if self.confirmation_threshold > self.hard_task_limit:

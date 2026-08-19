@@ -129,8 +129,8 @@ def create_scalable_plan(
         raise TypeError("create_scalable_plan seeds must be a SeedRange")
     if type(policy) is not ExecutionPolicy:
         raise TypeError("create_scalable_plan policy must be an ExecutionPolicy")
-    if version not in {4, 5, 6}:
-        raise ValueError("create_scalable_plan version must be 4, 5, or 6")
+    if version not in {4, 5, 6, 7}:
+        raise ValueError("create_scalable_plan version must be 4, 5, 6, or 7")
     for name, value in (
         ("workers", workers),
         ("task_slots_per_worker", task_slots_per_worker),
@@ -279,6 +279,22 @@ def create_scalable_plan(
         task_slots_per_worker,
         max_lane_depth,
     )
+    if (
+        version >= 7
+        and policy.max_memory_per_worker is not None
+        and worker_resources.memory_bytes is not None
+        and worker_resources.memory_bytes > policy.max_memory_per_worker
+    ):
+        raise PlanningError(
+            code="WORKER_MEMORY_LIMIT_EXCEEDED",
+            message="aggregate worker memory exceeds the target policy",
+            details={
+                "logical_task_memory_bytes": spec.resources.memory_bytes or 0,
+                "task_slots_per_worker": task_slots_per_worker,
+                "worker_memory_bytes": worker_resources.memory_bytes,
+                "max_memory_per_worker": policy.max_memory_per_worker,
+            },
+        )
     return ExecutionPlan(
         version=version,
         experiment_name=spec.name,
@@ -298,10 +314,10 @@ def create_scalable_plan(
         max_lane_depth=(max_lane_depth if version >= 5 else None),
         worker_resources=(worker_resources if version >= 5 else None),
         requested_workers=(
-            requested_workers if version == 6 and selected == WORKER_POOL else None
+            requested_workers if version >= 6 and selected == WORKER_POOL else None
         ),
         requested_task_slots_per_worker=(
-            requested_slots if version == 6 and selected == WORKER_POOL else None
+            requested_slots if version >= 6 and selected == WORKER_POOL else None
         ),
     )
 

@@ -50,6 +50,46 @@ targets:
     assert workers.max_slot_count == 40
 
 
+def test_target_v7_parses_optional_worker_memory_ceiling(tmp_path: Path) -> None:
+    source = tmp_path / "targets.yaml"
+    source.write_text(
+        """
+version: 7
+targets:
+  cluster:
+    transport: {type: ssh, host: cluster}
+    scheduler: {type: slurm}
+    staging: {type: rsync}
+    container: {type: apptainer}
+    workspace: /work/rundra
+    execution:
+      hard_task_limit: 100000
+      confirmation_threshold: 10000
+      max_active_tasks: 320
+      max_concurrent_jobs: 8
+      max_array_size: 1001
+      output_shard_tasks: 1000
+      automatic_retrieval_threshold: 20000
+      max_memory_per_worker: 60GiB
+      worker_pool:
+        activation_threshold: 10000
+        default_workers: 1
+        max_workers: 8
+        default_task_slots_per_worker: 1
+        max_task_slots_per_worker: 40
+        tasks_per_lease: 100
+        infrastructure_retry_limit: 2
+        requeue_limit: 8
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    config = load_targets_config(source)
+
+    assert config.version == 7
+    assert config.execution["cluster"].max_memory_per_worker == 60 * 1024**3
+
+
 def test_target_v6_rejects_default_capacity_above_policy(tmp_path: Path) -> None:
     source = tmp_path / "targets.yaml"
     source.write_text(

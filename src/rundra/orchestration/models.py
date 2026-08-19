@@ -124,7 +124,7 @@ class ExecutionPlan:
             raise ValueError("ExecutionPlan v2 requires preparation")
         if self.version == 3 and any(unit.parameter_set is None for unit in self.units):
             raise ValueError("ExecutionPlan v3 requires parameterized units")
-        if self.version in {4, 5, 6}:
+        if self.version in {4, 5, 6, 7}:
             if type(self.task_space) is not TaskSpace:
                 raise ValueError("Scalable ExecutionPlan requires a TaskSpace")
             if type(self.execution_policy) is not ExecutionPolicy:
@@ -146,7 +146,7 @@ class ExecutionPlan:
                     )
             elif self.worker_count is not None:
                 raise ValueError("multi-array plans cannot define worker_count")
-            if self.version in {5, 6}:
+            if self.version in {5, 6, 7}:
                 if (
                     type(self.task_slots_per_worker) is not int
                     or self.task_slots_per_worker < 1
@@ -165,7 +165,7 @@ class ExecutionPlan:
                     raise ValueError("ExecutionPlan v5 max_lane_depth must be positive")
                 if type(self.worker_resources) is not ResourceRequest:
                     raise TypeError("ExecutionPlan v5+ requires worker_resources")
-                if self.version == 6 and self.strategy == WORKER_POOL:
+                if self.version >= 6 and self.strategy == WORKER_POOL:
                     for name in (
                         "requested_workers",
                         "requested_task_slots_per_worker",
@@ -175,7 +175,7 @@ class ExecutionPlan:
                             raise ValueError(
                                 f"ExecutionPlan v6 {name} must be positive"
                             )
-                elif self.version == 6 and any(
+                elif self.version >= 6 and any(
                     value is not None
                     for value in (
                         self.requested_workers,
@@ -222,7 +222,7 @@ class ExecutionPlan:
             )
         ):
             raise ValueError("ExecutionPlan v1-v3 cannot contain scaling fields")
-        if self.version not in {1, 2, 3, 4, 5, 6}:
+        if self.version not in {1, 2, 3, 4, 5, 6, 7}:
             raise ValueError("ExecutionPlan version is unsupported")
         if type(self.experiment_name) is not str or not self.experiment_name.strip():
             raise ValueError("ExecutionPlan experiment_name must be nonblank")

@@ -163,6 +163,22 @@ values to request scale. Requests above a target ceiling fail rather than being
 silently clamped. Without a request, target defaults apply; permitting eight
 workers therefore does not reserve eight workers by default.
 
+## Target-v7 worker memory ceiling
+
+Target configuration version 7 optionally limits the aggregate memory of each
+worker allocation before scheduler contact:
+
+```yaml
+execution:
+  max_memory_per_worker: 60GiB
+```
+
+Rundra multiplies declared logical Task memory by the effective Task slots per
+worker. If the result exceeds this site-owned ceiling, `plan`, `run`, and
+`submit` fail with `WORKER_MEMORY_LIMIT_EXCEEDED`. Reduce
+`--task-slots-per-worker` or correct the experiment's per-Task memory request;
+Rundra does not infer node memory or silently lower either value.
+
 `rundr plan` remains offline and does not probe node topology. Target v6
 returns plan format 6 with requested and effective scale, policy ceilings,
 worker resources, and scheduler-controlled placement. Operators must configure

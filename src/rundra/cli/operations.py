@@ -909,7 +909,15 @@ def _create_effective_scaling_plan(
         strategy=strategy,
         retrieval_policy=retrieval_policy,
         preparation=preparation,
-        version=(6 if targets_version >= 6 else 5 if targets_version >= 4 else 4),
+        version=(
+            7
+            if targets_version >= 7
+            else 6
+            if targets_version >= 6
+            else 5
+            if targets_version >= 4
+            else 4
+        ),
         workers=workers,
         task_slots_per_worker=task_slots_per_worker,
     )
