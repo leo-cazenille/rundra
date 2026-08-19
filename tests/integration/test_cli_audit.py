@@ -139,7 +139,8 @@ def test_every_operation_has_deterministic_json_and_common_option_placement(
         assert global_json.stderr == local_json.stderr == repeated.stderr == ""
         assert global_json.stdout == local_json.stdout == repeated.stdout
         document = json.loads(global_json.stdout)
-        assert document["format_version"] == 1
+        expected_format = 2 if case.operation == "list" and case.ok else 1
+        assert document["format_version"] == expected_format
         assert document["operation"] == case.operation
         assert document["ok"] is case.ok
         if case.error_code is not None:
