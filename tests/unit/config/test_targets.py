@@ -330,6 +330,7 @@ targets:
         load_targets(remote)
     assert caught.value.code == "INVALID_BACKEND_COMBINATION"
     assert caught.value.path == ("targets", "bad")
+    assert "Slurm or OpenPBS" in caught.value.message
 
 
 @pytest.mark.parametrize(

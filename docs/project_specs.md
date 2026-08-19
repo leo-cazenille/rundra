@@ -710,11 +710,11 @@ Target configuration may later include:
 - staging constraints.
 
 Version-1 target files accept only executable backend stacks: all-local
-transport/scheduler/staging with either native or Apptainer execution, or the
-SSH/Slurm/rsync/Apptainer reference path. SSH workspaces must be absolute,
-non-root paths. This is static configuration validation; executable discovery,
-connectivity, authentication, and site availability remain execution preflight
-concerns and are never contacted by `plan`.
+transport/scheduler/staging with either native or Apptainer execution, or SSH
+with Slurm or OpenPBS, rsync or shared staging, and Apptainer. SSH workspaces
+must be absolute, non-root paths. This is static configuration validation;
+executable discovery, connectivity, authentication, and site availability
+remain execution preflight concerns and are never contacted by `plan`.
 
 Target configuration version 2 adds preparation cache roots and explicit image
 search paths. Version 3 adds a required per-target `execution` policy. Every
@@ -1844,15 +1844,16 @@ task failure returns a Run document with state `FAILED` and process exit code
 successful operations return 0.
 
 `list` and `inspect` load strict persisted RunRecords. `status` additionally
-refreshes active Slurm Runs through the scheduler adapter. `logs` resolves
-framework-managed stdout/stderr artifacts by stable Task ID and reads remote
-Slurm logs through the configured transport. Local `fetch` reconstructs the
+refreshes active remote Runs through the selected scheduler adapter. `logs`
+resolves framework-managed stdout/stderr artifacts by stable Task ID and reads
+remote scheduler logs through the configured transport. Local `fetch` reconstructs the
 per-Run workspace from its target and Run ID, is idempotent, and updates the
 artifact manifest; refetching an already successful retrieval keeps its
 successful state. Asynchronous
-`submit` and idempotent `cancel` are available for SSH/Slurm/rsync/Apptainer
-targets; local `submit` remains the structured `ASYNC_UNAVAILABLE` capability
-error because no detached local process owner exists.
+`submit` and idempotent `cancel` are available for supported SSH scheduler
+targets using Slurm or OpenPBS; local `submit` remains the structured
+`ASYNC_UNAVAILABLE` capability error because no detached local process owner
+exists.
 
 Synchronous `run` wires the Git provenance provider into the same orchestration
 service. `inspect` exposes the persisted optional fields through the existing

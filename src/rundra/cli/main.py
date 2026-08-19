@@ -263,7 +263,9 @@ def build_parser() -> argparse.ArgumentParser:
     _add_store_option(inspect)
     _add_json_option(inspect)
 
-    cancel = subparsers.add_parser("cancel", help="cancel an active Slurm Run")
+    cancel = subparsers.add_parser(
+        "cancel", help="cancel active scheduler work for a Run"
+    )
     _add_run_selector(cancel)
     _add_store_option(cancel)
     _add_json_option(cancel)

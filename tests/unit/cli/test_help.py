@@ -14,6 +14,7 @@ def test_help_lists_common_workflow_and_registered_commands(
     output = capsys.readouterr().out
     assert "Common workflow:" in output
     assert "rundr submit EXPERIMENT" in output
+    assert "cancel active scheduler work for a Run" in output
     assert "fetch" in output
     assert "version" in output
     assert "Run 'rundr help COMMAND'" in output

@@ -76,11 +76,12 @@ a maximum ten-Task preview, scheduler batch or worker counts, target limits,
 and confirmation threshold. Planning remains network-free.
 
 The optional target-v3 execution field `max_concurrent_jobs` defaults to 256.
-It limits submitted Slurm jobs and array elements, not only simultaneously
-running elements. Materialized `run` and `submit` operations above this limit
-use a bounded worker array whose elements execute logical Tasks sequentially,
-with isolated outputs, per-Task timeouts, and atomic exit journals. Compact
-TaskSpace launch, requeue recovery, and shard retrieval remain future work.
+It limits submitted scheduler jobs and array elements, not only simultaneously
+running elements. On Slurm, materialized `run` and `submit` operations above
+this limit may use a bounded worker array whose elements execute logical Tasks
+sequentially, with isolated outputs, per-Task timeouts, and atomic exit
+journals. OpenPBS uses bounded scheduler arrays and does not implement Rundra's
+Slurm worker-pool strategy.
 
 ```yaml
 execution:
@@ -111,8 +112,8 @@ and `doctor`.
 
 `plan` deliberately has no `--destination` or `--data-dir` because it creates
 no snapshot, retrieval, or RunRecord. Local `submit` returns
-`ASYNC_UNAVAILABLE`; SSH/Slurm submission persists scheduler identities before
-returning so later processes can operate by Run ID.
+`ASYNC_UNAVAILABLE`; SSH/Slurm and SSH/OpenPBS submission persist scheduler
+identities before returning so later processes can operate by Run ID.
 
 ## Machine output and exits
 

@@ -164,7 +164,8 @@ def load_targets_config(source: Path) -> TargetsConfig:
                 code="INVALID_BACKEND_COMBINATION",
                 message=(
                     "Target backends must use an all-local stack or the supported "
-                    "SSH/Slurm with rsync or shared staging and Apptainer"
+                    "SSH stack with Slurm or OpenPBS, rsync or shared staging, "
+                    "and Apptainer"
                 ),
             )
         if target.transport.kind == "ssh" and (

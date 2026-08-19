@@ -113,14 +113,15 @@ cmp "$M65_ROOT/retrieved/results/result.json" \
   "$M65_ROOT/retrieved-again/results/result.json"
 ```
 
-## SSH/Slurm lifecycle
+## Remote scheduler lifecycle
 
 Start from an edited target and experiment whose workspace and Apptainer image
 are valid for the site. The checked Shoal templates contain placeholders and
 must not be submitted unchanged.
 
-First inspect the plan. Two or more homogeneous seeds on Slurm should report a
-`slurm_array` strategy and explicit Task/seed/index mapping:
+First inspect the plan. Two or more homogeneous seeds report explicit
+Task/seed/index mapping. Slurm uses the `slurm_array` strategy and OpenPBS uses
+`scheduler_array`:
 
 ```bash
 uv run rundr plan /path/to/experiment.yaml \
@@ -180,9 +181,10 @@ uv run rundr cancel "$RUN_ID" \
 ```
 
 Cancellation reconciles first and does not cancel elements already known to be
-terminal. Repeat cancellation is safe. Scheduler account, partition, QOS, and
-constraint requests belong in the experiment's explicit
-`resources.native.slurm` mapping and remain subject to site policy.
+terminal. Repeat cancellation is safe. Scheduler-native account, partition,
+queue, QOS, project, constraint, and placement requests belong in the
+experiment's explicit `resources.native.slurm` or `resources.native.pbs`
+mapping and remain subject to site policy.
 
 ## Exit status
 
@@ -205,11 +207,11 @@ matching prose.
 |---|---|
 | `CONFIG_NOT_FOUND`, `INVALID_YAML`, `UNKNOWN_FIELD`, `UNSUPPORTED_VERSION` | Validate the exact experiment, target, project, or user file; all public YAML documents require version 1. |
 | `LAUNCH_VALUE_REQUIRED`, `PROFILE_NOT_FOUND`, `TARGET_NOT_FOUND` | Inspect adjacent `rundra.yaml`, selected profile, `~/.config/rundra/config.yaml`, target name, and target-file path. |
-| `CONTAINER_REQUIRED`, `CONTAINER_CONFLICT`, `GPU_CONFIGURATION_MISMATCH` | Remote execution requires Apptainer; native local execution forbids a container/GPU request; Slurm GPU resources and `container.gpu` must agree. |
-| `CAPABILITY_CHECK_FAILED` | Check local `ssh`, `rsync`, or `apptainer`; remotely check rsync, Slurm clients, Apptainer, image readability, and normal SSH authentication/host verification. |
+| `CONTAINER_REQUIRED`, `CONTAINER_CONFLICT`, `GPU_CONFIGURATION_MISMATCH` | Remote execution requires Apptainer; native local execution forbids a container/GPU request; scheduler GPU resources and `container.gpu` must agree. |
+| `CAPABILITY_CHECK_FAILED` | Check local `ssh`, `rsync`, or `apptainer`; remotely check rsync, selected scheduler clients, Apptainer, image readability, and normal SSH authentication/host verification. |
 | `STAGING_FAILED` | Verify the configured workspace's nearest existing ancestor is writable and shared, the source exists, rsync is available, and no destination component is a symlink. |
 | `SCHEDULER_SUBMISSION_FAILED` | Re-run `plan`, then inspect account/partition/QOS/constraint, time/memory/GPU requests, and site policy. Rundra intentionally redacts scheduler stderr. |
-| `SCHEDULER_QUERY_FAILED` or `ACCOUNTING_PENDING` | Retry `status`; verify `squeue` and `scontrol`. `sacct` is optional, and completed work must still be retained by one available query path. |
+| `SCHEDULER_QUERY_FAILED` or `ACCOUNTING_PENDING` | Retry `status`; verify the configured scheduler's query commands. For Slurm, `sacct` is optional and `squeue`/`scontrol` provide fallback paths; for OpenPBS, verify `qstat`. |
 | `LOGS_UNAVAILABLE` | Select a Task for a multi-Task Run and wait until scheduler log paths or terminal artifacts exist. |
 | `RESULT_RETRIEVAL_FAILED` | Preserve computation state, correct connectivity/path/permissions, and retry `fetch`; retrieval state is independent and retryable. |
 | `RUN_STORE_CONFLICT` | Another process updated the same Run. Reload with `status` or `inspect` and retry the lifecycle operation. |

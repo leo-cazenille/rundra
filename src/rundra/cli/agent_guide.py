@@ -16,8 +16,9 @@ GUIDE = f"""{START_MARKER}
 - On a new machine or agent session, run `rundr doctor --agent codex --json`
   before attempting an experiment. Apply only the reported permissions, start a
   new agent session, and rerun the audit until `ready` is true.
-- Use Rundra for scientific execution; do not invoke SSH, rsync, Slurm, or
-  Apptainer directly except while diagnosing an explicit Rundra error.
+- Use Rundra for scientific execution; do not invoke SSH, rsync,
+  scheduler-native, or Apptainer commands directly except while diagnosing an
+  explicit Rundra error.
 - Run `rundr doctor EXPERIMENT --connect --agent codex --json` and `rundr plan
   EXPERIMENT` before consuming cluster resources. Use the explicit
   `--scheduler-probe` only when a bounded no-op scheduler submission is wanted.

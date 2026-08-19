@@ -1,29 +1,30 @@
 # Installation and target setup
 
-This guide describes the implemented v0.1-development interface. Rundra is not
-yet published on PyPI, so install or run it from a source checkout rather than
-assuming that `uv tool install rundra` resolves a released distribution.
+This guide describes the released v0.1 interface and current development
+extensions. Install the latest release from PyPI or use a source checkout when
+developing Rundra itself.
 
 ## Requirements
 
-The client requires Python 3.12. From a checkout, synchronize the locked
-environment and verify the installed console script:
+The client requires Python 3.12. Install the released command as an isolated
+tool:
+
+```bash
+uv tool install --python 3.12 rundra
+rundr --version
+rundr help
+```
+
+From a checkout, contributors should instead synchronize the locked environment
+and run the source version:
 
 ```bash
 uv sync --locked
-uv run rundr --help
+uv run rundr --version
 ```
 
-All repository examples below use `uv run rundr`. A source installation outside
-the repository is also possible:
-
-```bash
-uv tool install --python 3.12 /absolute/path/to/rundra
-rundr --help
-```
-
-Reinstall that tool after changing the checkout. Contributors should use the
-locked development environment and commands in the root README instead.
+The examples below use `uv run rundr`; omit `uv run` when using the isolated
+PyPI installation.
 
 The all-local native path needs no external execution tool. Other paths need:
 
@@ -32,10 +33,11 @@ The all-local native path needs no external execution tool. Other paths need:
 | local/native | none beyond Rundra | Python/application executable requested by the experiment |
 | local/Apptainer | `apptainer` | same machine |
 | SSH/Slurm/rsync/Apptainer | OpenSSH and rsync | rsync, Slurm client commands, Apptainer, and the experiment executable inside the image |
+| SSH/OpenPBS/rsync/Apptainer | OpenSSH and rsync | rsync, OpenPBS client commands, Apptainer, and the experiment executable inside the image |
 
-For the remote path, the Slurm commands required for execution are `sbatch`,
-`squeue`, `scancel`, and `scontrol`. Rundra uses `sacct` when it is available and
-usable, but works without it by falling back to `scontrol` for retained jobs.
+Slurm execution requires `sbatch`, `squeue`, `scancel`, and `scontrol`. Rundra
+uses `sacct` when available and otherwise falls back to `scontrol` for retained
+jobs. OpenPBS execution requires `qsub`, `qstat`, and `qdel`.
 
 ## Configuration locations
 
@@ -81,9 +83,10 @@ unmanaged background process.
 local filesystem path in use; exclude an in-project workspace such as
 `.rundra/` from version control and source synchronization.
 
-## SSH/Slurm target
+## SSH scheduler target
 
-The only implemented remote stack is SSH/Slurm/rsync/Apptainer:
+Implemented remote stacks combine SSH, Slurm or OpenPBS, rsync or shared
+staging, and Apptainer:
 
 ```yaml
 version: 1
@@ -92,7 +95,7 @@ targets:
     transport:
       type: ssh
       host: cluster-login
-    scheduler: {type: slurm}
+    scheduler: {type: slurm}  # use pbs for OpenPBS
     staging: {type: rsync}
     container: {type: apptainer}
     workspace: /shared/users/alice/rundra-work
@@ -104,7 +107,8 @@ normal OpenSSH configuration. Rundra neither accepts credentials nor adds
 flags that weaken host verification.
 
 The remote workspace is mandatory, absolute, and not `/`. It should be on a
-filesystem visible from both the login/controller side and Slurm compute nodes.
+filesystem visible from both the login/controller side and scheduler compute
+nodes.
 It does not need to exist before the first Run: preflight checks the nearest
 existing writable ancestor, and staging creates `WORKSPACE/runs/RUN_ID` when
 execution begins. Rundra never implicitly requires or creates `~/.rundra`; it
@@ -115,7 +119,9 @@ Before running an experiment, verify the external path directly:
 ```bash
 ssh cluster-login true
 rsync --version
-ssh cluster-login 'command -v rsync && command -v sbatch && command -v squeue && command -v scancel && command -v scontrol && command -v apptainer'
+ssh cluster-login 'command -v rsync && command -v apptainer'
+ssh cluster-login 'command -v sbatch && command -v squeue && command -v scancel && command -v scontrol'  # Slurm
+ssh cluster-login 'command -v qsub && command -v qstat && command -v qdel'  # OpenPBS
 ```
 
 Then validate the target file and inspect an offline plan:
@@ -130,9 +136,10 @@ uv run rundr plan experiment.yaml \
 ```
 
 `plan` validates the supported stack, container/GPU/resource compatibility,
-Slurm native-option allowlist, and staging intent without connecting, creating a
-workspace or RunRecord, or submitting work. Live capability checks happen only
-on execution or through the explicitly opted-in Shoal preflight harness.
+the selected scheduler's native-option allowlist, and staging intent without
+connecting, creating a workspace or RunRecord, or submitting work. Live
+capability checks happen only on execution or through an explicit `doctor`
+connection or scheduler probe.
 
 ## Launch defaults
 

@@ -3443,7 +3443,10 @@ def _unsupported_execution_target(
         if asynchronous:
             return OperationError(
                 "ASYNC_UNAVAILABLE",
-                "Asynchronous submit requires an SSH/Slurm/rsync target",
+                (
+                    "Asynchronous submit requires SSH with Slurm or OpenPBS, "
+                    "rsync or shared staging, and Apptainer"
+                ),
                 {"target": target.name},
             )
         if actual[3] == "native" and experiment.container is not None:

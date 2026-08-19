@@ -4,6 +4,12 @@ All notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
+### Changed
+
+- Portable lifecycle help, target errors, setup guidance, and agent instructions
+  now describe both Slurm and OpenPBS without renaming backend-specific strategy
+  or native-resource fields.
+
 ## [0.1.1] - 2026-08-19
 
 ### Added
