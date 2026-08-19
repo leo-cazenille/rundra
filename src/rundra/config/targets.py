@@ -33,7 +33,7 @@ _TARGET_V4_FIELDS = _TARGET_V3_FIELDS
 _TARGET_V5_FIELDS = _TARGET_V4_FIELDS
 _BACKENDS_BY_ROLE = {
     "transport": frozenset({"local", "ssh"}),
-    "scheduler": frozenset({"local", "slurm"}),
+    "scheduler": frozenset({"local", "pbs", "slurm"}),
     "staging": frozenset({"local", "rsync", "shared"}),
     "container": frozenset({"apptainer", "native"}),
 }
@@ -43,6 +43,8 @@ _SUPPORTED_BACKEND_STACKS = frozenset(
         ("local", "local", "local", "native"),
         ("ssh", "slurm", "rsync", "apptainer"),
         ("ssh", "slurm", "shared", "apptainer"),
+        ("ssh", "pbs", "rsync", "apptainer"),
+        ("ssh", "pbs", "shared", "apptainer"),
     }
 )
 

@@ -18,10 +18,11 @@ from rundra.domain.scaling import ExecutionPolicy, TaskSpace
 
 ONE_UNIT_PER_TASK = "one_unit_per_task"
 SLURM_ARRAY = "slurm_array"
+SCHEDULER_ARRAY = "scheduler_array"
 MULTI_ARRAY = "multi-array"
 WORKER_POOL = "worker-pool"
 _EXECUTION_STRATEGIES = frozenset(
-    {ONE_UNIT_PER_TASK, SLURM_ARRAY, MULTI_ARRAY, WORKER_POOL}
+    {ONE_UNIT_PER_TASK, SLURM_ARRAY, SCHEDULER_ARRAY, MULTI_ARRAY, WORKER_POOL}
 )
 
 
@@ -242,6 +243,17 @@ class ExecutionPlan:
                 )
             if any(unit.resources != units[0].resources for unit in units[1:]):
                 raise ValueError("slurm_array strategy requires uniform Task resources")
+        if self.version < 4 and self.strategy == SCHEDULER_ARRAY:
+            if self.target.scheduler.kind != "pbs":
+                raise ValueError("scheduler_array strategy requires a PBS target")
+            if len(units) < 2 or len(groups) != 1:
+                raise ValueError(
+                    "scheduler_array strategy requires one multi-Task execution group"
+                )
+            if any(unit.resources != units[0].resources for unit in units[1:]):
+                raise ValueError(
+                    "scheduler_array strategy requires uniform Task resources"
+                )
         array_mapping = tuple(self.array_mapping)
         if any(type(item) is not ArrayTaskMapping for item in array_mapping):
             raise TypeError(
@@ -255,7 +267,7 @@ class ExecutionPlan:
             raise ValueError(
                 "one_unit_per_task strategy cannot define an array mapping"
             )
-        if self.strategy == SLURM_ARRAY:
+        if self.strategy in {SLURM_ARRAY, SCHEDULER_ARRAY}:
             expected_mapping = tuple(
                 ArrayTaskMapping(unit.task_id, unit.seed, index)
                 for index, unit in enumerate(units)

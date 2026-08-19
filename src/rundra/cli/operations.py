@@ -17,6 +17,8 @@ from rundra.adapters import (
     LocalStager,
     LocalTransport,
     NativeRuntime,
+    OpenPBSScheduler,
+    PBSScriptError,
     PurgeError,
     RemoteApptainerRuntime,
     RsyncStager,
@@ -26,6 +28,7 @@ from rundra.adapters import (
     SlurmScriptError,
     SSHPurger,
     SSHTransport,
+    validate_pbs_resources,
     validate_slurm_resources,
 )
 from rundra.config.errors import ConfigError
@@ -1654,12 +1657,15 @@ def submit_operation(
         remote_source_root = None
         transport, stager, runtime, scheduler = _execution_adapters(target)
         if preparation is not None:
-            if target.transport.kind != "ssh" or target.scheduler.kind != "slurm":
+            if target.transport.kind != "ssh" or target.scheduler.kind not in {
+                "pbs",
+                "slurm",
+            }:
                 return OperationResult.failure(
                     "submit",
                     OperationError(
                         "ASYNC_UNAVAILABLE",
-                        "Prepared submit requires an SSH/Slurm target",
+                        "Prepared submit requires an SSH scheduler target",
                         {"target": target.name},
                     ),
                 )
@@ -1836,7 +1842,7 @@ def status_operation(
     assert record is not None
     if (
         record.format_version < 4
-        and record.run.target.scheduler.kind == "slurm"
+        and record.run.target.scheduler.kind in {"pbs", "slurm"}
         and record.run.state
         not in {
             ExecutionState.SUCCEEDED,
@@ -1845,7 +1851,7 @@ def status_operation(
         }
     ):
         try:
-            active_scheduler = scheduler or _record_slurm_scheduler(record)
+            active_scheduler = scheduler or _record_scheduler(record)
             record = SchedulerLifecycleService(
                 store=store,
                 scheduler=active_scheduler,
@@ -1986,17 +1992,17 @@ def cancel_operation(
     if error is not None:
         return OperationResult.failure("cancel", error)
     assert record is not None
-    if record.run.target.scheduler.kind != "slurm":
+    if record.run.target.scheduler.kind not in {"pbs", "slurm"}:
         return OperationResult.failure(
             "cancel",
             OperationError(
                 "CANCEL_UNSUPPORTED",
-                f"Run {record.run.id} does not use an asynchronous Slurm scheduler",
+                f"Run {record.run.id} does not use an asynchronous scheduler",
                 {"run_id": str(record.run.id)},
             ),
         )
     try:
-        active_scheduler = scheduler or _record_slurm_scheduler(record)
+        active_scheduler = scheduler or _record_scheduler(record)
         record = SchedulerLifecycleService(
             store=store,
             scheduler=active_scheduler,
@@ -2095,17 +2101,13 @@ def purge_operation(
             return OperationResult.failure(
                 "purge", _run_store_operation_error(store_error, record.run.id)
             )
-        if (
-            record.run.state
-            not in {
-                ExecutionState.SUCCEEDED,
-                ExecutionState.FAILED,
-                ExecutionState.CANCELLED,
-            }
-            and record.run.target.scheduler.kind == "slurm"
-        ):
+        if record.run.state not in {
+            ExecutionState.SUCCEEDED,
+            ExecutionState.FAILED,
+            ExecutionState.CANCELLED,
+        } and record.run.target.scheduler.kind in {"pbs", "slurm"}:
             try:
-                active_scheduler = scheduler or _record_slurm_scheduler(record)
+                active_scheduler = scheduler or _record_scheduler(record)
                 record = SchedulerLifecycleService(
                     store=store,
                     scheduler=active_scheduler,
@@ -2374,13 +2376,16 @@ def logs_operation(
     if error is not None:
         return OperationResult.failure("logs", error)
     assert record is not None
-    if record.run.target.scheduler.kind == "slurm" and record.run.state not in {
+    if record.run.target.scheduler.kind in {
+        "pbs",
+        "slurm",
+    } and record.run.state not in {
         ExecutionState.SUCCEEDED,
         ExecutionState.FAILED,
         ExecutionState.CANCELLED,
     }:
         try:
-            active_scheduler = scheduler or _record_slurm_scheduler(record)
+            active_scheduler = scheduler or _record_scheduler(record)
             record = SchedulerLifecycleService(
                 store=store,
                 scheduler=active_scheduler,
@@ -3209,11 +3214,13 @@ def _unsupported_execution_target(
     elif actual in {
         ("ssh", "slurm", "rsync", "apptainer"),
         ("ssh", "slurm", "shared", "apptainer"),
+        ("ssh", "pbs", "rsync", "apptainer"),
+        ("ssh", "pbs", "shared", "apptainer"),
     }:
         if experiment.container is None:
             return OperationError(
                 "CONTAINER_REQUIRED",
-                "The remote Slurm path requires an experiment container image",
+                "The remote scheduler path requires an experiment container image",
                 {"target": target.name},
             )
     else:
@@ -3238,6 +3245,15 @@ def _unsupported_execution_target(
                 "NATIVE_OPTIONS_UNSUPPORTED",
                 str(error),
                 {"target": target.name, "scheduler": "slurm"},
+            )
+    if target.scheduler.kind == "pbs":
+        try:
+            validate_pbs_resources(resources)
+        except PBSScriptError as error:
+            return OperationError(
+                "NATIVE_OPTIONS_UNSUPPORTED",
+                str(error),
+                {"target": target.name, "scheduler": "pbs"},
             )
 
     container_gpu = (
@@ -3288,22 +3304,31 @@ def _execution_adapters(
             ssh_executable=executable,
             ssh_config_file=config_file,
         )
+    scheduler: Scheduler = (
+        OpenPBSScheduler(
+            remote_transport,
+            log_directory=target.workspace / ".rundra-scheduler-logs",
+        )
+        if target.scheduler.kind == "pbs"
+        else SlurmScheduler(
+            remote_transport,
+            log_directory=target.workspace / ".rundra-scheduler-logs",
+        )
+    )
     return (
         remote_transport,
         stager,
         RemoteApptainerRuntime(remote_transport),
-        SlurmScheduler(
-            remote_transport,
-            log_directory=target.workspace / ".rundra-scheduler-logs",
-        ),
+        scheduler,
     )
 
 
-def _record_slurm_scheduler(record: RunRecord) -> SlurmScheduler:
+def _record_scheduler(record: RunRecord) -> Scheduler:
     transport = _record_ssh_transport(record)
-    return SlurmScheduler(
-        transport,
-        log_directory=record.run.target.workspace / ".rundra-scheduler-logs",
+    scheduler_type = record.run.target.scheduler.kind
+    scheduler_class = OpenPBSScheduler if scheduler_type == "pbs" else SlurmScheduler
+    return scheduler_class(
+        transport, log_directory=record.run.target.workspace / ".rundra-scheduler-logs"
     )
 
 

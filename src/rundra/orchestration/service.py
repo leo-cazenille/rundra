@@ -28,7 +28,12 @@ from rundra.domain.states import (
     aggregate_execution_state,
 )
 from rundra.domain.sweeps import ExpandedConfig
-from rundra.orchestration.models import SLURM_ARRAY, ExecutionPlan, ExecutionUnit
+from rundra.orchestration.models import (
+    SCHEDULER_ARRAY,
+    SLURM_ARRAY,
+    ExecutionPlan,
+    ExecutionUnit,
+)
 from rundra.orchestration.planner import create_plan, create_sweep_plan
 from rundra.orchestration.preparation import (
     RemotePreparationSpec,
@@ -695,7 +700,7 @@ class OrchestrationService:
                 raise TypeError(
                     "Configured scheduler does not support preparation dependencies"
                 )
-            if request.plan.strategy == SLURM_ARRAY:
+            if request.plan.strategy in {SLURM_ARRAY, SCHEDULER_ARRAY}:
                 if not isinstance(self._scheduler, ArrayScheduler):
                     raise TypeError(
                         "Configured scheduler does not support mapped arrays"
@@ -703,7 +708,12 @@ class OrchestrationService:
                 array_request = SchedulerArrayRequest(
                     scheduler_group,
                     request.plan.array_mapping,
-                    workspace.metadata / "slurm-array-tasks.sh",
+                    workspace.metadata
+                    / (
+                        "slurm-array-tasks.sh"
+                        if request.plan.strategy == SLURM_ARRAY
+                        else "scheduler-array-tasks.sh"
+                    ),
                     allow_duplicate_seeds=request.plan.version == 3,
                     max_concurrent_jobs=request.max_concurrent_jobs,
                     max_workers=request.max_workers,
@@ -937,10 +947,16 @@ class OrchestrationService:
                 "OrchestrationService.execute_one requires a RunExecutionRequest"
             )
         units = request.plan.units
-        if len(units) > 1 and request.plan.strategy != SLURM_ARRAY:
+        if len(units) > 1 and request.plan.strategy not in {
+            SLURM_ARRAY,
+            SCHEDULER_ARRAY,
+        }:
             raise OrchestrationError(
                 code="UNSUPPORTED_TASK_COUNT",
-                message="Multi-Task execution currently requires a Slurm array plan",
+                message=(
+                    "Multi-Task execution requires a Slurm array or PBS "
+                    "scheduler array plan"
+                ),
             )
         if request.plan.experiment_name != request.experiment.name:
             raise OrchestrationError(

@@ -17,6 +17,17 @@ from rundra.adapters.local import (
     WorkspaceCollisionError,
 )
 from rundra.adapters.native import NativeRuntime, NativeRuntimeError
+from rundra.adapters.pbs import (
+    OpenPBSScheduler,
+    PBSCancellationError,
+    PBSQueryError,
+    PBSSchedulerError,
+    PBSScriptError,
+    PBSSubmissionError,
+    render_qsub_array_script,
+    render_qsub_script,
+    validate_pbs_resources,
+)
 from rundra.adapters.preflight import RemotePreflight
 from rundra.adapters.purge import LocalPurger, PurgeError, SSHPurger
 from rundra.adapters.remote import (
@@ -66,6 +77,12 @@ __all__ = [
     "LocalPurger",
     "NativeRuntime",
     "NativeRuntimeError",
+    "OpenPBSScheduler",
+    "PBSCancellationError",
+    "PBSQueryError",
+    "PBSSchedulerError",
+    "PBSScriptError",
+    "PBSSubmissionError",
     "RemoteWorkspaceAllocator",
     "RemoteApptainerRuntime",
     "RemoteWorkspaceCollisionError",
@@ -95,5 +112,8 @@ __all__ = [
     "render_sbatch_array_script",
     "render_sbatch_script",
     "render_slurm_array_manifest",
+    "render_qsub_array_script",
+    "render_qsub_script",
+    "validate_pbs_resources",
     "validate_slurm_resources",
 ]

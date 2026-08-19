@@ -23,6 +23,7 @@ from rundra.domain.sweeps import ExpandedConfig
 from rundra.orchestration.models import (
     MULTI_ARRAY,
     ONE_UNIT_PER_TASK,
+    SCHEDULER_ARRAY,
     SLURM_ARRAY,
     WORKER_POOL,
     ExecutionGroup,
@@ -322,7 +323,7 @@ def create_plan(
         )
         for index, seed in enumerate(normalized_seeds)
     )
-    uses_array = target.scheduler.kind == "slurm" and len(units) > 1
+    uses_array = target.scheduler.kind in {"pbs", "slurm"} and len(units) > 1
     return ExecutionPlan(
         version=2 if preparation is not None else 1,
         experiment_name=spec.name,
@@ -337,7 +338,11 @@ def create_plan(
             if uses_array
             else ()
         ),
-        strategy=SLURM_ARRAY if uses_array else ONE_UNIT_PER_TASK,
+        strategy=(
+            SCHEDULER_ARRAY
+            if uses_array and target.scheduler.kind == "pbs"
+            else (SLURM_ARRAY if uses_array else ONE_UNIT_PER_TASK)
+        ),
         preparation=preparation,
     )
 
@@ -372,7 +377,7 @@ def create_sweep_plan(
             itertools.product(expanded, normalized_seeds)
         )
     )
-    uses_array = target.scheduler.kind == "slurm" and len(units) > 1
+    uses_array = target.scheduler.kind in {"pbs", "slurm"} and len(units) > 1
     return ExecutionPlan(
         version=3,
         experiment_name=spec.name,
@@ -387,7 +392,11 @@ def create_sweep_plan(
             if uses_array
             else ()
         ),
-        strategy=SLURM_ARRAY if uses_array else ONE_UNIT_PER_TASK,
+        strategy=(
+            SCHEDULER_ARRAY
+            if uses_array and target.scheduler.kind == "pbs"
+            else (SLURM_ARRAY if uses_array else ONE_UNIT_PER_TASK)
+        ),
         preparation=preparation,
     )
 
@@ -435,7 +444,7 @@ def _validate_seed_set(seeds: Sequence[object]) -> tuple[int, ...]:
 def _execution_groups(
     target: Target, units: tuple[ExecutionUnit, ...]
 ) -> tuple[ExecutionGroup, ...]:
-    if target.scheduler.kind == "slurm" and len(units) > 1:
+    if target.scheduler.kind in {"pbs", "slurm"} and len(units) > 1:
         return (ExecutionGroup(tuple(unit.task_id for unit in units)),)
     return tuple(ExecutionGroup((unit.task_id,)) for unit in units)
 

@@ -88,7 +88,9 @@ def doctor_operation(
         config_file = None if config_value is None else Path(str(config_value))
         checks.extend(_ssh_static_checks(host, executable, config_file))
         if connect:
-            checks.append(_ssh_connect_check(host, executable, config_file))
+            checks.append(
+                _ssh_connect_check(host, executable, config_file, target.scheduler.kind)
+            )
     return OperationResult.success(
         "doctor", DoctorValue(source, target, tuple(checks), connect)
     )
@@ -210,14 +212,16 @@ def _ssh_configuration_checks(
 
 
 def _ssh_connect_check(
-    host: str, executable: str, config_file: Path | None
+    host: str, executable: str, config_file: Path | None, scheduler: str
 ) -> DoctorCheck:
+    scheduler_tools = (
+        ("qsub", "qstat", "qdel")
+        if scheduler == "pbs"
+        else ("sbatch", "squeue", "scancel", "scontrol")
+    )
     tools = (
         "rsync",
-        "sbatch",
-        "squeue",
-        "scancel",
-        "scontrol",
+        *scheduler_tools,
         "apptainer",
         "base64",
         "gzip",

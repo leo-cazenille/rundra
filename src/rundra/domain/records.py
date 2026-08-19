@@ -206,8 +206,10 @@ class RunRecord:
         if task_array_mapping:
             if self.format_version == 4:
                 raise ValueError("RunRecord v4 cannot materialize an array mapping")
-            if self.run.target.scheduler.kind != "slurm":
-                raise ValueError("RunRecord task_array_mapping requires a Slurm target")
+            if self.run.target.scheduler.kind not in {"pbs", "slurm"}:
+                raise ValueError(
+                    "RunRecord task_array_mapping requires a Slurm target or PBS target"
+                )
             expected_mapping = tuple(
                 ArrayTaskMapping(task.id, task.seed, index)
                 for index, task in enumerate(self.run.tasks)
