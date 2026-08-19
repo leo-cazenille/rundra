@@ -38,8 +38,12 @@ def test_mcp_server_exposes_guarded_lifecycle_tools(tmp_path: Path) -> None:
     )
 
     server = build_server(settings)
+    tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
 
     assert server.name == "Rundra"
+    assert "resume_submission" in tools
+    list_schema = tools["list_runs"].input_schema
+    assert {"offset", "limit", "include_tasks"} <= set(list_schema["properties"])
 
 
 def test_static_bearer_verifier_accepts_only_the_configured_token() -> None:

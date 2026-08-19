@@ -46,7 +46,11 @@ In Open WebUI 0.6.31 or newer on fishvision:
 
 Test `list_targets`, then `plan_experiment` before approving a small
 `submit_experiment`. Use `wait_run`, `get_status`, and `fetch_results` for the
-remaining lifecycle. Rotate the token by changing the environment value,
+remaining lifecycle. If submission is interrupted, use `resume_submission`
+with the retained Run ID rather than submitting a duplicate. `list_runs`
+returns compact pages by default; pass `offset` and `limit` to advance, and use
+`list_tasks` instead of expanded Run pages for large experiments. Rotate the
+token by changing the environment value,
 restarting `rundr-mcp`, and updating Open WebUI.
 
 Never put the token in command arguments, project YAML, target configuration,

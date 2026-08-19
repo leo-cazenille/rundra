@@ -45,6 +45,7 @@ GUIDE = f"""{START_MARKER}
 - Continue an interrupted submit with `rundr resume RUN_ID`. Do not repeat the
   submission as a new Run until Rundra has resolved the recorded scheduler
   outcome; an unknown outcome intentionally blocks automatic resubmission.
+  MCP clients use the equivalent `resume_submission` tool.
 - Use `--json` or Rundra MCP tools. Never parse scheduler-native output.
 - Use paginated `rundr list --json` Run summaries for discovery and `rundr
   tasks RUN_ID --json` for Task pages. Request `list --include-tasks` only when

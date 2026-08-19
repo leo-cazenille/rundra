@@ -30,6 +30,7 @@ from rundra.cli.operations import (
     purge_operation,
     resolve_plan_inputs_operation,
     resolve_run_inputs_operation,
+    resume_operation,
     run_operation,
     status_operation,
     submit_operation,
@@ -39,7 +40,12 @@ from rundra.cli.operations import (
     wait_operation,
 )
 from rundra.cli.render import result_document
-from rundra.persistence import JsonRunStore, PurgeReceiptStore, SqliteTaskStore
+from rundra.persistence import (
+    JsonRunStore,
+    PurgeReceiptStore,
+    SqliteTaskStore,
+    SubmissionReceiptStore,
+)
 from rundra.results import OperationError, OperationResult
 
 
@@ -133,7 +139,8 @@ def build_server(
         "Rundra",
         instructions=(
             "Plan before submission. Use explicit seeds and preserve Run IDs. "
-            "For long work use submit_experiment, wait_run, then fetch_results."
+            "For long work use submit_experiment, wait_run, then fetch_results. "
+            "Use resume_submission after an interrupted submit and page list_runs."
         ),
         token_verifier=token_verifier,
         auth=_STATIC_AUTH_SETTINGS if token_verifier is not None else None,
@@ -144,6 +151,9 @@ def build_server(
 
     def task_store() -> SqliteTaskStore:
         return SqliteTaskStore(settings.data_dir)
+
+    def submission_receipts() -> SubmissionReceiptStore:
+        return SubmissionReceiptStore(settings.data_dir)
 
     def document(result: OperationResult[Any]) -> dict[str, Any]:
         return result_document(result)
@@ -275,9 +285,8 @@ def build_server(
             return document(resolved)
         assert resolved.value is not None
         inputs = resolved.value
-        function = run_operation if operation == "run" else submit_operation
-        return document(
-            function(
+        if operation == "run":
+            result = run_operation(
                 experiment_path,
                 inputs.config,
                 inputs.targets_file,
@@ -293,7 +302,25 @@ def build_server(
                 sweep=inputs.sweep,
                 confirm_tasks=confirm_tasks,
             )
-        )
+        else:
+            result = submit_operation(
+                experiment_path,
+                inputs.config,
+                inputs.targets_file,
+                inputs.target,
+                inputs.source_root,
+                inputs.destination,
+                store(),
+                seed=inputs.seed,
+                seeds=inputs.seeds if len(inputs.seeds) > 1 else None,
+                launch=inputs.launch,
+                preparation=inputs.preparation_plan,
+                preparation_storage=inputs.preparation_storage,
+                sweep=inputs.sweep,
+                confirm_tasks=confirm_tasks,
+                submission_receipts=submission_receipts(),
+            )
+        return document(result)
 
     @server.tool()
     def submit_experiment(
@@ -377,9 +404,26 @@ def build_server(
         return document(status_operation(run_id, store(), task_store=task_store()))
 
     @server.tool()
-    def list_runs() -> dict[str, Any]:
-        """List Runs in the configured client RunStore."""
-        return document(list_runs_operation(store(), task_store=task_store()))
+    def resume_submission(run_id: str) -> dict[str, Any]:
+        """Recover an interrupted submission or find its durable scheduler IDs."""
+        return document(resume_operation(run_id, store(), submission_receipts()))
+
+    @server.tool()
+    def list_runs(
+        offset: int = 0,
+        limit: int = 100,
+        include_tasks: bool = False,
+    ) -> dict[str, Any]:
+        """Return one bounded page of compact Run summaries."""
+        return document(
+            list_runs_operation(
+                store(),
+                task_store=task_store(),
+                offset=offset,
+                limit=limit,
+                include_tasks=include_tasks,
+            )
+        )
 
     @server.tool()
     def list_tasks(run_id: str, offset: int = 0, limit: int = 100) -> dict[str, Any]:

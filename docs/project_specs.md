@@ -2005,6 +2005,13 @@ Long Runs use renewable waiting. `wait` reconciles durable state until terminal
 or timeout and never fetches implicitly. MCP waits are bounded so an agent host
 can renew them; no Rundra daemon is required.
 
+MCP asynchronous submission uses the same durable submission receipts as the
+CLI. Agents can call `resume_submission` after a disconnected or interrupted
+submission to recover scheduler identifiers without creating a duplicate Run.
+Run discovery is bounded: `list_runs` returns compact summaries by default and
+accepts `offset`, `limit`, and explicit `include_tasks` arguments; task details
+remain available through paginated `list_tasks` calls.
+
 ---
 
 ## 24. Resource policy — future design constraint
