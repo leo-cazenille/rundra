@@ -1315,6 +1315,68 @@ def test_slurm_query_falls_back_to_scontrol_when_accounting_is_disabled() -> Non
     assert transport.run_calls[-1] == Command(("scontrol", "show", "job", "-o", "18"))
 
 
+def test_slurm_scontrol_fallback_aggregates_root_array_elements() -> None:
+    reference = SchedulerReference("18")
+    transport = ScriptedTransport(
+        deque(
+            (
+                _command_result(Command(("unused",)), 0, ""),
+                _command_result(Command(("unused",)), 1, "", "accounting disabled"),
+                _command_result(
+                    Command(("unused",)),
+                    0,
+                    "JobId=19 ArrayJobId=18 ArrayTaskId=0 "
+                    "JobState=COMPLETED ExitCode=0:0 "
+                    "StartTime=2026-08-15T21:13:48 "
+                    "EndTime=2026-08-15T21:13:49 NodeList=node01\n"
+                    "JobId=20 ArrayJobId=18 ArrayTaskId=1 "
+                    "JobState=COMPLETED ExitCode=0:0 "
+                    "StartTime=2026-08-15T21:13:48 "
+                    "EndTime=2026-08-15T21:13:50 NodeList=node02\n",
+                ),
+            )
+        )
+    )
+
+    observation = SlurmScheduler(transport).query((reference,))[0]
+
+    assert observation.state is ExecutionState.SUCCEEDED
+    assert observation.native_state == "COMPLETED"
+    assert observation.exit_code == 0
+    assert observation.metadata == {
+        "source": "scontrol",
+        "array_elements": 2,
+        "native_start": "2026-08-15T21:13:48",
+        "native_end": "2026-08-15T21:13:50",
+        "allocated_nodes": "node01,node02",
+    }
+
+
+def test_slurm_scontrol_fallback_accepts_internal_array_element_job_id() -> None:
+    reference = SchedulerReference("18_0")
+    transport = ScriptedTransport(
+        deque(
+            (
+                _command_result(Command(("unused",)), 0, ""),
+                _command_result(Command(("unused",)), 1, "", "accounting disabled"),
+                _command_result(
+                    Command(("unused",)),
+                    0,
+                    "JobId=19 ArrayJobId=18 ArrayTaskId=0 "
+                    "JobState=COMPLETED ExitCode=0:0 "
+                    "StartTime=2026-08-15T21:13:48 "
+                    "EndTime=2026-08-15T21:13:49 NodeList=node01\n",
+                ),
+            )
+        )
+    )
+
+    observation = SlurmScheduler(transport).query((reference,))[0]
+
+    assert observation.state is ExecutionState.SUCCEEDED
+    assert observation.exit_code == 0
+
+
 def test_slurm_query_reports_failed_scontrol_fallback() -> None:
     transport = ScriptedTransport(
         deque(

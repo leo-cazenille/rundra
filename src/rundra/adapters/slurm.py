@@ -1410,10 +1410,40 @@ def _parse_scontrol(
     reference: SchedulerReference,
     timezone: tzinfo | None,
 ) -> SchedulerObservation:
+    rows = tuple(line for line in output.splitlines() if line.strip())
+    observations: list[SchedulerObservation] = []
+    root_reference = "_" not in reference.native_id
+    for row in rows:
+        job_id = _scontrol_field(row, "JobId")
+        array_job_id = _scontrol_field(row, "ArrayJobId")
+        array_task_id = _scontrol_field(row, "ArrayTaskId")
+        array_alias = (
+            f"{array_job_id}_{array_task_id}"
+            if array_job_id is not None and array_task_id is not None
+            else None
+        )
+        if (
+            job_id != reference.native_id
+            and array_alias != reference.native_id
+            and not (root_reference and array_job_id == reference.native_id)
+        ):
+            raise SlurmQueryError("scontrol returned a mismatched job")
+        observations.append(_parse_scontrol_row(row, reference, timezone))
+    if not observations:
+        raise SlurmQueryError("scontrol returned a mismatched job")
+    if len(observations) == 1:
+        return observations[0]
+    return _aggregate_scontrol_array(observations, reference)
+
+
+def _parse_scontrol_row(
+    output: str,
+    reference: SchedulerReference,
+    timezone: tzinfo | None,
+) -> SchedulerObservation:
     fields = {
         name: _scontrol_field(output, name)
         for name in (
-            "JobId",
             "JobState",
             "ExitCode",
             "StartTime",
@@ -1421,8 +1451,6 @@ def _parse_scontrol(
             "NodeList",
         )
     }
-    if fields["JobId"] != reference.native_id:
-        raise SlurmQueryError("scontrol returned a mismatched job")
     native_state = fields["JobState"]
     if native_state is None:
         raise SlurmQueryError("scontrol did not return JobState")
@@ -1452,6 +1480,74 @@ def _parse_scontrol(
         metadata=metadata,
         started_at=_parse_timestamp(raw_start, timezone),
         finished_at=_parse_timestamp(raw_end, timezone) if terminal else None,
+    )
+
+
+def _aggregate_scontrol_array(
+    observations: list[SchedulerObservation],
+    reference: SchedulerReference,
+) -> SchedulerObservation:
+    states = {observation.state for observation in observations}
+    if ExecutionState.RUNNING in states:
+        state = ExecutionState.RUNNING
+    elif ExecutionState.QUEUED in states or ExecutionState.SUBMITTED in states:
+        state = ExecutionState.QUEUED
+    elif ExecutionState.UNKNOWN in states:
+        state = ExecutionState.UNKNOWN
+    elif ExecutionState.FAILED in states:
+        state = ExecutionState.FAILED
+    elif ExecutionState.CANCELLED in states:
+        state = ExecutionState.CANCELLED
+    else:
+        state = ExecutionState.SUCCEEDED
+    terminal = state in {
+        ExecutionState.SUCCEEDED,
+        ExecutionState.FAILED,
+        ExecutionState.CANCELLED,
+    }
+    native_states = sorted({item.native_state for item in observations})
+    exit_codes = tuple(
+        item.exit_code for item in observations if item.exit_code is not None
+    )
+    nonzero_exit = next((code for code in exit_codes if code != 0), None)
+    exit_code = None
+    if terminal:
+        exit_code = nonzero_exit if nonzero_exit is not None else 0
+        if state is ExecutionState.FAILED and exit_code == 0:
+            exit_code = 1
+    metadata: dict[str, NativeValue] = {
+        "source": "scontrol",
+        "array_elements": len(observations),
+    }
+    for name, reducer in (("native_start", min), ("native_end", max)):
+        values = tuple(
+            str(item.metadata[name]) for item in observations if name in item.metadata
+        )
+        if values:
+            metadata[name] = reducer(values)
+    nodes = sorted(
+        {
+            str(item.metadata["allocated_nodes"])
+            for item in observations
+            if "allocated_nodes" in item.metadata
+        }
+    )
+    if nodes:
+        metadata["allocated_nodes"] = ",".join(nodes)
+    starts = tuple(
+        item.started_at for item in observations if item.started_at is not None
+    )
+    finishes = tuple(
+        item.finished_at for item in observations if item.finished_at is not None
+    )
+    return SchedulerObservation(
+        reference,
+        state,
+        ",".join(native_states),
+        exit_code=exit_code,
+        metadata=metadata,
+        started_at=min(starts) if starts else None,
+        finished_at=max(finishes) if terminal and finishes else None,
     )
 
 
