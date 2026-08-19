@@ -503,12 +503,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     try:
-    progress = create_progress_reporter(
-        verbose=getattr(arguments, "verbose", False),
-        progress=getattr(arguments, "progress", False),
-        stream=sys.stderr,
-        announce_run=arguments.command == "submit",
-    )
+        progress = create_progress_reporter(
+            verbose=getattr(arguments, "verbose", False),
+            progress=getattr(arguments, "progress", False),
+            stream=sys.stderr,
+            announce_run=arguments.command == "submit",
+        )
     except ProgressUnavailableError as error:
         unavailable: OperationResult[Any] = OperationResult.failure(
             arguments.command,
