@@ -33,9 +33,7 @@ def write_reference_manifest(
     temporary = Path(temporary_name)
     try:
         payload = (
-            json.dumps(document, sort_keys=True, separators=(",", ":")).encode(
-                "utf-8"
-            )
+            json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
             + b"\n"
         )
         with os.fdopen(descriptor, "wb") as stream:

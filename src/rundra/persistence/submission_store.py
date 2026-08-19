@@ -53,7 +53,9 @@ class SubmissionReceipt:
             raise TypeError("Submission receipt Task mapping is invalid")
         if self.completed_at is None:
             if jobs or mapping:
-                raise ValueError("Pending submission receipt cannot contain scheduler IDs")
+                raise ValueError(
+                    "Pending submission receipt cannot contain scheduler IDs"
+                )
         else:
             if (
                 not isinstance(self.completed_at, datetime)

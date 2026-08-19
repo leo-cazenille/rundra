@@ -793,11 +793,7 @@ class OrchestrationService:
                     ),
                     "result_shards": request.shard_outputs,
                     **(
-                        {
-                            "result_shard_root": str(
-                                workspace.outputs / ".rundra-shards"
-                            )
-                        }
+                        {"result_shard_root": str(workspace.outputs / ".rundra-shards")}
                         if request.shard_outputs
                         else {}
                     ),
@@ -807,13 +803,14 @@ class OrchestrationService:
             record = updated
 
         submission_started_at = self._clock()
+        submission_receipts = self._submission_receipts
         pending_receipt = (
-            self._submission_receipts.begin(
+            submission_receipts.begin(
                 run_id,
                 tuple(unit.task_id for unit in units),
                 submission_started_at,
             )
-            if self._submission_receipts is not None
+            if submission_receipts is not None
             else None
         )
         try:
@@ -873,11 +870,10 @@ class OrchestrationService:
                     else self._scheduler.submit(scheduler_group)
                 )
             if pending_receipt is not None:
-                self._submission_receipts.complete(
+                assert submission_receipts is not None
+                submission_receipts.complete(
                     pending_receipt,
-                    tuple(
-                        reference.native_id for reference in submission.references
-                    ),
+                    tuple(reference.native_id for reference in submission.references),
                     submission.task_native_ids,
                     self._clock(),
                 )

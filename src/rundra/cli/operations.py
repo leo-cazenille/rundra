@@ -111,8 +111,8 @@ from rundra.persistence import (
     RunStore,
     RunStoreConflictError,
     RunStoreError,
-    SubmissionReceiptStore,
     SqliteTaskStore,
+    SubmissionReceiptStore,
     TaskState,
 )
 from rundra.ports import (
@@ -2264,16 +2264,13 @@ def list_runs_operation(
             "list",
             ListRunsValue(
                 tuple(
-                    status
-                    if include_tasks
-                    else replace(status, task_details=())
+                    status if include_tasks else replace(status, task_details=())
                     for status in (
                         _status_value(
                             record,
                             (
                                 task_store.counts(record.run.id).execution
-                                if record.format_version == 4
-                                and task_store is not None
+                                if record.format_version == 4 and task_store is not None
                                 else None
                             ),
                         )

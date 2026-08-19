@@ -1,0 +1,26 @@
+{
+  "format_version": 15,
+  "program": "rundr",
+  "global_options": ["--json", "--version"],
+  "commands": {
+    "validate": {"positionals": ["experiment"], "options": ["--json"]},
+    "plan": {"positionals": ["experiment"], "options": ["--config", "--execution-strategy", "--json", "--offline", "--prepare-location", "--profile", "--project-file", "--random-seed", "--rebuild", "--retrieval", "--seed", "--seeds", "--source-root", "--target", "--targets-file", "--task-slots-per-worker", "--workers"]},
+    "targets": {"positionals": [], "options": ["--json", "--targets-file"]},
+    "doctor": {"positionals": ["experiment"], "options": ["--agent", "--config", "--connect", "--data-dir", "--destination", "--json", "--local-target-access", "--no-write-probe", "--probe-timeout", "--profile", "--project-file", "--scheduler-probe", "--source-root", "--target", "--targets-file"]},
+    "run": {"positionals": ["experiment"], "options": ["--config", "--confirm-tasks", "--data-dir", "--destination", "--json", "--offline", "--prepare-location", "--profile", "--progress", "--project-file", "--random-seed", "--rebuild", "--seed", "--seeds", "--source-root", "--target", "--targets-file", "--task-slots-per-worker", "--verbose", "--workers"]},
+    "submit": {"positionals": ["experiment"], "options": ["--config", "--confirm-tasks", "--data-dir", "--destination", "--json", "--offline", "--prepare-location", "--profile", "--progress", "--project-file", "--random-seed", "--rebuild", "--seed", "--seeds", "--source-root", "--target", "--targets-file", "--task-slots-per-worker", "--verbose", "--workers"]},
+    "resume": {"positionals": ["run_id"], "options": ["--data-dir", "--json", "--last"]},
+    "wait": {"positionals": ["run_id"], "options": ["--data-dir", "--json", "--last", "--poll-interval", "--progress", "--timeout", "--verbose"]},
+    "status": {"positionals": ["run_id"], "options": ["--data-dir", "--json", "--last"]},
+    "tasks": {"positionals": ["run_id"], "options": ["--data-dir", "--json", "--last", "--limit", "--offset"]},
+    "list": {"positionals": [], "options": ["--data-dir", "--include-tasks", "--json", "--limit", "--offset"]},
+    "logs": {"positionals": ["run_id"], "options": ["--data-dir", "--json", "--last", "--preparation", "--task"]},
+    "fetch": {"positionals": ["run_id"], "options": ["--data-dir", "--destination", "--extract", "--json", "--last", "--mode", "--progress", "--task", "--verbose"]},
+    "inspect": {"positionals": ["run_id"], "options": ["--data-dir", "--json", "--last"]},
+    "cancel": {"positionals": ["run_id"], "options": ["--data-dir", "--json", "--last"]},
+    "purge": {"positionals": ["run_id"], "options": ["--confirm", "--data-dir", "--dry-run", "--json", "--last", "--workspace"]},
+    "help": {"positionals": ["topic"], "options": []},
+    "agent-guide": {"positionals": [], "options": ["--check", "--json", "--write"]},
+    "version": {"positionals": [], "options": []}
+  }
+}

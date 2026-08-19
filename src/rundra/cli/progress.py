@@ -67,11 +67,7 @@ class CLIProgressReporter:
     def __call__(self, event: ProgressEvent) -> None:
         if type(event) is not ProgressEvent:
             raise TypeError("CLIProgressReporter requires a ProgressEvent")
-        if (
-            self._announce_run
-            and not self._announced_run
-            and event.run_id is not None
-        ):
+        if self._announce_run and not self._announced_run and event.run_id is not None:
             print(f"Run registered: {event.run_id}", file=self._stream, flush=True)
             self._announced_run = True
         bar = self._ensure_bar(event) if self._progress else None

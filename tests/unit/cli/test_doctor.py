@@ -78,7 +78,7 @@ def test_bootstrap_doctor_reports_paths_and_generates_codex_profile(
     assert not cache.exists()
     document = render_json(result)
     assert '"format_version":2' in document
-    assert '"complete":false' in document
+    assert '"complete":true' in document
 
 
 def test_doctor_rejects_scheduler_probe_without_write_probe(tmp_path: Path) -> None:

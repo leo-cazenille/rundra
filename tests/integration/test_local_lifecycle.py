@@ -30,6 +30,7 @@ from rundra.domain.preparation import (
     PreparationRecord,
     PreparationSourceGit,
 )
+from rundra.domain.records import RunRecord
 from rundra.domain.states import ExecutionState, RetrievalState
 from rundra.orchestration.planner import create_plan
 from rundra.orchestration.preparation import RemotePreparationSpec

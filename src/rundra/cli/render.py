@@ -125,6 +125,14 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
         document["run"] = _run_value_document(value)
         if value.launch is not None:
             document["launch"] = _launch_document(value.launch)
+    elif isinstance(value, SubmissionRecoveryValue):
+        record = value.record
+        document["submission"] = {
+            "action": value.action,
+            "run_id": str(record.run.id),
+            "state": record.run.state.value,
+            "scheduler_job_ids": list(record.scheduler_job_ids),
+        }
     elif isinstance(value, StatusValue):
         document["status"] = _status_document(value)
     elif isinstance(value, WaitValue):
@@ -373,14 +381,12 @@ def render_human(result: OperationResult[Any]) -> str:
         return _with_launch(rendered, value.launch)
     if isinstance(value, SubmissionRecoveryValue):
         record = value.record
-        return {
-            "submission": {
-                "action": value.action,
-                "run_id": str(record.run.id),
-                "state": record.run.state.value,
-                "scheduler_job_ids": list(record.scheduler_job_ids),
-            }
-        }
+        return (
+            f"Run: {record.run.id}\n"
+            f"Submission: {value.action}\n"
+            f"State: {record.run.state.value}\n"
+            "Scheduler jobs: " + ", ".join(record.scheduler_job_ids)
+        )
     if isinstance(value, StatusValue):
         counts = ", ".join(
             f"{state.lower()}={count}"
@@ -444,9 +450,13 @@ def render_human(result: OperationResult[Any]) -> str:
         )
         if not value.runs:
             return page
-        return page + "\n" + "\n".join(
-            f"  {run.run_id}: {run.state.value} ({run.experiment} on {run.target})"
-            for run in value.runs
+        return (
+            page
+            + "\n"
+            + "\n".join(
+                f"  {run.run_id}: {run.state.value} ({run.experiment} on {run.target})"
+                for run in value.runs
+            )
         )
     if isinstance(value, LogsValue):
         return (
@@ -682,13 +692,7 @@ def _result_format_version(value: object) -> int:
     if isinstance(value, StatusValue) and value.preparation is not None:
         return value.format_version
     if isinstance(value, SubmissionRecoveryValue):
-        record = value.record
-        return (
-            f"Run: {record.run.id}\n"
-            f"Submission: {value.action}\n"
-            f"State: {record.run.state.value}\n"
-            "Scheduler jobs: " + ", ".join(record.scheduler_job_ids)
-        )
+        return value.record.format_version
     if isinstance(value, StatusValue):
         return value.format_version
     if isinstance(value, WaitValue):
