@@ -17,6 +17,7 @@ def test_agent_guide_print_write_update_and_check(tmp_path: Path) -> None:
     assert printed.value.content == GUIDE
     assert "https://pypi.org/project/rundra/" in printed.value.content
     assert "installed `rundr help`" in printed.value.content
+    assert "rundr doctor --agent codex --json" in printed.value.content
     assert written.ok and updated.ok and checked.ok
     assert path.read_text(encoding="utf-8").count("rundra-agent:start") == 1
 

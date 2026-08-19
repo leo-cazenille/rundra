@@ -1334,6 +1334,18 @@ canonical PyPI project overview for additional installation and workflow
 documentation. Because that page describes the latest release, installed help
 and version output remain authoritative for local behavior.
 
+The version-2 doctor result is the first-run capability boundary for humans and
+agents. Bare `rundr doctor` exercises the effective local Run store and
+preparation cache with private temporary files. Experiment mode additionally
+reports the exact source, config, destination, target, SSH, network, and socket
+requirements. `--connect` performs a reversible staging round trip; the
+separate `--scheduler-probe` opt-in submits one bounded no-op job and guarantees
+best-effort cancellation and exact-path cleanup. `ready` means that no known
+requirement failed, while `complete` means every requested check passed. The
+audit may generate agent-specific configuration text but never applies it,
+reads credential contents into output, fetches sources, pulls images, builds
+applications, or creates a scientific RunRecord.
+
 M12.1 adds an opt-in Docker Compose system boundary with one Slurm controller,
 two compute nodes, SSH/rsync staging, and restricted-capability nested
 Apptainer. It validates 1,000 logical Tasks through bounded worker allocations,

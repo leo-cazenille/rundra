@@ -1,0 +1,28 @@
+{
+  "doctor": {
+    "checks": [
+      {
+        "message": "rundra 0.1.1 is installed",
+        "name": "package",
+        "scope": "client",
+        "status": "pass"
+      }
+    ],
+    "complete": true,
+    "connected": false,
+    "mode": "bootstrap",
+    "ready": true,
+    "remediation": {
+      "actions": [],
+      "agent": "generic",
+      "config": null
+    },
+    "requirements": [],
+    "scheduler_probed": false,
+    "source": "/home/alice/.config/rundra/targets.yaml",
+    "target": null
+  },
+  "format_version": 2,
+  "ok": true,
+  "operation": "doctor"
+}

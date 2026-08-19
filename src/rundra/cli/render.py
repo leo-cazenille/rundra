@@ -8,7 +8,7 @@ from hashlib import sha256
 from typing import Any
 
 from rundra.cli.agent_guide import AgentGuideValue
-from rundra.cli.doctor import DoctorValue
+from rundra.cli.capability_doctor import DoctorValue
 from rundra.cli.operations import (
     CancelValue,
     FetchValue,
@@ -84,18 +84,41 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
         ]
     elif isinstance(value, DoctorValue):
         document["doctor"] = {
+            "mode": value.mode,
             "source": str(value.source),
-            "target": value.target.name,
+            "target": None if value.target is None else value.target.name,
             "connected": value.connected,
+            "scheduler_probed": value.scheduler_probed,
             "ready": value.ready,
+            "complete": value.complete,
             "checks": [
                 {
                     "name": check.name,
+                    "scope": "client",
                     "status": check.status,
                     "message": check.message,
                 }
                 for check in value.checks
             ],
+            "requirements": [
+                {
+                    "kind": requirement.kind,
+                    "value": requirement.value,
+                    "access": requirement.access,
+                    "purpose": requirement.purpose,
+                    "location": requirement.location,
+                    "status": requirement.status,
+                }
+                for requirement in value.requirements
+            ],
+            "remediation": {
+                "agent": value.agent,
+                "actions": [
+                    {"code": action.code, "message": action.message}
+                    for action in value.actions
+                ],
+                "config": value.agent_config,
+            },
         }
     elif isinstance(value, RunValue):
         document["run"] = _run_value_document(value)
@@ -284,12 +307,28 @@ def render_human(result: OperationResult[Any]) -> str:
         )
         return "\n".join(lines)
     if isinstance(value, DoctorValue):
-        lines = [f"Doctor for target {value.target.name}:"]
+        subject = (
+            "installation" if value.target is None else f"target {value.target.name}"
+        )
+        lines = [f"Doctor for {subject} ({value.mode}):"]
         lines.extend(
             f"  [{check.status.upper()}] {check.name}: {check.message}"
             for check in value.checks
         )
         lines.append(f"Ready: {'yes' if value.ready else 'no'}")
+        lines.append(f"Verification complete: {'yes' if value.complete else 'no'}")
+        if value.actions:
+            lines.append("Next actions:")
+            lines.extend(
+                f"  {action.code}: {action.message}" for action in value.actions
+            )
+        if value.agent_config is not None:
+            lines.extend(
+                (
+                    "Codex permission profile (generated, not applied):",
+                    value.agent_config.rstrip(),
+                )
+            )
         return "\n".join(lines)
     if isinstance(value, RunValue):
         seed_line = _human_run_dimensions(value)
@@ -609,6 +648,8 @@ def _result_format_version(value: object) -> int:
     if isinstance(value, (LogsValue, FetchValue, PurgeValue)):
         return value.format_version
     if isinstance(value, TasksValue):
+        return value.format_version
+    if isinstance(value, DoctorValue):
         return value.format_version
     if (
         isinstance(value, ValidationValue)

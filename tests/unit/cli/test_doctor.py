@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rundra.cli.doctor import doctor_operation
+from rundra.cli.capability_doctor import doctor_operation
+from rundra.cli.render import render_json
 
 
 def test_doctor_accepts_a_writable_local_target(tmp_path: Path) -> None:
@@ -24,7 +25,9 @@ targets:
 
     assert result.ok and result.value is not None
     assert result.value.ready
-    assert [check.status for check in result.value.checks] == ["pass", "pass"]
+    assert result.value.format_version == 2
+    assert any(check.name == "workspace" for check in result.value.checks)
+    assert not (tmp_path / "workspace").exists()
 
 
 def test_doctor_reports_missing_target_without_connecting(tmp_path: Path) -> None:
@@ -33,5 +36,58 @@ def test_doctor_reports_missing_target_without_connecting(tmp_path: Path) -> Non
 
     result = doctor_operation(targets, "absent", connect=True)
 
+    assert result.ok and result.value is not None
+    assert not result.value.ready
+    assert any(check.name == "selected_target" for check in result.value.checks)
+
+
+def test_bootstrap_doctor_reports_paths_and_generates_codex_profile(
+    tmp_path: Path,
+) -> None:
+    targets = tmp_path / "targets.yaml"
+    targets.write_text(
+        "\n".join(
+            (
+                "version: 1",
+                "targets:",
+                "  local:",
+                "    transport: {type: local}",
+                "    scheduler: {type: local}",
+                "    staging: {type: local}",
+                "    container: {type: native}",
+                f"    workspace: {tmp_path / 'workspace'}",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    data_dir = tmp_path / "records"
+    cache = tmp_path / "cache"
+
+    result = doctor_operation(
+        targets, None, data_dir=data_dir, cache_root=cache, agent="codex"
+    )
+
+    assert result.ok and result.value is not None
+    assert result.value.ready
+    assert result.value.mode == "bootstrap"
+    assert result.value.agent_config is not None
+    assert "[permissions.rundra.filesystem]" in result.value.agent_config
+    assert str(data_dir) in result.value.agent_config
+    assert not data_dir.exists()
+    assert not cache.exists()
+    document = render_json(result)
+    assert '"format_version":2' in document
+    assert '"complete":false' in document
+
+
+def test_doctor_rejects_scheduler_probe_without_write_probe(tmp_path: Path) -> None:
+    result = doctor_operation(
+        tmp_path / "targets.yaml",
+        None,
+        scheduler_probe=True,
+        write_probe=False,
+    )
+
     assert result.error is not None
-    assert result.error.code == "TARGET_NOT_FOUND"
+    assert result.error.code == "CLI_USAGE_ERROR"

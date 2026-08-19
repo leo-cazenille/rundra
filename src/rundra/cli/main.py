@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Never, cast
 
 from rundra.cli.agent_guide import AgentGuideValue, agent_guide_operation
-from rundra.cli.doctor import DoctorValue, doctor_operation
+from rundra.cli.capability_doctor import DoctorValue, doctor_operation
 from rundra.cli.operations import (
     LAST_RUN_SELECTOR,
     RunValue,
@@ -123,13 +123,23 @@ def build_parser() -> argparse.ArgumentParser:
     targets.add_argument("--targets-file", type=Path, default=_default_targets_file())
     _add_json_option(targets)
 
-    doctor = subparsers.add_parser("doctor", help="diagnose target access safely")
+    doctor = subparsers.add_parser(
+        "doctor", help="audit installation, sandbox, target, and scheduler access"
+    )
     doctor.add_argument("experiment", nargs="?", type=Path)
+    doctor.add_argument("--config", type=Path)
     doctor.add_argument("--target")
     doctor.add_argument("--targets-file", type=Path)
+    doctor.add_argument("--source-root", type=Path)
+    doctor.add_argument("--destination", type=Path)
+    doctor.add_argument("--data-dir", type=Path)
     doctor.add_argument("--project-file", type=Path)
     doctor.add_argument("--profile")
     doctor.add_argument("--connect", action="store_true")
+    doctor.add_argument("--scheduler-probe", action="store_true")
+    doctor.add_argument("--probe-timeout", type=int, default=120)
+    doctor.add_argument("--no-write-probe", action="store_true")
+    doctor.add_argument("--agent", choices=("generic", "codex"), default="generic")
     _add_json_option(doctor)
 
     run = subparsers.add_parser("run", help="execute one Run synchronously")
@@ -516,12 +526,23 @@ def main(argv: Sequence[str] | None = None) -> int:
                 arguments.targets_file or _default_targets_file(),
                 arguments.target,
                 connect=arguments.connect,
+                scheduler_probe=arguments.scheduler_probe,
+                probe_timeout=arguments.probe_timeout,
+                write_probe=not arguments.no_write_probe,
+                data_dir=arguments.data_dir,
+                destination=arguments.destination,
+                source_root=arguments.source_root,
+                agent=arguments.agent,
             )
         else:
             resolved_doctor = resolve_run_inputs_operation(
                 arguments.experiment,
+                config=arguments.config,
                 target=arguments.target,
                 targets_file=arguments.targets_file,
+                source_root=arguments.source_root,
+                destination=arguments.destination,
+                data_dir=arguments.data_dir,
                 project_file=arguments.project_file,
                 profile=arguments.profile,
                 operation="doctor",
@@ -534,6 +555,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                     resolved_doctor.value.targets_file,
                     resolved_doctor.value.target,
                     connect=arguments.connect,
+                    scheduler_probe=arguments.scheduler_probe,
+                    probe_timeout=arguments.probe_timeout,
+                    write_probe=not arguments.no_write_probe,
+                    data_dir=resolved_doctor.value.data_dir,
+                    destination=resolved_doctor.value.destination,
+                    source_root=resolved_doctor.value.source_root,
+                    experiment_source=arguments.experiment,
+                    config_source=resolved_doctor.value.config,
+                    cache_root=(
+                        None
+                        if resolved_doctor.value.preparation_storage.cache_root is None
+                        else Path(
+                            str(resolved_doctor.value.preparation_storage.cache_root)
+                        )
+                    ),
+                    agent=arguments.agent,
                 )
     elif arguments.command == "run":
         resolved = resolve_run_inputs_operation(

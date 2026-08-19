@@ -50,8 +50,14 @@ surface introduced for preparation is frozen in
 [`cli-surface-v2.json`](cli-surface-v2.json), while the v1 fixture remains as
 the historical contract.
 
-The version-3 CLI surface adds the non-mutating `doctor` diagnostic. Its JSON
-payload reports typed checks without exposing credential material.
+The version-3 CLI surface added the original non-mutating `doctor` diagnostic.
+Doctor JSON version 2 expands it into a bootstrap and sandbox capability audit
+with typed requirements, verification coverage, reversible-probe results, and
+generated remediation. It reports credential paths when OpenSSH requires them
+but never reads credential contents into output.
+The representative contract is [`doctor-success-v2.json`](doctor-success-v2.json).
+The expanded command options are frozen in
+[`cli-surface-v12.json`](cli-surface-v12.json); version 11 remains historical.
 
 Version-3 parameterized documents add a `parameter_set` object to each Task,
 permit a seed to recur in different parameter sets, and stage a distinct

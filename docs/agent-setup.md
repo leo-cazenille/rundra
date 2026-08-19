@@ -40,20 +40,36 @@ project or temporary agent home, disable host verification, or place
 credentials in Rundra YAML. Merely changing `HOME` is not a reliable OpenSSH
 setup because OpenSSH may derive user paths from the operating-system account.
 
+Start every new agent installation or sandbox with the bootstrap audit:
+
+```bash
+rundr doctor --agent codex --json
+```
+
+The audit performs real reversible writes in the effective Run store and local
+preparation cache. Its structured requirements identify exact read/write paths,
+network endpoints, executables, and SSH-agent sockets. The generated Codex TOML
+is guidance only: Rundra never edits agent security configuration. After
+granting only the reported permissions, start a new agent session and rerun the
+audit because sandbox permissions are commonly fixed at session startup.
+
 Check static setup without contacting the cluster:
 
 ```bash
 uv run rundr doctor examples/pogosim-shoal/experiment.yaml
 ```
 
-After the sandbox has network and authentication access, request the read-only
-live probe:
+After the sandbox has network and authentication access, request the live
+staging probe:
 
 ```bash
 uv run rundr doctor examples/pogosim-shoal/experiment.yaml --connect --json
 ```
 
-The live probe uses batch-mode SSH, submits no scheduler work, and creates no
-remote state. If sandbox policy cannot expose an authentication mechanism, a
+The live probe uses batch-mode SSH and creates a uniquely named private target
+directory for a one-token upload/download round trip, then removes it. It
+submits no scheduler work. Use `--scheduler-probe` only when one bounded no-op
+job should verify scheduler acceptance and compute-side workspace access. If
+sandbox policy cannot expose an authentication mechanism, a
 human or external trusted execution broker must launch Rundra; Rundra does not
 bypass that boundary.

@@ -10,7 +10,7 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 | `validate` | `EXPERIMENT` | `--json` | Validate experiment YAML without executing. |
 | `plan` | `EXPERIMENT` | `--config`, `--seed`/`--seeds`/`--random-seed`, `--target`, `--targets-file`, `--project-file`, `--profile`, preparation options, `--execution-strategy`, `--retrieval`, `--json` | Resolve and inspect execution without target contact or state changes. |
 | `targets` | none | `--targets-file`, `--json` | Validate and list configured targets. |
-| `doctor` | optional `EXPERIMENT` | `--target`, `--targets-file`, `--project-file`, `--profile`, `--connect`, `--json` | Diagnose static target setup and optionally perform a read-only live SSH probe. |
+| `doctor` | optional `EXPERIMENT` | launch path overrides, `--connect`, `--scheduler-probe`, `--probe-timeout`, `--no-write-probe`, `--agent`, `--json` | Audit installation, sandbox paths, target access, reversible staging, and an optional bounded scheduler submission. |
 | `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--verbose`, `--progress`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
 | `wait` | `RUN_ID` or `--last` | `--timeout`, `--poll-interval`, `--data-dir`, `--verbose`, `--progress`, `--json` | Reconcile until terminal or a renewable timeout. |
 | `agent-guide` | none | `--write PATH`, `--check PATH`, `--json` | Print, install, or check portable agent instructions. |
@@ -23,6 +23,16 @@ human or JSON result on stdout.
 For synchronous arrays the bar total is six lifecycle units plus the number of
 Tasks; scheduler updates show terminal/total, running, queued, failed, and
 allocated-node counts.
+
+Bare `doctor` performs reversible local write probes in the effective Run store
+and preparation cache. With an experiment it also checks the source, config,
+and retrieval destination. `--connect` creates and removes a private target
+workspace and performs a one-token staging round trip. `--scheduler-probe`
+implies connection, submits at most one 1-CPU no-op job, and cancels it on
+timeout. `--no-write-probe` leaves write capabilities untested and cannot be
+combined with `--scheduler-probe`. Doctor JSON version 2 distinguishes `ready`
+from complete requested verification and can generate, but never apply, a
+Codex permission profile.
 | `status` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Reconcile scheduler state and return portable Run/Task status. |
 | `tasks` | `RUN_ID` or `--last` | `--offset`, `--limit`, `--data-dir`, `--json` | Return one bounded page from materialized Run tasks or a compact version-4 TaskSpace sidecar. |
 | `list` | none | `--data-dir`, `--json` | List persisted Runs in deterministic order. |
