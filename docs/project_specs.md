@@ -3641,6 +3641,28 @@ targets:
         requeue_limit: 8
 ```
 
+## M14 explicit worker scaling
+
+Targets version 6 separates conservative worker defaults from hard target
+ceilings. `default_workers` and `default_task_slots_per_worker` select the
+scale used when a Run has no explicit request; `max_workers`,
+`max_task_slots_per_worker`, `max_active_tasks`, and `max_concurrent_jobs`
+remain target-owned policy. CLI or project-profile requests above a ceiling
+fail before staging and are never silently clamped.
+
+`plan`, `run`, and `submit` use one scalable decision. A target-v6 plan emits
+schema version 6 and records requested scale, effective worker count and slots,
+concurrent capacity, exact aggregate worker resources, policy ceilings, and
+scheduler-controlled placement. Materialized submission passes those exact
+worker resources to the scheduler adapter. Slurm workers remain single-node,
+CPU-only allocations; one `srun` lane is created for each reserved Task slot.
+Rundra does not infer topology, request exclusive nodes implicitly, or
+overcommit declared Task memory.
+
+Targets versions 1 through 5 retain their parsing and default semantics. Their
+launches nevertheless use the same scalable decision as `plan`, fixing the
+previous loss of `task_slots_per_worker` between planning and submission.
+
 ## M13 OpenPBS scheduler backend
 
 Targets may select `scheduler: {type: pbs}` with the existing SSH, staging,

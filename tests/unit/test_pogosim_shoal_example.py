@@ -108,7 +108,7 @@ def test_pogosim_experiment_is_a_bounded_headless_cpu_workload() -> None:
         "tasks": 1,
         "cpus_per_task": 1,
         "gpus_per_task": 0,
-        "memory": "2GiB",
+        "memory": "1GiB",
         "walltime": "00:15:00",
     }
     assert experiment["outputs"]["include"] == ["data.feather", "console.txt"]

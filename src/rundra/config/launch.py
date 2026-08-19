@@ -22,7 +22,15 @@ from rundra.security import is_credential_field
 _PROJECT_V1_FIELDS = frozenset({"version", "default_profile", "defaults", "profiles"})
 _PROJECT_V2_FIELDS = _PROJECT_V1_FIELDS | {"preparation"}
 _LAUNCH_VALUE_FIELDS = frozenset(
-    {"config", "seed", "target", "source_root", "destination"}
+    {
+        "config",
+        "seed",
+        "target",
+        "source_root",
+        "destination",
+        "workers",
+        "task_slots_per_worker",
+    }
 )
 _USER_V1_FIELDS = frozenset({"version", "defaults"})
 _USER_V2_FIELDS = _USER_V1_FIELDS | {"preparation"}
@@ -45,6 +53,8 @@ _VALUE_NAMES = (
     "destination",
     "targets_file",
     "data_dir",
+    "workers",
+    "task_slots_per_worker",
 )
 
 
@@ -59,6 +69,8 @@ class LaunchValues:
     destination: Path | None = None
     targets_file: Path | None = None
     data_dir: Path | None = None
+    workers: int | None = None
+    task_slots_per_worker: int | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -77,6 +89,10 @@ class LaunchValues:
             type(self.target) is not str or not self.target.strip()
         ):
             raise ValueError("LaunchValues target must be a nonblank string or None")
+        for name in ("workers", "task_slots_per_worker"):
+            value = getattr(self, name)
+            if value is not None and (type(value) is not int or value < 1):
+                raise ValueError(f"LaunchValues {name} must be positive or None")
 
 
 @dataclass(frozen=True, slots=True)
@@ -500,7 +516,22 @@ def _launch_values(
         destination=_optional_path(section, "destination", source, path),
         targets_file=_optional_path(section, "targets_file", source, path),
         data_dir=_optional_path(section, "data_dir", source, path),
+        workers=_optional_positive_integer(section, "workers", source, path),
+        task_slots_per_worker=_optional_positive_integer(
+            section, "task_slots_per_worker", source, path
+        ),
     )
+
+
+def _optional_positive_integer(
+    section: Mapping[str, object],
+    field: str,
+    source: Path,
+    path: ConfigPath,
+) -> int | None:
+    if field not in section:
+        return None
+    return expect_integer(section[field], source=source, path=(*path, field), minimum=1)
 
 
 def _optional_path(
@@ -574,4 +605,10 @@ def _overlay(base: LaunchValues, override: LaunchValues) -> LaunchValues:
             else base.targets_file
         ),
         data_dir=override.data_dir if override.data_dir is not None else base.data_dir,
+        workers=override.workers if override.workers is not None else base.workers,
+        task_slots_per_worker=(
+            override.task_slots_per_worker
+            if override.task_slots_per_worker is not None
+            else base.task_slots_per_worker
+        ),
     )

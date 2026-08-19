@@ -92,6 +92,19 @@ accepts `PATH/rundra-reference.json` or a retrieval directory containing
 creating a transient loose-file tree. Its expected paired seed count is inferred
 from `metadata/tasks.json` rather than fixed at 20.
 
+The default `shoal` project profile requests one 40-slot worker, so ordinary
+use occupies at most one full node. Full-cluster use is explicit:
+
+```bash
+uv run rundr submit examples/pogosim-shoal/experiment.yaml \
+  --config examples/pogosim-shoal/conf/msd-120s.yaml \
+  --seeds 0:2499 --profile shoal-full
+```
+
+The `shoal-full` profile requests eight workers with 40 Task slots each. The
+target policy must independently permit that scale; Slurm retains control of
+physical placement.
+
 ## Troubleshooting only
 
 Ordinary use does not require a manual checkout, image pull, or compilation.

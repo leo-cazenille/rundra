@@ -8,6 +8,12 @@ defaults:
 profiles:
   shoal:
     target: shoal
+    workers: 1
+    task_slots_per_worker: 40
+  shoal-full:
+    target: shoal
+    workers: 8
+    task_slots_per_worker: 40
 
 preparation:
   source:

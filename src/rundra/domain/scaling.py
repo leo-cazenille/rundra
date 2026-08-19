@@ -128,6 +128,8 @@ class WorkerPoolPolicy:
     infrastructure_retry_limit: int
     requeue_limit: int
     task_slots_per_worker: int = 1
+    default_workers: int | None = None
+    max_task_slots_per_worker: int | None = None
 
     def __post_init__(self) -> None:
         _integer_at_least(self.activation_threshold, 2, "activation_threshold")
@@ -138,6 +140,34 @@ class WorkerPoolPolicy:
         )
         _integer_at_least(self.requeue_limit, 0, "requeue_limit")
         _integer_at_least(self.task_slots_per_worker, 1, "task_slots_per_worker")
+        if self.default_workers is not None:
+            _integer_at_least(self.default_workers, 1, "default_workers")
+            if self.default_workers > self.max_workers:
+                raise ValueError("default_workers must not exceed max_workers")
+        if self.max_task_slots_per_worker is not None:
+            _integer_at_least(
+                self.max_task_slots_per_worker,
+                1,
+                "max_task_slots_per_worker",
+            )
+            if self.task_slots_per_worker > self.max_task_slots_per_worker:
+                raise ValueError(
+                    "default task slots must not exceed max_task_slots_per_worker"
+                )
+
+    @property
+    def default_worker_count(self) -> int:
+        return (
+            self.max_workers if self.default_workers is None else self.default_workers
+        )
+
+    @property
+    def max_slot_count(self) -> int:
+        return (
+            self.task_slots_per_worker
+            if self.max_task_slots_per_worker is None
+            else self.max_task_slots_per_worker
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,3 +205,13 @@ class ExecutionPolicy:
             raise ValueError(
                 "worker_pool task_slots_per_worker exceeds max_active_tasks"
             )
+        if self.worker_pool.max_slot_count > self.max_active_tasks:
+            raise ValueError(
+                "worker_pool max_task_slots_per_worker exceeds max_active_tasks"
+            )
+        if (
+            self.worker_pool.default_worker_count
+            * self.worker_pool.task_slots_per_worker
+            > self.max_active_tasks
+        ):
+            raise ValueError("default worker capacity exceeds max_active_tasks")

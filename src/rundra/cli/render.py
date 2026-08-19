@@ -254,7 +254,7 @@ def render_human(result: OperationResult[Any]) -> str:
             "Safety: validated offline; no target contact, workspace creation, "
             "Run creation, or submission"
         )
-        if plan.version in {4, 5}:
+        if plan.version in {4, 5, 6}:
             assert plan.execution_policy is not None
             rendered += (
                 f"\nScheduling: batches={plan.scheduler_batches}, "
@@ -262,24 +262,35 @@ def render_human(result: OperationResult[Any]) -> str:
                 f"max_active={plan.execution_policy.max_active_tasks}, "
                 f"retrieval={plan.retrieval_policy}, preview={len(plan.units)}"
             )
-            if plan.version == 5:
+            if plan.version in {5, 6}:
                 rendered += (
                     f", slots_per_worker={plan.task_slots_per_worker}, "
                     f"task_capacity={plan.concurrent_task_capacity}, "
                     f"lane_depth={plan.max_lane_depth}"
                 )
-                slots = plan.task_slots_per_worker or 1
-                worker_memory = (
-                    "unset"
-                    if resources.memory_bytes is None
-                    else str(resources.memory_bytes * slots)
-                )
+                assert plan.worker_resources is not None
                 rendered += (
                     "\nWorker allocation: "
-                    f"cpus={resources.cpus_per_task * slots}, "
-                    f"memory_bytes={worker_memory}, "
-                    f"sequential_tasks_per_slot={plan.max_lane_depth}"
+                    f"nodes={plan.worker_resources.nodes}, "
+                    f"tasks={plan.worker_resources.tasks}, "
+                    f"cpus_per_task={plan.worker_resources.cpus_per_task}, "
+                    f"memory_bytes={plan.worker_resources.memory_bytes}, "
+                    f"sequential_tasks_per_slot={plan.max_lane_depth}; "
+                    f"potential_nodes=up_to_{plan.worker_count or 0}; "
+                    "placement=scheduler-controlled"
                 )
+                if plan.version == 6:
+                    policy = plan.execution_policy.worker_pool
+                    rendered += (
+                        "\nRequested scale: "
+                        f"workers={plan.requested_workers}, "
+                        "slots_per_worker="
+                        f"{plan.requested_task_slots_per_worker}; "
+                        "target ceilings: "
+                        f"workers={policy.max_workers}, "
+                        f"slots_per_worker={policy.max_slot_count}, "
+                        f"active_tasks={plan.execution_policy.max_active_tasks}"
+                    )
         if plan.array_mapping:
             mapping = _human_sequence(
                 tuple(
@@ -529,7 +540,7 @@ def _plan_document(plan: ExecutionPlan) -> dict[str, Any]:
     }
     if plan.preparation is not None:
         document["preparation"] = _preparation_document(plan.preparation)
-    if plan.version in {4, 5}:
+    if plan.version in {4, 5, 6}:
         assert plan.task_space is not None
         assert plan.execution_policy is not None
         policy = plan.execution_policy
@@ -551,7 +562,7 @@ def _plan_document(plan: ExecutionPlan) -> dict[str, Any]:
             "max_array_size": policy.max_array_size,
         }
         document["scheduling"] = scheduling
-        if plan.version == 5:
+        if plan.version in {5, 6}:
             assert plan.worker_resources is not None
             scheduling.update(
                 {
@@ -561,6 +572,20 @@ def _plan_document(plan: ExecutionPlan) -> dict[str, Any]:
                     "worker_resources": _resources_document(plan.worker_resources),
                 }
             )
+            if plan.version == 6:
+                scheduling.update(
+                    {
+                        "requested_workers": plan.requested_workers,
+                        "requested_task_slots_per_worker": (
+                            plan.requested_task_slots_per_worker
+                        ),
+                        "max_workers": policy.worker_pool.max_workers,
+                        "max_task_slots_per_worker": (
+                            policy.worker_pool.max_slot_count
+                        ),
+                        "placement": "scheduler-controlled",
+                    }
+                )
         document["retrieval_policy"] = plan.retrieval_policy
         safety = document["safety"]
         assert isinstance(safety, dict)

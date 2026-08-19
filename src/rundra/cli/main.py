@@ -106,6 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--project-file", type=Path)
     plan.add_argument("--profile")
     plan.add_argument("--source-root", type=Path)
+    _add_worker_scale_arguments(plan)
     plan.add_argument(
         "--execution-strategy",
         choices=("auto", "multi-array", "worker-pool"),
@@ -151,6 +152,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--project-file", type=Path)
     run.add_argument("--profile")
     run.add_argument("--confirm-tasks", type=int)
+    _add_worker_scale_arguments(run)
     _add_preparation_arguments(run)
     _add_feedback_arguments(run)
     _add_store_option(run, use_default=False)
@@ -165,6 +167,7 @@ def build_parser() -> argparse.ArgumentParser:
     submit.add_argument("--project-file", type=Path)
     submit.add_argument("--profile")
     submit.add_argument("--confirm-tasks", type=int)
+    _add_worker_scale_arguments(submit)
     _add_preparation_arguments(submit)
     _add_feedback_arguments(submit)
     _add_store_option(submit, use_default=False)
@@ -406,6 +409,19 @@ def _add_preparation_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_worker_scale_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--workers",
+        type=int,
+        help="request worker allocations within the target policy",
+    )
+    parser.add_argument(
+        "--task-slots-per-worker",
+        type=int,
+        help="request concurrent logical Task slots in each worker",
+    )
+
+
 def _add_feedback_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--verbose",
@@ -499,6 +515,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             prepare_location=arguments.prepare_location,
             rebuild=arguments.rebuild,
             offline=arguments.offline,
+            workers=arguments.workers,
+            task_slots_per_worker=arguments.task_slots_per_worker,
         )
         if not resolved_plan.ok:
             result = resolved_plan
@@ -517,6 +535,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 sweep=plan_inputs.sweep,
                 execution_strategy=arguments.execution_strategy,
                 retrieval_policy=arguments.retrieval,
+                workers=plan_inputs.workers,
+                task_slots_per_worker=plan_inputs.task_slots_per_worker,
             )
     elif arguments.command == "targets":
         result = targets_operation(arguments.targets_file)
@@ -589,6 +609,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             prepare_location=arguments.prepare_location,
             rebuild=arguments.rebuild,
             offline=arguments.offline,
+            workers=arguments.workers,
+            task_slots_per_worker=arguments.task_slots_per_worker,
         )
         if not resolved.ok:
             result = resolved
@@ -611,6 +633,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 progress=progress,
                 sweep=run_inputs.sweep,
                 confirm_tasks=arguments.confirm_tasks,
+                workers=run_inputs.workers,
+                task_slots_per_worker=run_inputs.task_slots_per_worker,
             )
     elif arguments.command == "submit":
         resolved = resolve_run_inputs_operation(
@@ -630,6 +654,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             prepare_location=arguments.prepare_location,
             rebuild=arguments.rebuild,
             offline=arguments.offline,
+            workers=arguments.workers,
+            task_slots_per_worker=arguments.task_slots_per_worker,
         )
         if not resolved.ok:
             result = resolved
@@ -652,6 +678,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 progress=progress,
                 sweep=submit_inputs.sweep,
                 confirm_tasks=arguments.confirm_tasks,
+                workers=submit_inputs.workers,
+                task_slots_per_worker=submit_inputs.task_slots_per_worker,
             )
     elif arguments.command == "wait":
         result = wait_operation(

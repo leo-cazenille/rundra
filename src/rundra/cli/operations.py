@@ -70,13 +70,13 @@ from rundra.domain.purge import (
     PurgeScope,
 )
 from rundra.domain.records import RunRecord
-from rundra.domain.scaling import TaskCoordinate
+from rundra.domain.scaling import ExecutionPolicy, SeedRange, TaskCoordinate
 from rundra.domain.states import (
     ExecutionState,
     RetrievalState,
     aggregate_retrieval_state,
 )
-from rundra.domain.sweeps import SweepExpansion
+from rundra.domain.sweeps import ExpandedConfig, SweepExpansion
 from rundra.orchestration.models import ExecutionPlan, PlanningError
 from rundra.orchestration.planner import (
     compact_seed_range,
@@ -482,6 +482,8 @@ class ResolvedRunInputs:
     offline: bool = False
     preparation_storage: PreparationStorageConfig = PreparationStorageConfig()
     sweep: SweepExpansion | None = None
+    workers: int | None = None
+    task_slots_per_worker: int | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -508,6 +510,10 @@ class ResolvedRunInputs:
             raise TypeError("ResolvedRunInputs preparation storage is invalid")
         if self.sweep is not None and type(self.sweep) is not SweepExpansion:
             raise TypeError("ResolvedRunInputs sweep is invalid")
+        for name in ("workers", "task_slots_per_worker"):
+            value = getattr(self, name)
+            if value is not None and (type(value) is not int or value < 1):
+                raise ValueError(f"ResolvedRunInputs {name} must be positive or None")
         _validate_preparation_inputs(
             self.preparation,
             self.mutable_source,
@@ -538,6 +544,8 @@ class ResolvedRunInputs:
                 "source_root",
                 "destination",
                 "data_dir",
+                "workers",
+                "task_slots_per_worker",
             ),
         )
         if len(self.seeds) == 1:
@@ -585,6 +593,8 @@ class ResolvedPlanInputs:
     rebuild: bool = False
     offline: bool = False
     sweep: SweepExpansion | None = None
+    workers: int | None = None
+    task_slots_per_worker: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.config, Path) or not isinstance(self.targets_file, Path):
@@ -603,6 +613,10 @@ class ResolvedPlanInputs:
             raise TypeError("ResolvedPlanInputs source_root must be a Path or None")
         if self.sweep is not None and type(self.sweep) is not SweepExpansion:
             raise TypeError("ResolvedPlanInputs sweep is invalid")
+        for name in ("workers", "task_slots_per_worker"):
+            value = getattr(self, name)
+            if value is not None and (type(value) is not int or value < 1):
+                raise ValueError(f"ResolvedPlanInputs {name} must be positive or None")
         _validate_preparation_inputs(
             self.preparation,
             self.source_root is not None,
@@ -626,7 +640,14 @@ class ResolvedPlanInputs:
         """Return public metadata for values consumed by non-submitting plan."""
         if self.seeds is not None:
             base = _launch_resolution_value(
-                self.resolution, ("config", "target", "targets_file")
+                self.resolution,
+                (
+                    "config",
+                    "target",
+                    "targets_file",
+                    "workers",
+                    "task_slots_per_worker",
+                ),
             )
             seeds_source = (
                 "config"
@@ -641,7 +662,15 @@ class ResolvedPlanInputs:
                 {**base.sources, "seeds": seeds_source},
             )
         return _launch_resolution_value(
-            self.resolution, ("config", "seed", "target", "targets_file")
+            self.resolution,
+            (
+                "config",
+                "seed",
+                "target",
+                "targets_file",
+                "workers",
+                "task_slots_per_worker",
+            ),
         )
 
 
@@ -746,6 +775,8 @@ def plan_operation(
     sweep: SweepExpansion | None = None,
     execution_strategy: str = "auto",
     retrieval_policy: str = "manifest",
+    workers: int | None = None,
+    task_slots_per_worker: int | None = None,
 ) -> OperationResult[PlanValue]:
     try:
         experiment = load_experiment(experiment_source)
@@ -770,16 +801,18 @@ def plan_operation(
             return OperationResult.failure("plan", unsupported)
         policy = targets_config.execution.get(target_name)
         if policy is not None:
-            plan = create_scalable_plan(
+            plan = _create_effective_scaling_plan(
                 experiment,
                 expansion.configs,
                 target,
-                seeds=compact_seed_range(seed=seed, seeds=seeds),
-                policy=policy,
+                compact_seed_range(seed=seed, seeds=seeds),
+                policy,
+                targets_config.version,
                 strategy=execution_strategy,
                 retrieval_policy=retrieval_policy,
                 preparation=preparation,
-                version=5 if targets_config.version == 4 else 4,
+                workers=workers,
+                task_slots_per_worker=task_slots_per_worker,
             )
         else:
             seed_values = expand_seeds(seed=seed, seeds=seeds)
@@ -809,6 +842,52 @@ def plan_operation(
         )
 
 
+def _create_effective_scaling_plan(
+    experiment: ExperimentSpec,
+    configs: Sequence[ExpandedConfig],
+    target: Target,
+    seeds: SeedRange,
+    policy: ExecutionPolicy,
+    targets_version: int,
+    *,
+    strategy: str = "auto",
+    retrieval_policy: str = "manifest",
+    preparation: PreparationPlan | None = None,
+    workers: int | None = None,
+    task_slots_per_worker: int | None = None,
+) -> ExecutionPlan:
+    return create_scalable_plan(
+        experiment,
+        configs,
+        target,
+        seeds=seeds,
+        policy=policy,
+        strategy=strategy,
+        retrieval_policy=retrieval_policy,
+        preparation=preparation,
+        version=(6 if targets_version >= 6 else 5 if targets_version >= 4 else 4),
+        workers=workers,
+        task_slots_per_worker=task_slots_per_worker,
+    )
+
+
+def _seed_range_from_values(values: Sequence[int]) -> SeedRange:
+    normalized = tuple(values)
+    if not normalized:
+        raise PlanningError(code="SEED_REQUIRED", message="Provide one seed or range")
+    if any(type(value) is not int for value in normalized):
+        raise PlanningError(code="INVALID_SEED", message="seed must be an integer")
+    if len(normalized) > 1 and any(
+        right != left + 1
+        for left, right in zip(normalized, normalized[1:], strict=False)
+    ):
+        raise PlanningError(
+            code="INVALID_SEED_RANGE",
+            message="scalable execution requires a contiguous seed range",
+        )
+    return SeedRange(normalized[0], normalized[-1])
+
+
 def targets_operation(source: Path) -> OperationResult[TargetsValue]:
     try:
         return OperationResult.success(
@@ -835,6 +914,8 @@ def resolve_plan_inputs_operation(
     prepare_location: str = "auto",
     rebuild: bool = False,
     offline: bool = False,
+    workers: int | None = None,
+    task_slots_per_worker: int | None = None,
 ) -> OperationResult[ResolvedPlanInputs]:
     """Resolve plan inputs without submitting, staging, or mutating a workspace."""
     if type(random_seed) is not bool:
@@ -876,6 +957,8 @@ def resolve_plan_inputs_operation(
                 seed=seed,
                 target=target,
                 targets_file=targets_file,
+                workers=workers,
+                task_slots_per_worker=task_slots_per_worker,
             ),
             project=project,
             user=user,
@@ -973,6 +1056,8 @@ def resolve_plan_inputs_operation(
             rebuild=rebuild,
             offline=offline,
             sweep=sweep,
+            workers=values.workers,
+            task_slots_per_worker=values.task_slots_per_worker,
         ),
     )
 
@@ -997,6 +1082,8 @@ def resolve_run_inputs_operation(
     prepare_location: str = "auto",
     rebuild: bool = False,
     offline: bool = False,
+    workers: int | None = None,
+    task_slots_per_worker: int | None = None,
 ) -> OperationResult[ResolvedRunInputs]:
     """Resolve run or submit inputs without planning or executing work."""
     if type(random_seed) is not bool:
@@ -1011,6 +1098,8 @@ def resolve_run_inputs_operation(
             destination=destination,
             targets_file=targets_file,
             data_dir=data_dir,
+            workers=workers,
+            task_slots_per_worker=task_slots_per_worker,
         )
         discovered_project = discover_project_launch(
             experiment_source, project_file=project_file
@@ -1170,6 +1259,8 @@ def resolve_run_inputs_operation(
                 user.preparation if user is not None else PreparationStorageConfig()
             ),
             sweep=sweep,
+            workers=values.workers,
+            task_slots_per_worker=values.task_slots_per_worker,
         ),
     )
 
@@ -1314,6 +1405,8 @@ def run_operation(
     progress: ProgressObserver | None = None,
     sweep: SweepExpansion | None = None,
     confirm_tasks: int | None = None,
+    workers: int | None = None,
+    task_slots_per_worker: int | None = None,
 ) -> OperationResult[RunValue]:
     try:
         _report_progress(
@@ -1339,10 +1432,11 @@ def run_operation(
                 ),
             )
         target = targets[target_name]
-        if target_name in targets_config.execution:
+        policy = targets_config.execution.get(target_name)
+        if policy is not None:
             validate_task_confirmation(
                 task_total,
-                targets_config.execution[target_name],
+                policy,
                 confirm_tasks,
             )
         _report_progress(
@@ -1481,6 +1575,21 @@ def run_operation(
                 preparation=preparation,
             )
         )
+        scaling_plan = (
+            _create_effective_scaling_plan(
+                effective_experiment,
+                expansion.configs,
+                target,
+                _seed_range_from_values(seed_values),
+                policy,
+                targets_config.version,
+                preparation=preparation,
+                workers=workers,
+                task_slots_per_worker=task_slots_per_worker,
+            )
+            if policy is not None
+            else None
+        )
         service = OrchestrationService(
             store=store,
             stager=stager,
@@ -1502,26 +1611,27 @@ def run_operation(
                 remote_preparation=remote_preparation,
                 remote_source_root=remote_source_root,
                 max_concurrent_jobs=(
-                    targets_config.execution[target_name].max_concurrent_jobs
-                    if target_name in targets_config.execution
-                    else None
+                    policy.max_concurrent_jobs if policy is not None else None
                 ),
                 max_workers=(
-                    min(
-                        targets_config.execution[target_name].worker_pool.max_workers,
-                        targets_config.execution[target_name].max_array_size,
-                        targets_config.execution[target_name].max_active_tasks
-                        // targets_config.execution[
-                            target_name
-                        ].worker_pool.task_slots_per_worker,
-                    )
-                    if target_name in targets_config.execution
-                    else None
+                    scaling_plan.worker_count if scaling_plan is not None else None
                 ),
                 task_slots_per_worker=(
-                    plan.task_slots_per_worker
-                    if plan.task_slots_per_worker is not None
+                    scaling_plan.task_slots_per_worker
+                    if scaling_plan is not None
+                    and scaling_plan.task_slots_per_worker is not None
                     else 1
+                ),
+                worker_resources=(
+                    scaling_plan.worker_resources if scaling_plan is not None else None
+                ),
+                requested_workers=(
+                    scaling_plan.requested_workers if scaling_plan is not None else None
+                ),
+                requested_task_slots_per_worker=(
+                    scaling_plan.requested_task_slots_per_worker
+                    if scaling_plan is not None
+                    else None
                 ),
                 shard_outputs=(
                     target_name in targets_config.execution
@@ -1595,6 +1705,8 @@ def submit_operation(
     progress: ProgressObserver | None = None,
     sweep: SweepExpansion | None = None,
     confirm_tasks: int | None = None,
+    workers: int | None = None,
+    task_slots_per_worker: int | None = None,
 ) -> OperationResult[RunValue]:
     try:
         _report_progress(
@@ -1620,10 +1732,11 @@ def submit_operation(
                 ),
             )
         target = targets[target_name]
-        if target_name in targets_config.execution:
+        policy = targets_config.execution.get(target_name)
+        if policy is not None:
             validate_task_confirmation(
                 task_total,
-                targets_config.execution[target_name],
+                policy,
                 confirm_tasks,
             )
         _report_progress(
@@ -1750,6 +1863,21 @@ def submit_operation(
                 preparation=preparation,
             )
         )
+        scaling_plan = (
+            _create_effective_scaling_plan(
+                effective_experiment,
+                expansion.configs,
+                target,
+                _seed_range_from_values(seed_values),
+                policy,
+                targets_config.version,
+                preparation=preparation,
+                workers=workers,
+                task_slots_per_worker=task_slots_per_worker,
+            )
+            if policy is not None
+            else None
+        )
         service = OrchestrationService(
             store=store,
             stager=stager,
@@ -1771,26 +1899,27 @@ def submit_operation(
                 remote_preparation=remote_preparation,
                 remote_source_root=remote_source_root,
                 max_concurrent_jobs=(
-                    targets_config.execution[target_name].max_concurrent_jobs
-                    if target_name in targets_config.execution
-                    else None
+                    policy.max_concurrent_jobs if policy is not None else None
                 ),
                 max_workers=(
-                    min(
-                        targets_config.execution[target_name].worker_pool.max_workers,
-                        targets_config.execution[target_name].max_array_size,
-                        targets_config.execution[target_name].max_active_tasks
-                        // targets_config.execution[
-                            target_name
-                        ].worker_pool.task_slots_per_worker,
-                    )
-                    if target_name in targets_config.execution
-                    else None
+                    scaling_plan.worker_count if scaling_plan is not None else None
                 ),
                 task_slots_per_worker=(
-                    plan.task_slots_per_worker
-                    if plan.task_slots_per_worker is not None
+                    scaling_plan.task_slots_per_worker
+                    if scaling_plan is not None
+                    and scaling_plan.task_slots_per_worker is not None
                     else 1
+                ),
+                worker_resources=(
+                    scaling_plan.worker_resources if scaling_plan is not None else None
+                ),
+                requested_workers=(
+                    scaling_plan.requested_workers if scaling_plan is not None else None
+                ),
+                requested_task_slots_per_worker=(
+                    scaling_plan.requested_task_slots_per_worker
+                    if scaling_plan is not None
+                    else None
                 ),
                 shard_outputs=(
                     target_name in targets_config.execution
@@ -3154,6 +3283,8 @@ def _launch_resolution_value(
     sources: dict[str, str] = {}
     for field in fields:
         value = getattr(resolved.values, field)
+        if value is None and field in {"workers", "task_slots_per_worker"}:
+            continue
         if value is None or field not in resolved.sources:
             raise ValueError(f"Resolved launch field is unavailable: {field}")
         values[field] = str(value) if isinstance(value, Path) else value

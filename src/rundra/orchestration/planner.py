@@ -115,6 +115,8 @@ def create_scalable_plan(
     retrieval_policy: str = "manifest",
     preparation: PreparationPlan | None = None,
     version: int = 4,
+    workers: int | None = None,
+    task_slots_per_worker: int | None = None,
 ) -> ExecutionPlan:
     """Create a bounded-preview scalable plan without materializing logical Tasks."""
 
@@ -127,8 +129,17 @@ def create_scalable_plan(
         raise TypeError("create_scalable_plan seeds must be a SeedRange")
     if type(policy) is not ExecutionPolicy:
         raise TypeError("create_scalable_plan policy must be an ExecutionPolicy")
-    if version not in {4, 5}:
-        raise ValueError("create_scalable_plan version must be 4 or 5")
+    if version not in {4, 5, 6}:
+        raise ValueError("create_scalable_plan version must be 4, 5, or 6")
+    for name, value in (
+        ("workers", workers),
+        ("task_slots_per_worker", task_slots_per_worker),
+    ):
+        if value is not None and (type(value) is not int or value < 1):
+            raise PlanningError(
+                code="INVALID_EXECUTION_SCALE",
+                message=f"{name} must be a positive integer",
+            )
     if strategy not in _SCALABLE_STRATEGIES:
         raise PlanningError(
             code="INVALID_EXECUTION_STRATEGY",
@@ -154,7 +165,9 @@ def create_scalable_plan(
         WORKER_POOL
         if strategy == "auto"
         and (
-            task_space.task_count > policy.max_concurrent_jobs
+            workers is not None
+            or task_slots_per_worker is not None
+            or task_space.task_count > policy.max_concurrent_jobs
             or task_space.task_count >= policy.worker_pool.activation_threshold
         )
         else (MULTI_ARRAY if strategy == "auto" else strategy)
@@ -170,6 +183,13 @@ def create_scalable_plan(
                 "task_count": task_space.task_count,
                 "max_concurrent_jobs": policy.max_concurrent_jobs,
             },
+        )
+    if selected == MULTI_ARRAY and (
+        workers is not None or task_slots_per_worker is not None
+    ):
+        raise PlanningError(
+            code="EXECUTION_SCALE_REQUIRES_WORKER_POOL",
+            message="worker scale options require worker-pool execution",
         )
     if selected == WORKER_POOL and target.scheduler.kind != "slurm":
         raise PlanningError(
@@ -192,25 +212,65 @@ def create_scalable_plan(
         )
         for item in preview
     )
+    requested_workers: int | None = None
+    requested_slots: int | None = None
     if selected == MULTI_ARRAY:
         scheduler_batches = ceil(task_space.task_count / policy.max_array_size)
         worker_count = None
         task_slots_per_worker = 1
     else:
         leases = ceil(task_space.task_count / policy.worker_pool.tasks_per_lease)
-        task_slots_per_worker = (
-            min(policy.worker_pool.task_slots_per_worker, task_space.task_count)
-            if version == 5
-            else 1
+        requested_workers = (
+            policy.worker_pool.default_worker_count if workers is None else workers
         )
-        worker_count = min(
-            policy.worker_pool.max_workers,
+        requested_slots = (
+            policy.worker_pool.task_slots_per_worker
+            if task_slots_per_worker is None
+            else task_slots_per_worker
+        )
+        if requested_workers > policy.worker_pool.max_workers:
+            raise PlanningError(
+                code="WORKER_LIMIT_EXCEEDED",
+                message="requested workers exceed the target policy",
+                details={
+                    "requested_workers": requested_workers,
+                    "max_workers": policy.worker_pool.max_workers,
+                },
+            )
+        if requested_slots > policy.worker_pool.max_slot_count:
+            raise PlanningError(
+                code="WORKER_SLOT_LIMIT_EXCEEDED",
+                message="requested task slots per worker exceed the target policy",
+                details={
+                    "requested_task_slots_per_worker": requested_slots,
+                    "max_task_slots_per_worker": policy.worker_pool.max_slot_count,
+                },
+            )
+        if (
+            version >= 6
+            and requested_workers * requested_slots > policy.max_active_tasks
+        ):
+            raise PlanningError(
+                code="ACTIVE_TASK_LIMIT_EXCEEDED",
+                message="requested worker capacity exceeds the target policy",
+                details={
+                    "requested_capacity": requested_workers * requested_slots,
+                    "max_active_tasks": policy.max_active_tasks,
+                },
+            )
+        task_slots_per_worker = (
+            min(requested_slots, task_space.task_count) if version >= 5 else 1
+        )
+        worker_limits = [
+            requested_workers,
             policy.max_active_tasks // task_slots_per_worker,
             policy.max_concurrent_jobs,
             policy.max_array_size,
             ceil(task_space.task_count / task_slots_per_worker),
-            leases,
-        )
+        ]
+        if version < 6:
+            worker_limits.append(leases)
+        worker_count = min(worker_limits)
         scheduler_batches = 1
     concurrent_task_capacity = (worker_count or 1) * task_slots_per_worker
     max_lane_depth = ceil(task_space.task_count / concurrent_task_capacity)
@@ -233,10 +293,16 @@ def create_scalable_plan(
         retrieval_policy=retrieval_policy,
         scheduler_batches=scheduler_batches,
         worker_count=worker_count,
-        task_slots_per_worker=(task_slots_per_worker if version == 5 else None),
-        concurrent_task_capacity=(concurrent_task_capacity if version == 5 else None),
-        max_lane_depth=(max_lane_depth if version == 5 else None),
-        worker_resources=(worker_resources if version == 5 else None),
+        task_slots_per_worker=(task_slots_per_worker if version >= 5 else None),
+        concurrent_task_capacity=(concurrent_task_capacity if version >= 5 else None),
+        max_lane_depth=(max_lane_depth if version >= 5 else None),
+        worker_resources=(worker_resources if version >= 5 else None),
+        requested_workers=(
+            requested_workers if version == 6 and selected == WORKER_POOL else None
+        ),
+        requested_task_slots_per_worker=(
+            requested_slots if version == 6 and selected == WORKER_POOL else None
+        ),
     )
 
 

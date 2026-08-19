@@ -137,6 +137,7 @@ class SchedulerArrayRequest:
     task_slots_per_worker: int = 1
     output_root: PurePath | None = None
     shard_root: PurePath | None = None
+    worker_resources: ResourceRequest | None = None
 
     def __post_init__(self) -> None:
         if type(self.group) is not SchedulerGroup:
@@ -191,6 +192,13 @@ class SchedulerArrayRequest:
             )
         if (self.output_root is None) != (self.shard_root is None):
             raise ValueError("SchedulerArrayRequest shard paths must be set together")
+        if (
+            self.worker_resources is not None
+            and type(self.worker_resources) is not ResourceRequest
+        ):
+            raise TypeError(
+                "SchedulerArrayRequest worker_resources must be a ResourceRequest"
+            )
         for name in ("output_root", "shard_root"):
             path = getattr(self, name)
             if path is not None and (

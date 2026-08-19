@@ -8,10 +8,10 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 | Command | Positional | Options | Semantics |
 |---|---|---|---|
 | `validate` | `EXPERIMENT` | `--json` | Validate experiment YAML without executing. |
-| `plan` | `EXPERIMENT` | `--config`, `--seed`/`--seeds`/`--random-seed`, `--target`, `--targets-file`, `--project-file`, `--profile`, preparation options, `--execution-strategy`, `--retrieval`, `--json` | Resolve and inspect execution without target contact or state changes. |
+| `plan` | `EXPERIMENT` | `--config`, `--seed`/`--seeds`/`--random-seed`, `--target`, `--targets-file`, `--project-file`, `--profile`, preparation options, `--execution-strategy`, `--retrieval`, `--workers`, `--task-slots-per-worker`, `--json` | Resolve and inspect execution without target contact or state changes. |
 | `targets` | none | `--targets-file`, `--json` | Validate and list configured targets. |
 | `doctor` | optional `EXPERIMENT` | launch path overrides, `--connect`, `--scheduler-probe`, `--probe-timeout`, `--no-write-probe`, `--agent`, `--json` | Audit installation, sandbox paths, target access, reversible staging, and an optional bounded scheduler submission. |
-| `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--verbose`, `--progress`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
+| `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--workers`, `--task-slots-per-worker`, `--verbose`, `--progress`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
 | `wait` | `RUN_ID` or `--last` | `--timeout`, `--poll-interval`, `--data-dir`, `--verbose`, `--progress`, `--json` | Reconcile until terminal or a renewable timeout. |
 | `agent-guide` | none | `--write PATH`, `--check PATH`, `--json` | Print, install, or check portable agent instructions. |
 | `help` | optional `COMMAND` | none | List commands and the common workflow, or show one command's detailed arguments and options. |
@@ -129,11 +129,10 @@ the nested execution and retrieval states.
 See [running and managing experiments](usage.md) for executable workflows and
 [v0.1 interface stability](stability.md) for compatibility guarantees.
 
-## Target-v4 worker slots
+## Target-v6 worker scale
 
-For large single-threaded sweeps, target configuration version 4 can bound the
-number of Slurm jobs independently from the number of processes running inside
-each allocation:
+Target configuration version 6 separates conservative defaults from hard
+site-owned ceilings:
 
 ```yaml
 execution:
@@ -141,15 +140,22 @@ execution:
   max_concurrent_jobs: 8
   worker_pool:
     activation_threshold: 10000
+    default_workers: 1
     max_workers: 8
-    task_slots_per_worker: 40
+    default_task_slots_per_worker: 1
+    max_task_slots_per_worker: 40
     tasks_per_lease: 100
     infrastructure_retry_limit: 2
     requeue_limit: 8
 ```
 
-`rundr plan` remains offline and does not probe node topology. For target v4 it
-returns plan format 5 with `worker_count`, `task_slots_per_worker`,
-`concurrent_task_capacity`, `max_lane_depth`, and `worker_resources`. Operators
-must configure slots from known site policy; Rundra does not infer cores or
-oversubscribe an allocation.
+Use `--workers N --task-slots-per-worker M` or equivalent project-profile
+values to request scale. Requests above a target ceiling fail rather than being
+silently clamped. Without a request, target defaults apply; permitting eight
+workers therefore does not reserve eight workers by default.
+
+`rundr plan` remains offline and does not probe node topology. Target v6
+returns plan format 6 with requested and effective scale, policy ceilings,
+worker resources, and scheduler-controlled placement. Operators must configure
+limits and defaults from known site policy; Rundra does not infer cores,
+exclusive placement, or memory overcommit.

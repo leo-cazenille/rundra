@@ -15,6 +15,7 @@ from rundra.domain.models import (
     ArtifactKind,
     Command,
     ExperimentSpec,
+    ResourceRequest,
     Run,
     RunId,
     Task,
@@ -388,6 +389,9 @@ class RunExecutionRequest:
     max_workers: int | None = None
     task_slots_per_worker: int = 1
     shard_outputs: bool = False
+    worker_resources: ResourceRequest | None = None
+    requested_workers: int | None = None
+    requested_task_slots_per_worker: int | None = None
 
     def __post_init__(self) -> None:
         if type(self.plan) is not ExecutionPlan:
@@ -442,6 +446,15 @@ class RunExecutionRequest:
             raise ValueError("task_slots_per_worker must be positive")
         if type(self.shard_outputs) is not bool:
             raise TypeError("shard_outputs must be bool")
+        if (
+            self.worker_resources is not None
+            and type(self.worker_resources) is not ResourceRequest
+        ):
+            raise TypeError("worker_resources must be a ResourceRequest or None")
+        for name in ("requested_workers", "requested_task_slots_per_worker"):
+            value = getattr(self, name)
+            if value is not None and (type(value) is not int or value < 1):
+                raise ValueError(f"{name} must be positive or None")
 
 
 @dataclass(frozen=True, slots=True)
@@ -724,6 +737,7 @@ class OrchestrationService:
                         if request.shard_outputs
                         else None
                     ),
+                    worker_resources=request.worker_resources,
                 )
                 submission = (
                     cast(DependencyScheduler, self._scheduler).submit_array_afterok(
@@ -772,6 +786,10 @@ class OrchestrationService:
                         "max_concurrent_jobs": request.max_concurrent_jobs or 0,
                         "max_workers": request.max_workers or 0,
                         "task_slots_per_worker": request.task_slots_per_worker,
+                        "requested_workers": request.requested_workers or 0,
+                        "requested_task_slots_per_worker": (
+                            request.requested_task_slots_per_worker or 0
+                        ),
                         "result_shards": request.shard_outputs,
                         **(
                             {

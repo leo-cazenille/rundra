@@ -181,7 +181,7 @@ targets:
 @pytest.mark.parametrize(
     "content, code, path",
     [
-        ("version: 6\ntargets: {}\n", "UNSUPPORTED_VERSION", ("version",)),
+        ("version: 7\ntargets: {}\n", "UNSUPPORTED_VERSION", ("version",)),
         ("version: 1\n", "MISSING_FIELD", ("targets",)),
         (
             "version: 1\ntargets: []\n",

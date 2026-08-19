@@ -57,7 +57,7 @@ generated remediation. It reports credential paths when OpenSSH requires them
 but never reads credential contents into output.
 The representative contract is [`doctor-success-v2.json`](doctor-success-v2.json).
 The expanded command options are frozen in
-[`cli-surface-v12.json`](cli-surface-v12.json); version 11 remains historical.
+[`cli-surface-v13.json`](cli-surface-v13.json); versions 11 and 12 remain historical.
 
 Version-3 parameterized documents add a `parameter_set` object to each Task,
 permit a seed to recur in different parameter sets, and stage a distinct

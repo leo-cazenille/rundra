@@ -480,7 +480,7 @@ class SlurmScheduler:
                 "Concurrent Slurm workers require one-node, one-task, CPU-only "
                 "logical resources"
             )
-        worker_resources = replace(
+        derived_worker_resources = replace(
             resources,
             nodes=1,
             tasks=task_slots,
@@ -496,6 +496,14 @@ class SlurmScheduler:
                 else None
             ),
         )
+        if (
+            request.worker_resources is not None
+            and request.worker_resources != derived_worker_resources
+        ):
+            raise SlurmScriptError(
+                "Planned worker resources do not match logical Task resources"
+            )
+        worker_resources = request.worker_resources or derived_worker_resources
         manifest_path = request.manifest_path.with_name(
             f"{request.manifest_path.stem}.workers{request.manifest_path.suffix}"
         )

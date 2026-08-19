@@ -31,6 +31,7 @@ _TARGET_V2_FIELDS = _TARGET_V1_FIELDS | {"preparation"}
 _TARGET_V3_FIELDS = _TARGET_V2_FIELDS | {"execution"}
 _TARGET_V4_FIELDS = _TARGET_V3_FIELDS
 _TARGET_V5_FIELDS = _TARGET_V4_FIELDS
+_TARGET_V6_FIELDS = _TARGET_V5_FIELDS
 _BACKENDS_BY_ROLE = {
     "transport": frozenset({"local", "ssh"}),
     "scheduler": frozenset({"local", "pbs", "slurm"}),
@@ -57,8 +58,8 @@ class TargetsConfig:
     execution: Mapping[str, ExecutionPolicy] = dataclass_field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.version not in {1, 2, 3, 4, 5}:
-            raise ValueError("TargetsConfig version must be 1, 2, 3, 4, or 5")
+        if self.version not in {1, 2, 3, 4, 5, 6}:
+            raise ValueError("TargetsConfig version must be 1 through 6")
         object.__setattr__(self, "targets", MappingProxyType(dict(self.targets)))
         object.__setattr__(
             self, "preparation", MappingProxyType(dict(self.preparation))
@@ -84,12 +85,12 @@ def load_targets_config(source: Path) -> TargetsConfig:
     version = expect_integer(
         document["version"], source=source, path=("version",), minimum=1
     )
-    if version not in {1, 2, 3, 4, 5}:
+    if version not in {1, 2, 3, 4, 5, 6}:
         fail(
             source=source,
             path=("version",),
             code="UNSUPPORTED_VERSION",
-            message=("Unsupported targets version; supported versions are 1 through 5"),
+            message=("Unsupported targets version; supported versions are 1 through 6"),
         )
     raw_targets = expect_mapping(document["targets"], source=source, path=("targets",))
     targets: dict[str, Target] = {}
@@ -110,7 +111,13 @@ def load_targets_config(source: Path) -> TargetsConfig:
                     else (
                         _TARGET_V3_FIELDS
                         if version == 3
-                        else (_TARGET_V4_FIELDS if version == 4 else _TARGET_V5_FIELDS)
+                        else (
+                            _TARGET_V4_FIELDS
+                            if version == 4
+                            else (
+                                _TARGET_V5_FIELDS if version == 5 else _TARGET_V6_FIELDS
+                            )
+                        )
                     )
                 )
             ),
@@ -219,8 +226,14 @@ def _execution_policy(
             "requeue_limit",
         }
     )
-    if version >= 4:
+    if 4 <= version <= 5:
         worker_fields |= {"task_slots_per_worker"}
+    elif version >= 6:
+        worker_fields |= {
+            "default_workers",
+            "default_task_slots_per_worker",
+            "max_task_slots_per_worker",
+        }
     check_fields(
         worker,
         allowed=worker_fields,
@@ -277,13 +290,42 @@ def _execution_policy(
                 ),
                 task_slots_per_worker=(
                     expect_integer(
-                        worker["task_slots_per_worker"],
+                        worker[
+                            "default_task_slots_per_worker"
+                            if version >= 6
+                            else "task_slots_per_worker"
+                        ],
                         source=source,
-                        path=(*worker_path, "task_slots_per_worker"),
+                        path=(
+                            *worker_path,
+                            "default_task_slots_per_worker"
+                            if version >= 6
+                            else "task_slots_per_worker",
+                        ),
                         minimum=1,
                     )
                     if version >= 4
                     else 1
+                ),
+                default_workers=(
+                    expect_integer(
+                        worker["default_workers"],
+                        source=source,
+                        path=(*worker_path, "default_workers"),
+                        minimum=1,
+                    )
+                    if version >= 6
+                    else None
+                ),
+                max_task_slots_per_worker=(
+                    expect_integer(
+                        worker["max_task_slots_per_worker"],
+                        source=source,
+                        path=(*worker_path, "max_task_slots_per_worker"),
+                        minimum=1,
+                    )
+                    if version >= 6
+                    else None
                 ),
             ),
             max_concurrent_jobs=expect_integer(
