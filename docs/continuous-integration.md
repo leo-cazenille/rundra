@@ -14,7 +14,10 @@ tools/check.sh
 
 It executes ordinary pytest, Ruff lint and formatting checks, and strict mypy
 validation. Pytest's Docker and Shoal system tests remain skipped unless their
-explicit command-line opt-ins are present.
+explicit command-line opt-ins are present. Before Python validation, actionlint
+checks every workflow's syntax, expression contexts, job dependencies, cron
+syntax, and embedded shell scripts. This catches invalid workflows even when
+the invalid file cannot start its own GitHub Actions run.
 
 The `package` job builds the wheel and source distribution and then runs:
 
@@ -43,6 +46,14 @@ The OpenPBS workflow caches the shared Slurm/Apptainer base-image layers. The
 OpenPBS layer itself is built from the pinned source in the checked Dockerfile.
 Both scheduler lifecycle workflows upload a 14-day diagnostic artifact after a
 failure.
+
+## Dependency updates
+
+Dependabot checks pinned GitHub Actions each Monday and Python dependencies
+managed by `uv` shortly afterward. Updates within each ecosystem are grouped
+to limit pull-request volume. Dependabot does not merge changes: every proposed
+upgrade must pass the same `quality` and `package` checks and remains subject to
+normal review.
 
 ## Release workflow
 

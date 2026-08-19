@@ -2944,6 +2944,12 @@ the wheel into a clean Python 3.12 environment, and smoke-tests the installed
 CLI. Release validation reuses these repository commands and adds security,
 dependency, reproducibility, and publication checks.
 
+The quality gate also runs actionlint across every GitHub Actions definition so
+workflow syntax and expression-context mistakes fail a still-valid commit
+workflow. Weekly grouped Dependabot proposals cover pinned GitHub Actions and
+the `uv` dependency set; they are never merged without passing normal checks
+and review.
+
 Containerized scheduler boundaries remain separate from commit gates. The
 Docker Slurm lifecycle suite runs nightly and manually, while Docker OpenPBS
 runs weekly and manually. Privileged Slurm cgroup validation remains
