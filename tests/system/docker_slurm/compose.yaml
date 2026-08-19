@@ -44,6 +44,7 @@ services:
     <<: [*apptainer, *cluster-volumes]
     hostname: compute1
     command: [compute]
+    privileged: true
     depends_on:
       controller:
         condition: service_healthy
@@ -54,6 +55,7 @@ services:
     <<: [*apptainer, *cluster-volumes]
     hostname: compute2
     command: [compute]
+    privileged: true
     depends_on:
       controller:
         condition: service_healthy
