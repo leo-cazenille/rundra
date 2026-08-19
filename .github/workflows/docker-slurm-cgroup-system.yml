@@ -1,0 +1,62 @@
+name: Docker Slurm cgroup system
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-slurm-cgroup-system
+  cancel-in-progress: false
+
+jobs:
+  cgroup-memory-enforcement:
+    name: Rundra Slurm cgroup memory enforcement
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      RUNDRA_DOCKER_SLURM_IMAGE: rundra-slurm-system:cgroup-ci
+      RUNDRA_DOCKER_SLURM_CGROUP_DIAGNOSTICS: ${{ runner.temp }}/rundra-slurm-cgroup-diagnostics
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+        with:
+          enable-cache: true
+
+      - name: Synchronize the Python environment
+        run: uv sync --frozen
+
+      - name: Require a rootful cgroup-v2 Docker host
+        run: |
+          set -euo pipefail
+          if docker info --format '{{json .SecurityOptions}}' | grep -q 'rootless'; then
+            echo 'The privileged cgroup test requires a rootful Docker daemon.' >&2
+            exit 1
+          fi
+          test "$(docker info --format '{{.CgroupVersion}}')" = 2
+
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Build the shared Docker Slurm image
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: tests/system/docker_slurm
+          file: tests/system/docker_slurm/Dockerfile
+          load: true
+          tags: rundra-slurm-system:cgroup-ci
+          cache-from: type=gha,scope=docker-slurm-cgroup-system
+          cache-to: type=gha,mode=max,scope=docker-slurm-cgroup-system
+
+      - name: Run Rundra through Slurm cgroup memory enforcement
+        run: tools/run_docker_slurm_cgroup_tests.sh
+
+      - name: Upload cgroup diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: docker-slurm-cgroup-diagnostics-${{ github.run_id }}
+          path: ${{ runner.temp }}/rundra-slurm-cgroup-diagnostics
+          if-no-files-found: warn
+          retention-days: 14

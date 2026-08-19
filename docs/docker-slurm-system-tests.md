@@ -76,6 +76,12 @@ not a production Slurm deployment example; production cgroup-v2 deployments
 should run `slurmd` from systemd with delegation. The privileged variant is
 manual-only and is intentionally excluded from default and scheduled CI.
 
+Maintainers can run the same check on GitHub's rootful runner from **Actions >
+Docker Slurm cgroup system > Run workflow**. This workflow has only a
+`workflow_dispatch` trigger, checks for rootful cgroup v2 before cluster
+startup, uses a dedicated Docker layer-cache scope, and uploads a 14-day
+diagnostic artifact when the harness fails.
+
 Set `RUNDRA_DOCKER_SLURM_CGROUP_DIAGNOSTICS` to preserve diagnostics at a
 specific location when the test fails. The harness reuses
 `RUNDRA_DOCKER_SLURM_IMAGE` when provided and layers the private-cgroup
