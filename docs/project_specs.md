@@ -3604,3 +3604,26 @@ targets:
         infrastructure_retry_limit: 2
         requeue_limit: 8
 ```
+
+## M13 OpenPBS scheduler backend
+
+Targets may select `scheduler: {type: pbs}` with the existing SSH, staging,
+container, and workspace abstractions. The OpenPBS adapter owns `qsub`, `qstat`,
+and `qdel` command generation, PBS resource translation, job-array submission,
+array Task-ID mapping, terminal-state reconciliation, scheduler log metadata,
+dependencies, and cancellation. Portable experiment and Run models remain
+scheduler-neutral; PBS-native queue, account, project, priority, and placement
+options remain explicit target policy.
+
+PBS memory is rendered on each `select` chunk in integral `mb` units. Array
+parallelism uses OpenPBS's `max_run_subjobs` syntax, while large logical Task
+sets continue to use Rundra's scheduler-neutral partitioning and worker
+strategies. Readers accept persisted PBS scheduler identities without changing
+version-1 Slurm document shapes.
+
+The opt-in Docker OpenPBS system test builds a pinned official OpenPBS release,
+starts one controller and two MOM services, and exercises real submission,
+arrays, bounded subjob concurrency, successful retrieval, partial scientific
+failure, and durable cancellation. It uses a shared workspace and OpenPBS
+`$usecp` mappings, never disables SSH host verification, and does not run in
+the default unit suite.

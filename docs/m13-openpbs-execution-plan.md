@@ -6,6 +6,13 @@ Add a production-capable `scheduler.type: pbs` backend, tested against OpenPBS,
 without changing existing Slurm documents or leaking PBS concepts into portable
 experiment models. This is targeted for v0.2.0, not v0.1.1.
 
+## Implementation status
+
+Implemented with a typed `scheduler.type: pbs` adapter, scheduler-neutral PBS
+array planning, qsub/qstat/qdel lifecycle support, strict native PBS resources,
+and an opt-in two-MOM Docker system boundary. Existing Slurm plans retain their
+original `slurm_array` strategy and schemas.
+
 ## Implementation
 
 1. Replace scheduler-kind branches in planning and CLI wiring with capability

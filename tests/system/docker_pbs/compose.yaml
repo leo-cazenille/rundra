@@ -1,0 +1,64 @@
+name: rundra-pbs-system
+
+x-pbs-service: &pbs-service
+  image: ${RUNDRA_DOCKER_PBS_IMAGE:?set RUNDRA_DOCKER_PBS_IMAGE}
+  platform: linux/amd64
+  privileged: true
+  security_opt:
+    - seccomp=unconfined
+    - systempaths=unconfined
+  devices:
+    - /dev/fuse:/dev/fuse
+  volumes:
+    - cluster-data:/cluster
+    - cluster-workspace:/workspace
+
+services:
+  init:
+    <<: *pbs-service
+    command: [init]
+    volumes:
+      - cluster-data:/cluster
+      - cluster-workspace:/workspace
+      - ${RUNDRA_DOCKER_PBS_STATE:?set RUNDRA_DOCKER_PBS_STATE}:/state
+
+  controller:
+    <<: *pbs-service
+    hostname: controller
+    command: [controller]
+    ports:
+      - "127.0.0.1::22"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    cpus: 1
+    mem_limit: 2g
+
+  compute1:
+    <<: *pbs-service
+    hostname: compute1
+    command: [compute]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      controller:
+        condition: service_started
+    cpus: 2
+    mem_limit: 2g
+
+  compute2:
+    <<: *pbs-service
+    hostname: compute2
+    command: [compute]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      controller:
+        condition: service_started
+    cpus: 2
+    mem_limit: 2g
+
+volumes:
+  cluster-data:
+  cluster-workspace:
+

@@ -5,6 +5,12 @@ import pytest
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
+        "--run-docker-pbs-system-tests",
+        action="store_true",
+        default=False,
+        help="enable the Docker Compose OpenPBS system tests",
+    )
+    parser.addoption(
         "--run-docker-slurm-system-tests",
         action="store_true",
         default=False,
@@ -58,6 +64,7 @@ def pytest_collection_modifyitems(
     config: pytest.Config,
     items: Sequence[pytest.Item],
 ) -> None:
+    run_docker_pbs = bool(config.getoption("--run-docker-pbs-system-tests"))
     run_docker_slurm = bool(config.getoption("--run-docker-slurm-system-tests"))
     run_system = bool(config.getoption("--run-shoal-system-tests"))
     run_cpu = bool(config.getoption("--run-shoal-cpu-test"))
@@ -71,6 +78,9 @@ def pytest_collection_modifyitems(
     )
     skip_docker_slurm = pytest.mark.skip(
         reason="requires the explicit --run-docker-slurm-system-tests opt-in"
+    )
+    skip_docker_pbs = pytest.mark.skip(
+        reason="requires the explicit --run-docker-pbs-system-tests opt-in"
     )
     skip_cpu = pytest.mark.skip(
         reason="requires both Shoal system and CPU submission opt-ins"
@@ -91,7 +101,9 @@ def pytest_collection_modifyitems(
         reason="requires both Shoal system and Pogosim submission opt-ins"
     )
     for item in items:
-        if "docker_slurm" in item.keywords and not run_docker_slurm:
+        if "docker_pbs" in item.keywords and not run_docker_pbs:
+            item.add_marker(skip_docker_pbs)
+        elif "docker_slurm" in item.keywords and not run_docker_slurm:
             item.add_marker(skip_docker_slurm)
         elif "shoal_pogosim" in item.keywords and not (run_system and run_pogosim):
             item.add_marker(skip_pogosim)
