@@ -52,6 +52,9 @@ GUIDE = f"""{START_MARKER}
 - Run scientific and analysis workloads on the configured execution target or
   an approved workstation, never on a login/controller host.
 - Keep raw retrieved results separate from derived analysis outputs.
+- Prefer `rundr fetch RUN_ID` with its default auto mode. Rundra verifies shared
+  visibility and avoids bulk transfer when safe; use `--mode copy` only when a
+  materialized local result tree is required.
 - Use `rundr cancel` for active work. Preview deletion with `rundr purge
   RUN_ID --dry-run`; purge only with exact Run-ID confirmation.
 - Never place SSH keys, tokens, passwords, or other credentials in experiment,

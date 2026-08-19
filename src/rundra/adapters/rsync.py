@@ -15,6 +15,7 @@ from rundra.adapters._local_paths import (
     reject_destination_tree_symlinks,
     resolve_write_destination,
 )
+from rundra.adapters.reference import write_reference_manifest
 from rundra.adapters.remote import (
     RemoteWorkspaceAllocator,
     RemoteWorkspaceError,
@@ -53,6 +54,14 @@ class RsyncUploadError(RsyncStagerError):
 
 class RsyncRetrievalError(RsyncStagerError):
     """Raised when remote output retrieval does not complete safely."""
+
+
+_SHARED_VISIBILITY_PROBE = """\
+set -eu
+umask 077
+[ ! -e "$1" ] || exit 73
+printf '%s' "$2" > "$1"
+"""
 
 
 class RsyncStager:
@@ -391,6 +400,19 @@ class RsyncStager:
             reject_destination_tree_symlinks(destination)
         except UnsafeLocalPathError as error:
             raise RsyncRetrievalError(str(error)) from error
+        if request.mode in {"auto", "reference"}:
+            visible = self._workspace_is_locally_visible(request.workspace)
+            if visible:
+                workspace = Path(str(request.workspace.root)).resolve(strict=True)
+                if destination == workspace or destination.is_relative_to(workspace):
+                    raise RsyncRetrievalError(
+                        "Fetch destination must remain outside the Run workspace"
+                    )
+                return write_reference_manifest(request, destination)
+            if request.mode == "reference":
+                raise RsyncRetrievalError(
+                    "Run workspace is not jointly visible to client and target"
+                )
         self.check()
         output_destination = destination / "output"
         logs_destination = destination / "logs"
@@ -455,6 +477,64 @@ class RsyncStager:
                 request.patterns,
             )
         )
+
+    def _workspace_is_locally_visible(self, workspace: StagedWorkspace) -> bool:
+        root = Path(str(workspace.root)).expanduser()
+        paths = tuple(
+            Path(str(path)).expanduser()
+            for path in (
+                workspace.root,
+                workspace.outputs,
+                workspace.logs,
+                workspace.metadata,
+            )
+        )
+        try:
+            if root.is_symlink():
+                return False
+            resolved_root = root.resolve(strict=True)
+            if not resolved_root.is_dir():
+                return False
+            resolved_paths = tuple(path.resolve(strict=True) for path in paths)
+            if any(
+                path.is_symlink()
+                or not resolved.is_dir()
+                or (
+                    resolved != resolved_root
+                    and not resolved.is_relative_to(resolved_root)
+                )
+                for path, resolved in zip(paths, resolved_paths, strict=True)
+            ):
+                return False
+        except OSError:
+            return False
+
+        token = secrets.token_hex(16)
+        probe = resolved_paths[3] / f".rundra-fetch-visibility-{token}"
+        remote_probe = workspace.metadata / probe.name
+        try:
+            result = self._transport.run(
+                Command(
+                    (
+                        "/bin/sh",
+                        "-c",
+                        _SHARED_VISIBILITY_PROBE,
+                        "rundra-fetch-visibility",
+                        str(remote_probe),
+                        token,
+                    )
+                )
+            )
+            if result.exit_code != 0 or probe.is_symlink() or not probe.is_file():
+                return False
+            return probe.read_text(encoding="utf-8") == token
+        except Exception:
+            return False
+        finally:
+            try:
+                self._transport.run(Command(("rm", "-f", "--", str(remote_probe))))
+            except Exception:
+                pass
 
     def _upload(self, argv: tuple[str, ...], *, kind: str, run_id: str) -> None:
         try:

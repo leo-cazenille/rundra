@@ -1025,15 +1025,24 @@ and destinations inside the Run workspace, and atomically replaces each copied
 destination file. Repeating the same fetch is therefore safe and updates an
 existing retrieved file without partially overwriting it.
 
-`rundr fetch` accepts `--mode auto|copy|reference|archive`. Existing local and
-rsync target versions resolve `auto` to `copy`. Version-5 shared targets resolve
-`auto` to `reference`: Rundra writes an atomic read-only
+`rundr fetch` accepts `--mode auto|copy|reference|archive`. Local targets
+resolve `auto` to `copy`. Version-5 shared targets resolve `auto` to
+`reference`. Rsync targets first perform a private controller-to-client token
+round trip through the exact Run metadata directory; a matching token and
+symlink-safe locally visible workspace select `reference`, while a failed probe
+falls back to ordinary rsync. Rundra writes an atomic read-only
 `rundra-reference.json` in the destination instead of duplicating result data.
 The manifest records the immutable terminal Run's output, metadata, and log
 roots plus selected output patterns. Explicit `--mode copy` retains ordinary
 file materialization. Reference retrieval is rejected until the Run is
 terminal and remains dependent on the configured remote-workspace retention
 policy.
+
+Explicit `--mode reference` applies the same visibility proof and fails rather
+than silently copying when the target workspace is not jointly visible. The
+probe uses a random private file, removes it best-effort through the controller,
+does not trust matching path names alone, and never scans unrelated filesystem
+locations.
 
 For bundled Slurm runs at or above the target's `output_shard_tasks` threshold,
 each scheduled worker lane seals its completed Task output directories into one
