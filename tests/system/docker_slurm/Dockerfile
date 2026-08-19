@@ -1,24 +1,34 @@
-FROM ubuntu:24.04@sha256:1428a953896eef9e62fc6ef60cad05bbf98769f6ea5f8c278e519b9dd168ab26
+FROM debian:13-slim@sha256:3a39a0592364683e6bab97937b72cad5a8fa6dcbbee90edb3bb48c7f8e94f258
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG APPTAINER_VERSION=1.5.1
-ARG APPTAINER_SHA256=c7f1247e42d5d27aec4d9b2d632b0d0bca0f9254cc27ab836e02b20511e09eb5
+ARG APPTAINER_SHA256=ae00a6a2f1949a8f245c082660fd2990d61a6543159c9a28eede7966d89efe62
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates curl fuse3 munge openssh-server rsync \
-        slurm-wlm squashfs-tools \
+        build-essential ca-certificates curl fuse3 golang-go libfuse3-dev \
+        libseccomp-dev munge openssh-server pkg-config rsync slurm-wlm \
+        squashfs-tools squashfuse uidmap \
     && curl --fail --location --silent --show-error \
-        --output /tmp/apptainer.deb \
-        "https://github.com/apptainer/apptainer/releases/download/v${APPTAINER_VERSION}/apptainer_${APPTAINER_VERSION}_amd64.deb" \
-    && echo "${APPTAINER_SHA256}  /tmp/apptainer.deb" | sha256sum --check - \
-    && apt-get install -y --no-install-recommends /tmp/apptainer.deb \
-    && rm -rf /var/lib/apt/lists/* /tmp/apptainer.deb \
+        --output /tmp/apptainer.tar.gz \
+        "https://github.com/apptainer/apptainer/releases/download/v${APPTAINER_VERSION}/apptainer-${APPTAINER_VERSION}.tar.gz" \
+    && echo "${APPTAINER_SHA256}  /tmp/apptainer.tar.gz" | sha256sum --check - \
+    && tar -C /tmp -xzf /tmp/apptainer.tar.gz \
+    && cd "/tmp/apptainer-${APPTAINER_VERSION}" \
+    && ./mconfig --without-suid --prefix=/usr \
+    && make -C builddir -j2 \
+    && make -C builddir install \
+    && sed -i 's/^mount home = yes$/mount home = no/' \
+        /usr/etc/apptainer/apptainer.conf \
+    && grep -q '^mount home = no$' /usr/etc/apptainer/apptainer.conf \
+    && rm -rf /var/lib/apt/lists/* /tmp/apptainer.tar.gz \
+        "/tmp/apptainer-${APPTAINER_VERSION}" \
     && useradd --create-home --uid 1100 --shell /bin/bash rundra \
     && install -d -m 0755 /run/sshd /var/spool/slurmctld /var/spool/slurmd \
     && chown slurm:slurm /var/spool/slurmctld /var/spool/slurmd
 
 COPY slurm.conf /etc/slurm/slurm.conf
+COPY cgroup.conf /etc/slurm/cgroup.conf
 COPY entrypoint.sh /opt/rundra-cluster/entrypoint.sh
 
 ENTRYPOINT ["/opt/rundra-cluster/entrypoint.sh"]

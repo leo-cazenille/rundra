@@ -20,6 +20,7 @@ case "${1:-}" in
         install -d -o rundra -g rundra -m 0755 /workspace
         apptainer pull --disable-cache /cluster/rundra-test.sif docker://alpine:3.20
         sha256sum /cluster/rundra-test.sif > /cluster/image.sha256
+        chmod 0444 /cluster/rundra-test.sif /cluster/image.sha256
         touch /cluster/ready
         ;;
     controller)

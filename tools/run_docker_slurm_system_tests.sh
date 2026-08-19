@@ -39,11 +39,14 @@ Host rundra-docker-slurm
 EOF
 chmod 600 "$state/home/.ssh/config" "$state/id_ed25519"
 
-cat > "$state/targets.yaml" <<'EOF'
+cat > "$state/targets.yaml" <<EOF
 version: 4
 targets:
   docker-slurm:
-    transport: {type: ssh, host: rundra-docker-slurm}
+    transport:
+      type: ssh
+      host: rundra-docker-slurm
+      config_file: $state/home/.ssh/config
     scheduler: {type: slurm}
     staging: {type: rsync}
     container: {type: apptainer}
@@ -52,14 +55,14 @@ targets:
       hard_task_limit: 2000
       confirmation_threshold: 500
       max_active_tasks: 4
-      max_concurrent_jobs: 2
+      max_concurrent_jobs: 8
       max_array_size: 4
       output_shard_tasks: 100
       automatic_retrieval_threshold: 2000
       worker_pool:
         activation_threshold: 100
-        max_workers: 2
-        task_slots_per_worker: 2
+        max_workers: 4
+        task_slots_per_worker: 1
         tasks_per_lease: 100
         infrastructure_retry_limit: 1
         requeue_limit: 2

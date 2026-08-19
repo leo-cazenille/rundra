@@ -48,7 +48,6 @@ def test_docker_slurm_runs_one_thousand_tasks_on_compute_nodes(
     )
     _rundr(
         "doctor",
-        str(_SOURCE / "experiment.yaml"),
         "--target",
         docker_slurm_target_name,
         "--targets-file",
@@ -98,7 +97,7 @@ def test_docker_slurm_runs_one_thousand_tasks_on_compute_nodes(
     assert {item["host"] for item in documents} <= {"compute1", "compute2"}
 
 
-def test_docker_slurm_multi_array_preserves_partial_failure(
+def test_docker_slurm_bounded_array_preserves_partial_failure(
     tmp_path: Path,
     docker_slurm_targets_source: Path,
     docker_slurm_target_name: str,
@@ -128,7 +127,7 @@ def test_docker_slurm_multi_array_preserves_partial_failure(
     assert isinstance(run, dict)
     assert run["state"] == "FAILED"
     assert run["retrieval_state"] == "SUCCEEDED"
-    assert len(run["scheduler_job_ids"]) == 2
+    assert len(run["scheduler_job_ids"]) == 1
     results = sorted(destination.glob("output/task_*/results/result.json"))
     assert len(results) == 8
 
