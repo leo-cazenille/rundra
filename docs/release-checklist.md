@@ -4,6 +4,10 @@ This checklist turns the validated `0.1.1` source tree into the v0.1.1 release.
 Checking it does not itself authorize publishing, pushing, tagging, or changing
 external services.
 
+Release status: `v0.1.1` was published to TestPyPI and production PyPI on
+2026-08-19. The production wheel passed a clean Python 3.12 installation and
+local execution/retrieval smoke test before development resumed.
+
 ## Scope and contracts
 
 - [ ] Confirm the release contains only the documented local, SSH/Slurm,

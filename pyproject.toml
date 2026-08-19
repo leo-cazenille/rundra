@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "rundra"
-version = "0.1.1"
+version = "0.1.2.dev0"
 description = "Portable experiment execution for scientific computing"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
