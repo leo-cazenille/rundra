@@ -2805,6 +2805,12 @@ def _fetch_operation_locked(
             effective_mode = "archive"
         elif record.run.target.staging.kind == "shared":
             effective_mode = "reference"
+        elif record.run.target.staging.kind == "rsync" and record.run.state in {
+            ExecutionState.SUCCEEDED,
+            ExecutionState.FAILED,
+            ExecutionState.CANCELLED,
+        }:
+            effective_mode = "auto"
         else:
             effective_mode = "copy"
     if effective_mode == "reference" and record.run.state not in {

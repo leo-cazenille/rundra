@@ -561,6 +561,23 @@ def test_partial_array_fetch_tracks_tasks_and_becomes_complete_incrementally(
     }
 
 
+def test_terminal_rsync_fetch_preserves_auto_for_visibility_probe(
+    tmp_path: Path,
+) -> None:
+    store, run_id = _stored_array_record(tmp_path)
+    stager = RecordingFetchStager()
+
+    result = fetch_operation(
+        run_id,
+        store,
+        tmp_path / "retrieved-auto",
+        stager=stager,
+    )
+
+    assert result.ok
+    assert stager.requests[0].mode == "auto"
+
+
 def test_failed_partial_fetch_is_retryable_without_losing_other_task_state(
     tmp_path: Path,
 ) -> None:
