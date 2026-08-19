@@ -7,8 +7,6 @@
 > - **Python package:** `rundra`
 > - **PyPI distribution:** `rundra`
 > - **CLI command:** `rundr`
-> - **Primary domain:** `rundra.ai` (not yet reserved)
-> - **Secondary domain:** `rundr.ai` (not yet reserved; redirects to `rundra.ai`)
 >
 > **Primary reference deployment:** the shoal cluster, accessed through `fishvision`
 > **Initial implementation language:** Python 3.12

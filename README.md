@@ -10,14 +10,13 @@ product and architecture specification is in
 [`docs/project_specs.md`](docs/project_specs.md).
 
 The project, GitHub repository, Python package, and PyPI distribution are named
-`rundra`; the command-line executable is `rundr`. The intended primary domain is
-`rundra.ai`, with `rundr.ai` redirecting to it. Neither domain is reserved yet.
+`rundra`; the command-line executable is `rundr`.
 
 ## Development status
 
 M0 through M6 implementation and release hardening are complete. The source
-version remains `0.1.0.dev0`; no public release, tag, PyPI publication, or
-domain reservation is claimed. The checked
+version remains `0.1.0.dev0`; no public release, tag, or PyPI publication is
+claimed. The checked
 Shoal path has passed separately gated CPU, GPU, controlled-failure, and
 three-element Slurm-array system tests. M6.1 audits every public CLI operation,
 common `--json` placement, deterministic output, structured usage errors, and

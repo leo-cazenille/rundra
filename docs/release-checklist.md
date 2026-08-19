@@ -66,8 +66,6 @@ tools/check_distribution.sh dist/*.whl dist/*.tar.gz
   policy.
 - [ ] Publish the exact validated sdist and wheel to PyPI only with explicit
   authorization; verify their hashes and installed `rundr` behavior.
-- [ ] Treat `rundra.ai` registration and the `rundr.ai` redirect as separate
-  external tasks; do not claim either domain until verified.
 
 ## After release
 
