@@ -82,7 +82,7 @@ def _assert_plan(
 ) -> None:
     plan = document["plan"]
     assert isinstance(plan, dict)
-    assert plan["strategy"] == "worker_pool"
+    assert plan["strategy"] == "worker-pool"
     task_space = plan["task_space"]
     assert isinstance(task_space, dict)
     assert task_space["task_count"] == tasks
