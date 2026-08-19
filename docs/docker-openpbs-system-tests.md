@@ -16,10 +16,15 @@ SHA-256. It layers on `RUNDRA_DOCKER_SLURM_IMAGE` when supplied, reusing the
 test-only Apptainer runtime rather than building it twice. The OpenPBS image is
 cached locally as `rundra-pbs-system:local`.
 
-The test is excluded from ordinary pytest and CI. It creates temporary SSH
-credentials with strict host verification and removes containers, volumes, and
-credentials after success. On failure it preserves Docker logs, PBS server,
-node, and job state. Select a stable diagnostic directory with:
+The test is excluded from ordinary pytest and push CI. GitHub Actions runs it
+weekly and exposes the `docker-pbs-system` workflow for manual dispatch. The
+workflow caches the shared Slurm/Apptainer base-image layers and uploads a
+14-day diagnostic artifact after failures.
+
+The harness creates temporary SSH credentials with strict host verification
+and removes containers, volumes, and credentials after success. On failure it
+preserves Docker logs, PBS server, node, and job state. Select a stable
+diagnostic directory with:
 
 ```bash
 RUNDRA_DOCKER_PBS_DIAGNOSTICS=/path/to/diagnostics \
@@ -28,4 +33,3 @@ RUNDRA_DOCKER_PBS_DIAGNOSTICS=/path/to/diagnostics \
 
 This is a functional compatibility environment, not production OpenPBS
 deployment guidance or a scheduler performance benchmark.
-

@@ -107,6 +107,7 @@ User documentation:
 - [task-oriented tutorials](docs/tutorials/01-local-first-run.md);
 - [interface stability and internal Python API policy](docs/stability.md);
 - [v0.1 release checklist](docs/release-checklist.md);
+- [continuous integration and system-test triggers](docs/continuous-integration.md);
 - [Shoal setup and explicitly opted-in system tests](docs/shoal.md).
 
 ## Development setup
@@ -124,11 +125,11 @@ uv run rundr --help
 Run the required development checks with:
 
 ```bash
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
-uv run mypy src
+tools/check.sh
 ```
+
+This is also the push and pull-request quality gate. Packaging is checked
+separately as documented in [Continuous integration](docs/continuous-integration.md).
 
 Do not install project dependencies globally or use a different package
 manager.

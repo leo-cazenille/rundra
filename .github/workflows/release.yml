@@ -26,10 +26,7 @@ jobs:
         run: uv sync --locked
       - name: Validate source
         run: |
-          uv run pytest
-          uv run ruff check .
-          uv run ruff format --check .
-          uv run mypy src
+          tools/check.sh
           uv run bandit -q -ll -r src
           uv export --frozen --all-extras --no-dev --no-emit-project --format requirements-txt --output-file /tmp/rundra-requirements.txt
           uv run pip-audit --requirement /tmp/rundra-requirements.txt
@@ -40,16 +37,8 @@ jobs:
           (cd dist-first && sha256sum *.whl *.tar.gz | sort) > /tmp/first.sha256
           (cd dist-second && sha256sum *.whl *.tar.gz | sort) > /tmp/second.sha256
           diff -u /tmp/first.sha256 /tmp/second.sha256
-      - name: Audit publication boundary
-        run: |
-          uv run python tools/audit_distribution.py dist-first/*.whl dist-first/*.tar.gz
-          uv run twine check dist-first/*.whl dist-first/*.tar.gz
-      - name: Smoke-test wheel
-        run: |
-          uv venv /tmp/rundra-smoke --python 3.12
-          uv pip install --python /tmp/rundra-smoke/bin/python dist-first/*.whl
-          /tmp/rundra-smoke/bin/rundr --version
-          /tmp/rundra-smoke/bin/rundr help
+      - name: Audit publication boundary and smoke-test wheel
+        run: tools/check_distribution.sh dist-first/*.whl dist-first/*.tar.gz
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: distributions

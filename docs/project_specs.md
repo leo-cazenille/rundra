@@ -2934,6 +2934,23 @@ The resulting opt-in Shoal matrix covers:
 
 They must not run by default in ordinary CI.
 
+### 42.5 Continuous integration policy
+
+Every pushed commit and pull request runs two infrastructure-free status
+checks. The quality check executes ordinary pytest, Ruff lint and formatting,
+and strict mypy validation. The package check builds the wheel and source
+distribution, audits the public distribution boundary and metadata, installs
+the wheel into a clean Python 3.12 environment, and smoke-tests the installed
+CLI. Release validation reuses these repository commands and adds security,
+dependency, reproducibility, and publication checks.
+
+Containerized scheduler boundaries remain separate from commit gates. The
+Docker Slurm lifecycle suite runs nightly and manually, while Docker OpenPBS
+runs weekly and manually. Privileged Slurm cgroup validation remains
+manual-only. Live Shoal tests always require explicit local authorization and
+must never become an automatic GitHub Actions trigger. Scheduler-system
+availability is not a merge prerequisite.
+
 ---
 
 ## 43. Version 0.1 scope

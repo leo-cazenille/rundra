@@ -1,0 +1,52 @@
+# Continuous integration
+
+Rundra separates deterministic commit gates from infrastructure system tests.
+The `CI` workflow runs on every push and pull request with read-only repository
+permissions. Superseded runs for the same branch are cancelled.
+
+## Required commit checks
+
+The `quality` job runs the same command maintainers use locally:
+
+```bash
+tools/check.sh
+```
+
+It executes ordinary pytest, Ruff lint and formatting checks, and strict mypy
+validation. Pytest's Docker and Shoal system tests remain skipped unless their
+explicit command-line opt-ins are present.
+
+The `package` job builds the wheel and source distribution and then runs:
+
+```bash
+tools/check_distribution.sh dist/*.whl dist/*.tar.gz
+```
+
+This audits the publication boundary, checks package metadata, installs the
+wheel and its dependencies into a clean Python 3.12 virtual environment, and
+smoke-tests `rundr --version` and `rundr help`.
+
+Configure the default branch's GitHub protection rule to require `quality` and
+`package`. Do not require scheduled scheduler-system jobs: an external Docker
+or registry outage must not prevent an otherwise valid merge.
+
+## Scheduler-system workflows
+
+| Workflow | Automatic trigger | Manual trigger | Purpose |
+| --- | --- | --- | --- |
+| `docker-slurm-system` | nightly at 02:23 UTC | yes | Slurm lifecycle, scale, failure, cancellation, and retrieval |
+| `docker-pbs-system` | Wednesdays at 03:41 UTC | yes | OpenPBS arrays, failure, cancellation, and retrieval |
+| `Docker Slurm cgroup system` | none | yes | privileged cgroup-v2 memory enforcement |
+| Shoal system tests | none | local explicit opt-ins only | live reference-cluster acceptance evidence |
+
+The OpenPBS workflow caches the shared Slurm/Apptainer base-image layers. The
+OpenPBS layer itself is built from the pinned source in the checked Dockerfile.
+Both scheduler lifecycle workflows upload a 14-day diagnostic artifact after a
+failure.
+
+## Release workflow
+
+Manual release dispatch validates and publishes to TestPyPI. Publishing a
+GitHub Release validates and publishes to PyPI. Release validation reuses both
+commit-gate scripts, then adds Bandit, dependency auditing, reproducible double
+builds, and publication.

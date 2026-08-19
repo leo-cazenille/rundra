@@ -1,0 +1,48 @@
+name: docker-pbs-system
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 3 * * 3"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-pbs-system
+  cancel-in-progress: false
+
+jobs:
+  system:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+        with:
+          enable-cache: true
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+      - name: Synchronize the locked environment
+        run: uv sync --locked
+      - name: Build the shared Docker scheduler base
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: tests/system/docker_slurm
+          load: true
+          tags: rundra-slurm-system:pbs-ci
+          cache-from: type=gha,scope=docker-pbs-system-base
+          cache-to: type=gha,mode=max,scope=docker-pbs-system-base
+      - name: Run Docker OpenPBS system tests
+        run: tools/run_docker_pbs_system_tests.sh
+        env:
+          RUNDRA_DOCKER_SLURM_IMAGE: rundra-slurm-system:pbs-ci
+          RUNDRA_DOCKER_PBS_IMAGE: rundra-pbs-system:ci
+          RUNDRA_DOCKER_PBS_DIAGNOSTICS: ${{ runner.temp }}/docker-pbs-diagnostics
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: docker-pbs-diagnostics
+          path: ${{ runner.temp }}/docker-pbs-diagnostics
+          if-no-files-found: warn
+          retention-days: 14

@@ -23,11 +23,9 @@ Run from a clean checkout using Python 3.12:
 
 ```bash
 uv sync --locked
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
-uv run mypy src
-uv build
+tools/check.sh
+uv build --out-dir dist
+tools/check_distribution.sh dist/*.whl dist/*.tar.gz
 ```
 
 - [ ] Default tests pass with every real-cluster test explicitly skipped.
