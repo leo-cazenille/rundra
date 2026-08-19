@@ -18,17 +18,36 @@ All notable user-visible changes are recorded here.
   cancellation, native resource rendering, and Dockerized system coverage.
 - A gated Docker Slurm cgroup-v2 harness verifies memory enforcement and
   durable out-of-memory Task classification.
+- Agent capability diagnostics report the filesystem and network permissions
+  needed before local or remote execution, including explicitly audited access
+  to target-visible storage.
+- Explicit worker scaling distributes bounded Task slots across requested
+  scheduler workers without creating one scheduler job per experiment Task.
+- Interrupted scheduler submissions can be recovered from durable receipts
+  with `rundr resume` without creating a duplicate Run.
+- The optional MCP adapter supports authenticated Streamable HTTP, durable
+  submission recovery, and bounded Run and Task discovery.
 
 ### Changed
 
 - Manual release-workflow dispatches publish only to TestPyPI; published GitHub
   releases publish directly to PyPI after rebuilding and validating artifacts.
+- `rundr list --json` returns compact, paginated Run summaries by default and
+  expands Task details only when explicitly requested.
+- Automatic retrieval detects jointly visible target storage and can publish a
+  reference manifest instead of transferring large result trees unnecessarily.
+- Long-running lifecycle commands provide bounded progress reporting, default
+  retrieval destinations, and `--last` selection for interactive use.
 
 ### Fixed
 
 - Slurm array observations are reconciled consistently across scheduler output
   forms.
 - OpenPBS memory requests are rendered per `select` chunk.
+- Terminal rsync-backed Runs preserve automatic shared-filesystem retrieval
+  selection instead of being forced into a bulk copy.
+- Submission progress reaches completion when durable asynchronous submission
+  succeeds.
 
 ## [0.1.0] - 2026-08-18
 

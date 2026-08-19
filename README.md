@@ -108,7 +108,7 @@ User documentation:
 - [portable agent instructions](docs/agent-instructions.md);
 - [task-oriented tutorials](docs/tutorials/01-local-first-run.md);
 - [interface stability and internal Python API policy](docs/stability.md);
-- [v0.1 release checklist](docs/release-checklist.md);
+- [v0.1.1 release checklist](docs/release-checklist.md);
 - [continuous integration and system-test triggers](docs/continuous-integration.md);
 - [Shoal setup and explicitly opted-in system tests](docs/shoal.md).
 

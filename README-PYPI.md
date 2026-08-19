@@ -36,17 +36,23 @@ rundr fetch --last
 ```
 
 `rundr run` performs submission, waiting, and retrieval synchronously. Remote
-targets can combine SSH transport, a Slurm scheduler, rsync or shared staging,
-and an Apptainer container runtime. Site connection, account, partition, QOS,
+targets can combine SSH transport, a Slurm or OpenPBS scheduler, rsync or shared
+staging, and an Apptainer container runtime. Site connection, account, queue,
 workspace, and authentication policy remain explicit operator configuration.
+
+If an asynchronous submission is interrupted, `rundr resume RUN_ID` recovers
+its durable scheduler outcome without creating a duplicate Run. `rundr list`
+returns compact paginated summaries, while `rundr tasks RUN_ID` pages through
+Task details. Automatic fetch can avoid redundant bulk transfer when client and
+target paths are safely visible through the same filesystem.
 
 ## Automation
 
 All important lifecycle commands support structured JSON. The optional MCP
 server exposes the same operation layer over stdio or authenticated Streamable
-HTTP. Network transport requires an environment-sourced bearer token and an
-explicit host policy; TLS should terminate at an operator-managed reverse
-proxy.
+HTTP, including submission recovery and paginated discovery. Network transport
+requires an environment-sourced bearer token and an explicit host policy; TLS
+should terminate at an operator-managed reverse proxy.
 
 Rundra does not store SSH keys, passwords, registry credentials, or scheduler
 credentials. Run only experiment definitions and source trees that you trust,
