@@ -24,6 +24,8 @@ services:
     <<: *cluster-service
     hostname: controller
     command: controller
+    ports:
+      - "127.0.0.1::22"
     depends_on:
       init:
         condition: service_completed_successfully

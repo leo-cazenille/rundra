@@ -65,9 +65,11 @@ tools/run_docker_slurm_cgroup_tests.sh
 
 This variant requires Docker to provide a privileged private cgroup-v2
 namespace with a writable `memory` controller. It enables Slurm
-`task/cgroup`, requests 64 MiB for a workload retaining 512 MiB, and requires
-the resulting job state to be `OUT_OF_MEMORY`. It runs a successful control job
-first so startup or scheduling failures cannot be mistaken for enforcement.
+`task/cgroup`, launches a deliberately over-limit experiment through
+`rundr run --json`, and requires both a durable failed Rundra Task and Slurm's
+`OUT_OF_MEMORY` state for the recorded scheduler ID. It runs a successful
+control job first so startup or scheduling failures cannot be mistaken for
+enforcement.
 
 The variant uses Slurm's `IgnoreSystemd=yes` development/testing mode. It is
 not a production Slurm deployment example; production cgroup-v2 deployments
@@ -76,5 +78,5 @@ manual-only and is intentionally excluded from default and scheduled CI.
 
 Set `RUNDRA_DOCKER_SLURM_CGROUP_DIAGNOSTICS` to preserve diagnostics at a
 specific location when the test fails. The harness reuses
-`RUNDRA_DOCKER_SLURM_IMAGE` when provided and layers `stress-ng` into the local
-`rundra-slurm-cgroup-system:local` image.
+`RUNDRA_DOCKER_SLURM_IMAGE` when provided and layers the private-cgroup
+bootstrap into the local `rundra-slurm-cgroup-system:local` image.
