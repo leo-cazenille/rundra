@@ -14,11 +14,21 @@ All notable user-visible changes are recorded here.
   self-contained, version-aware baseline instructions.
 - An opt-in Docker Compose system harness exercises the complete remote stack
   and a 1,000-Task worker-pool Run on two local Slurm compute containers.
+- An OpenPBS scheduler backend supports arrays, lifecycle reconciliation,
+  cancellation, native resource rendering, and Dockerized system coverage.
+- A gated Docker Slurm cgroup-v2 harness verifies memory enforcement and
+  durable out-of-memory Task classification.
 
 ### Changed
 
 - Manual release-workflow dispatches publish only to TestPyPI; published GitHub
   releases publish directly to PyPI after rebuilding and validating artifacts.
+
+### Fixed
+
+- Slurm array observations are reconciled consistently across scheduler output
+  forms.
+- OpenPBS memory requests are rendered per `select` chunk.
 
 ## [0.1.0] - 2026-08-18
 
@@ -66,4 +76,3 @@ All notable user-visible changes are recorded here.
 - Container digest/runtime-version provenance is not yet captured. Scientific
   reproducibility still depends on preserving external source, image, and
   environment inputs.
-- The `rundra.ai` and `rundr.ai` domains are not reserved.

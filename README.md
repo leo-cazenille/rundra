@@ -15,8 +15,7 @@ The project, GitHub repository, Python package, and PyPI distribution are named
 ## Development status
 
 M0 through M6 implementation and release hardening are complete. The source
-version remains `0.1.0.dev0`; no public release, tag, or PyPI publication is
-claimed. The checked
+version is `0.1.1`; no `v0.1.1` tag or PyPI publication is claimed. The checked
 Shoal path has passed separately gated CPU, GPU, controlled-failure, and
 three-element Slurm-array system tests. M6.1 audits every public CLI operation,
 common `--json` placement, deterministic output, structured usage errors, and
