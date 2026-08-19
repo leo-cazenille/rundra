@@ -7,7 +7,7 @@ if [ "${1:-}" = compute ]; then
     # Slurm can own system.slice without modifying host cgroups.
     mkdir -p /sys/fs/cgroup/rundra-init.scope
     echo $$ > /sys/fs/cgroup/rundra-init.scope/cgroup.procs
-    echo '+cpu +memory +pids' > /sys/fs/cgroup/cgroup.subtree_control
+    echo '+cpuset +cpu +memory +pids' > /sys/fs/cgroup/cgroup.subtree_control
     mkdir -p /sys/fs/cgroup/system.slice
 fi
 

@@ -60,7 +60,9 @@ capabilities=$(docker run --rm --privileged \
   --entrypoint /bin/sh "$RUNDRA_DOCKER_SLURM_CGROUP_IMAGE" -c '
     test "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs || exit 10
     grep -qw memory /sys/fs/cgroup/cgroup.controllers || exit 11
-    mkdir /sys/fs/cgroup/rundra-cgroup-probe || exit 12
+    grep -qw cpu /sys/fs/cgroup/cgroup.controllers || exit 12
+    grep -qw cpuset /sys/fs/cgroup/cgroup.controllers || exit 13
+    mkdir /sys/fs/cgroup/rundra-cgroup-probe || exit 14
     rmdir /sys/fs/cgroup/rundra-cgroup-probe
     printf supported
   ') || {
