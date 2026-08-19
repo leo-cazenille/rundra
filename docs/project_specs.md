@@ -2743,6 +2743,17 @@ updates preserve the winner and return structured `RUN_STORE_CONFLICT` with an
 explicit retry action. Interrupted writes leave the previous record intact and
 remove temporary files.
 
+Asynchronous scheduler submission uses a separate atomic version-1 receipt per
+Run. Rundra writes a pending receipt before scheduler contact and completes it
+with every scheduler root and Task mapping before transitioning the RunRecord
+to `SUBMITTED`. `rundr resume RUN_ID` adopts a completed receipt after an
+interrupted client-side RunRecord update, or reports an already durable
+submission as `found`. A pending receipt with no scheduler identity is treated
+as an unknown outcome and blocks automatic resubmission; Rundra never creates a
+possible duplicate merely to make forward progress. Run registration is
+printed to stderr as soon as the initial RunRecord is durable, while structured
+stdout remains valid JSON when requested.
+
 ---
 
 ## 40. Versioned schemas

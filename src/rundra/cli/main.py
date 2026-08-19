@@ -24,6 +24,7 @@ from rundra.cli.operations import (
     run_operation,
     status_operation,
     submit_operation,
+    resume_operation,
     targets_operation,
     tasks_operation,
     validate_operation,
@@ -35,7 +36,12 @@ from rundra.cli.progress import (
     create_progress_reporter,
 )
 from rundra.cli.render import render_human, render_json
-from rundra.persistence import JsonRunStore, PurgeReceiptStore, SqliteTaskStore
+from rundra.persistence import (
+    JsonRunStore,
+    PurgeReceiptStore,
+    SqliteTaskStore,
+    SubmissionReceiptStore,
+)
 from rundra.results import OperationError, OperationResult
 
 _COMMANDS = (
@@ -173,6 +179,13 @@ def build_parser() -> argparse.ArgumentParser:
     _add_feedback_arguments(submit)
     _add_store_option(submit, use_default=False)
     _add_json_option(submit)
+
+    resume = subparsers.add_parser(
+        "resume", help="recover an interrupted scheduler submission"
+    )
+    _add_run_selector(resume)
+    _add_store_option(resume)
+    _add_json_option(resume)
 
     wait = subparsers.add_parser("wait", help="wait for a submitted Run")
     _add_run_selector(wait)
@@ -483,11 +496,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     try:
-        progress = create_progress_reporter(
-            verbose=getattr(arguments, "verbose", False),
-            progress=getattr(arguments, "progress", False),
-            stream=sys.stderr,
-        )
+    progress = create_progress_reporter(
+        verbose=getattr(arguments, "verbose", False),
+        progress=getattr(arguments, "progress", False),
+        stream=sys.stderr,
+        announce_run=arguments.command == "submit",
+    )
     except ProgressUnavailableError as error:
         unavailable: OperationResult[Any] = OperationResult.failure(
             arguments.command,
@@ -683,7 +697,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 confirm_tasks=arguments.confirm_tasks,
                 workers=submit_inputs.workers,
                 task_slots_per_worker=submit_inputs.task_slots_per_worker,
+                submission_receipts=SubmissionReceiptStore(submit_inputs.data_dir),
             )
+    elif arguments.command == "resume":
+        result = resume_operation(
+            arguments.run_id,
+            JsonRunStore(arguments.data_dir),
+            SubmissionReceiptStore(arguments.data_dir),
+        )
     elif arguments.command == "wait":
         result = wait_operation(
             arguments.run_id,

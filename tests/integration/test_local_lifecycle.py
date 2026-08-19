@@ -38,7 +38,8 @@ from rundra.orchestration.service import (
     OrchestrationService,
     RunExecutionRequest,
 )
-from rundra.persistence import JsonRunStore
+from rundra.persistence import JsonRunStore, SubmissionReceiptStore
+from rundra.persistence.errors import RunStoreError
 from rundra.ports import (
     CapabilityCheck,
     ContainerRequest,
@@ -617,6 +618,55 @@ def test_async_submit_returns_after_durable_submission_without_querying(
     assert result.record.scheduler_job_ids == ("918274",)
     assert service.store.load(_RUN_ID) == result.record
     assert scheduler.query_calls == 0
+
+
+def test_completed_receipt_recovers_interrupted_run_record_update(
+    tmp_path: Path,
+) -> None:
+    runtime = HostMappedRuntime()
+    request, _ = _request(tmp_path, exit_code=0)
+    task_id = request.plan.units[0].task_id
+    scheduler = QueryFailScheduler(
+        SchedulerSubmission(SchedulerReference("918275"), {task_id: "918275"})
+    )
+    service = _service(tmp_path, runtime, scheduler=scheduler)
+    receipts = SubmissionReceiptStore(tmp_path / "records")
+    service._submission_receipts = receipts
+    original_update = service.store.update
+
+    def interrupt_submitted_update(record: RunRecord, *, expected: RunRecord) -> None:
+        if record.run.state is ExecutionState.SUBMITTED:
+            raise RunStoreError("simulated client interruption")
+        original_update(record, expected=expected)
+
+    service.store.update = interrupt_submitted_update  # type: ignore[method-assign]
+    with pytest.raises(RunStoreError, match="simulated client interruption"):
+        service.submit_one(request)
+
+    service.store.update = original_update  # type: ignore[method-assign]
+    recovered, action = service.recover_submission(_RUN_ID)
+
+    assert action == "resumed"
+    assert recovered.run.state is ExecutionState.SUBMITTED
+    assert recovered.scheduler_job_ids == ("918275",)
+    assert service.store.load(_RUN_ID) == recovered
+
+
+def test_recovery_finds_an_already_durable_submission(tmp_path: Path) -> None:
+    runtime = HostMappedRuntime()
+    request, _ = _request(tmp_path, exit_code=0)
+    task_id = request.plan.units[0].task_id
+    scheduler = QueryFailScheduler(
+        SchedulerSubmission(SchedulerReference("918276"), {task_id: "918276"})
+    )
+    service = _service(tmp_path, runtime, scheduler=scheduler)
+    service._submission_receipts = SubmissionReceiptStore(tmp_path / "records")
+    submitted = service.submit_one(request).record
+
+    found, action = service.recover_submission(_RUN_ID)
+
+    assert action == "found"
+    assert found == submitted
 
 
 def test_available_source_provenance_is_persisted_before_execution(

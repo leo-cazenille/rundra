@@ -41,3 +41,9 @@ def test_lifecycle_command_accepts_explicit_run_id() -> None:
     arguments = build_parser().parse_args(("wait", run_id))
 
     assert arguments.run_id == run_id
+
+
+def test_resume_accepts_last_run_selector() -> None:
+    arguments = build_parser().parse_args(("resume", "--last"))
+
+    assert arguments.run_id == LAST_RUN_SELECTOR

@@ -21,6 +21,7 @@ from rundra.cli.operations import (
     PurgeValue,
     RunValue,
     StatusValue,
+    SubmissionRecoveryValue,
     TargetsValue,
     TaskStatusValue,
     TasksValue,
@@ -358,6 +359,16 @@ def render_human(result: OperationResult[Any]) -> str:
         elif value.record.run.retrieval_state is not RetrievalState.SUCCEEDED:
             rendered += f"\nNext: rundr fetch {shlex.quote(str(value.run_id))}"
         return _with_launch(rendered, value.launch)
+    if isinstance(value, SubmissionRecoveryValue):
+        record = value.record
+        return {
+            "submission": {
+                "action": value.action,
+                "run_id": str(record.run.id),
+                "state": record.run.state.value,
+                "scheduler_job_ids": list(record.scheduler_job_ids),
+            }
+        }
     if isinstance(value, StatusValue):
         counts = ", ".join(
             f"{state.lower()}={count}"
@@ -654,6 +665,14 @@ def _result_format_version(value: object) -> int:
         return 5 if value.retention is not None else value.record.format_version
     if isinstance(value, StatusValue) and value.preparation is not None:
         return value.format_version
+    if isinstance(value, SubmissionRecoveryValue):
+        record = value.record
+        return (
+            f"Run: {record.run.id}\n"
+            f"Submission: {value.action}\n"
+            f"State: {record.run.state.value}\n"
+            "Scheduler jobs: " + ", ".join(record.scheduler_job_ids)
+        )
     if isinstance(value, StatusValue):
         return value.format_version
     if isinstance(value, WaitValue):

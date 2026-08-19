@@ -111,6 +111,7 @@ from rundra.persistence import (
     RunStore,
     RunStoreConflictError,
     RunStoreError,
+    SubmissionReceiptStore,
     SqliteTaskStore,
     TaskState,
 )
@@ -248,6 +249,20 @@ class PreparationStatusValue:
                 raise ValueError(f"PreparationStatusValue {name} must be safe or None")
         if self.location not in {"local", "target"}:
             raise ValueError("PreparationStatusValue location is unsupported")
+
+
+@dataclass(frozen=True, slots=True)
+class SubmissionRecoveryValue:
+    """Result of safely recovering or finding one scheduler submission."""
+
+    record: RunRecord
+    action: str
+
+    def __post_init__(self) -> None:
+        if type(self.record) is not RunRecord:
+            raise TypeError("Submission recovery requires a RunRecord")
+        if self.action not in {"resumed", "found"}:
+            raise ValueError("Submission recovery action must be resumed or found")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1707,6 +1722,7 @@ def submit_operation(
     confirm_tasks: int | None = None,
     workers: int | None = None,
     task_slots_per_worker: int | None = None,
+    submission_receipts: SubmissionReceiptStore | None = None,
 ) -> OperationResult[RunValue]:
     try:
         _report_progress(
@@ -1887,6 +1903,7 @@ def submit_operation(
             framework_version=version("rundra"),
             provenance=GitProvenanceCapture(),
             progress=progress,
+            submission_receipts=submission_receipts,
         )
         result = service.submit_one(
             RunExecutionRequest(
@@ -1954,6 +1971,46 @@ def submit_operation(
     except PreparationError as error:
         return OperationResult.failure(
             "submit", OperationError("PREPARATION_FAILED", str(error))
+        )
+
+
+def resume_operation(
+    run_id: str,
+    store: RunStore,
+    receipts: SubmissionReceiptStore,
+) -> OperationResult[SubmissionRecoveryValue]:
+    """Recover a completed scheduler receipt without submitting another job."""
+    record, error = _load_record(run_id, store)
+    if error is not None:
+        return OperationResult.failure("resume", error)
+    assert record is not None
+    try:
+        transport, stager, runtime, scheduler = _execution_adapters(record.run.target)
+        service = OrchestrationService(
+            store=store,
+            stager=stager,
+            runtime=runtime,
+            scheduler=scheduler,
+            transport=transport,
+            framework_version=version("rundra"),
+            submission_receipts=receipts,
+        )
+        recovered, action = service.recover_submission(record.run.id)
+        return OperationResult.success(
+            "resume", SubmissionRecoveryValue(recovered, action)
+        )
+    except OrchestrationError as recovery_error:
+        return OperationResult.failure(
+            "resume",
+            OperationError(
+                recovery_error.code,
+                recovery_error.message,
+                {"run_id": str(record.run.id)},
+            ),
+        )
+    except RunStoreError as store_error:
+        return OperationResult.failure(
+            "resume", OperationError("RUN_STORE_ERROR", str(store_error))
         )
 
 

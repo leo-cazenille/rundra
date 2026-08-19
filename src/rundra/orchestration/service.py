@@ -43,6 +43,7 @@ from rundra.orchestration.preparation import (
 from rundra.orchestration.progress import ProgressEvent, ProgressObserver, ProgressPhase
 from rundra.persistence.base import RunStore
 from rundra.persistence.errors import RunStoreError
+from rundra.persistence.submission_store import SubmissionReceiptStore
 from rundra.ports import (
     ArrayScheduler,
     BindMount,
@@ -487,6 +488,7 @@ class OrchestrationService:
         framework_version: str,
         provenance: ProvenanceProvider | None = None,
         progress: ProgressObserver | None = None,
+        submission_receipts: SubmissionReceiptStore | None = None,
     ) -> None:
         for name, value, protocol in (
             ("store", store, RunStore),
@@ -511,6 +513,13 @@ class OrchestrationService:
             )
         if progress is not None and not callable(progress):
             raise TypeError("OrchestrationService progress must be callable")
+        if (
+            submission_receipts is not None
+            and type(submission_receipts) is not SubmissionReceiptStore
+        ):
+            raise TypeError(
+                "submission_receipts must be a SubmissionReceiptStore or None"
+            )
         self.store = store
         self._stager = stager
         self._runtime = runtime
@@ -521,6 +530,7 @@ class OrchestrationService:
         self._framework_version = framework_version
         self._provenance = provenance
         self._progress = progress
+        self._submission_receipts = submission_receipts
 
     def execute_one(self, request: RunExecutionRequest) -> RunExecutionResult:
         """Execute and fetch one planned Task while durably recording each phase."""
@@ -529,6 +539,63 @@ class OrchestrationService:
     def submit_one(self, request: RunExecutionRequest) -> RunExecutionResult:
         """Stage and submit one Task, returning once its reference is durable."""
         return self._execute_one(request, wait=False)
+
+    def recover_submission(self, run_id: RunId) -> tuple[RunRecord, str]:
+        """Adopt a completed receipt or report an already durable submission."""
+        if type(run_id) is not RunId:
+            raise TypeError("recover_submission requires a RunId")
+        if self._submission_receipts is None:
+            raise OrchestrationError(
+                code="SUBMISSION_RECOVERY_UNAVAILABLE",
+                message="Scheduler submission receipts are not configured",
+                run_id=run_id,
+            )
+        with self.store.operation_lock(run_id):
+            record = self.store.load(run_id)
+            if record.scheduler_job_ids:
+                return record, "found"
+            if record.run.state is not ExecutionState.STAGING:
+                raise OrchestrationError(
+                    code="SUBMISSION_NOT_RECOVERABLE",
+                    message=(
+                        f"Run {run_id} is {record.run.state.value}, not an interrupted "
+                        "scheduler submission"
+                    ),
+                    run_id=run_id,
+                )
+            try:
+                receipt = self._submission_receipts.load(run_id)
+            except RunStoreError as error:
+                raise OrchestrationError(
+                    code="SUBMISSION_RECEIPT_NOT_FOUND",
+                    message=str(error),
+                    run_id=run_id,
+                ) from error
+            if not receipt.completed:
+                raise OrchestrationError(
+                    code="SUBMISSION_OUTCOME_UNKNOWN",
+                    message=(
+                        f"Run {run_id} reached the scheduler but has no completed "
+                        "receipt. Rundra will not submit it again; inspect the "
+                        "scheduler before taking manual action."
+                    ),
+                    run_id=run_id,
+                )
+            if receipt.task_ids != tuple(task.id for task in record.run.tasks):
+                raise OrchestrationError(
+                    code="SUBMISSION_RECEIPT_MISMATCH",
+                    message=f"Run {run_id} receipt does not match its persisted Tasks",
+                    run_id=run_id,
+                )
+            updated = replace(
+                _with_execution_state(record, ExecutionState.SUBMITTED),
+                scheduler_job_ids=receipt.scheduler_job_ids,
+                task_scheduler_ids=receipt.task_scheduler_ids or {},
+                submitted_at=receipt.started_at,
+                native_state="SUBMISSION_RESUMED",
+            )
+            self.store.update(updated, expected=record)
+            return updated, "resumed"
 
     def _execute_one(
         self, request: RunExecutionRequest, *, wait: bool
@@ -699,7 +766,56 @@ class OrchestrationService:
                 run_id=run_id,
             ) from error
 
+        worker_limits = tuple(
+            limit
+            for limit in (request.max_concurrent_jobs, request.max_workers)
+            if limit is not None
+        )
+        planned_bundled = request.plan.strategy in {
+            SLURM_ARRAY,
+            SCHEDULER_ARRAY,
+        } and (
+            request.task_slots_per_worker > 1
+            or (worker_limits and len(units) > min(worker_limits))
+        )
+        if planned_bundled:
+            updated = replace(
+                record,
+                scheduler_metadata={
+                    **record.scheduler_metadata,
+                    "bundle_status_root": str(workspace.metadata / "bundle-status"),
+                    "max_concurrent_jobs": request.max_concurrent_jobs or 0,
+                    "max_workers": request.max_workers or 0,
+                    "task_slots_per_worker": request.task_slots_per_worker,
+                    "requested_workers": request.requested_workers or 0,
+                    "requested_task_slots_per_worker": (
+                        request.requested_task_slots_per_worker or 0
+                    ),
+                    "result_shards": request.shard_outputs,
+                    **(
+                        {
+                            "result_shard_root": str(
+                                workspace.outputs / ".rundra-shards"
+                            )
+                        }
+                        if request.shard_outputs
+                        else {}
+                    ),
+                },
+            )
+            self.store.update(updated, expected=record)
+            record = updated
+
         submission_started_at = self._clock()
+        pending_receipt = (
+            self._submission_receipts.begin(
+                run_id,
+                tuple(unit.task_id for unit in units),
+                submission_started_at,
+            )
+            if self._submission_receipts is not None
+            else None
+        )
         try:
             scheduler_group = SchedulerGroup(
                 tuple(
@@ -756,11 +872,29 @@ class OrchestrationService:
                     if preparation_reference is not None
                     else self._scheduler.submit(scheduler_group)
                 )
+            if pending_receipt is not None:
+                self._submission_receipts.complete(
+                    pending_receipt,
+                    tuple(
+                        reference.native_id for reference in submission.references
+                    ),
+                    submission.task_native_ids,
+                    self._clock(),
+                )
             if set(submission.task_native_ids) != {unit.task_id for unit in units}:
                 raise ValueError(
                     "Scheduler submission did not map every planned Task exactly"
                 )
         except Exception as error:
+            if pending_receipt is not None:
+                raise OrchestrationError(
+                    code="SUBMISSION_OUTCOME_UNKNOWN",
+                    message=(
+                        f"Run {run_id} scheduler submission outcome is unknown: "
+                        f"{error}. Retry only with 'rundr resume {run_id}'."
+                    ),
+                    run_id=run_id,
+                ) from error
             self._fail_before_completion(record, "SCHEDULER_SUBMISSION_FAILED")
             raise OrchestrationError(
                 code="SCHEDULER_SUBMISSION_FAILED",

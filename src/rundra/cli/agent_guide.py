@@ -42,6 +42,9 @@ GUIDE = f"""{START_MARKER}
 - Preserve the Run ID and the exact `--data-dir` used at submission. Lifecycle
   commands must use the same Run store. `--last` is convenient interactively,
   but agents should retain explicit Run IDs to avoid selecting concurrent work.
+- Continue an interrupted submit with `rundr resume RUN_ID`. Do not repeat the
+  submission as a new Run until Rundra has resolved the recorded scheduler
+  outcome; an unknown outcome intentionally blocks automatic resubmission.
 - Use `--json` or Rundra MCP tools. Never parse scheduler-native output.
 - Run scientific and analysis workloads on the configured execution target or
   an approved workstation, never on a login/controller host.

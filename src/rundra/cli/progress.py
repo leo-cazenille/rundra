@@ -51,6 +51,7 @@ class CLIProgressReporter:
         progress: bool,
         stream: IO[str],
         tqdm_factory: _TqdmFactory | None = None,
+        announce_run: bool = False,
     ) -> None:
         if type(verbose) is not bool or type(progress) is not bool:
             raise TypeError("CLI progress flags must be booleans")
@@ -60,10 +61,19 @@ class CLIProgressReporter:
         self._factory = tqdm_factory
         self._progress = progress
         self._closed = False
+        self._announce_run = announce_run
+        self._announced_run = False
 
     def __call__(self, event: ProgressEvent) -> None:
         if type(event) is not ProgressEvent:
             raise TypeError("CLIProgressReporter requires a ProgressEvent")
+        if (
+            self._announce_run
+            and not self._announced_run
+            and event.run_id is not None
+        ):
+            print(f"Run registered: {event.run_id}", file=self._stream, flush=True)
+            self._announced_run = True
         bar = self._ensure_bar(event) if self._progress else None
         line = f"[rundr] {event.phase.value}: {event.message}"
         if self._verbose:
@@ -102,12 +112,17 @@ class CLIProgressReporter:
 
 
 def create_progress_reporter(
-    *, verbose: bool, progress: bool, stream: IO[str]
+    *, verbose: bool, progress: bool, stream: IO[str], announce_run: bool = False
 ) -> ProgressObserver | None:
     """Create feedback only when explicitly requested by the caller."""
-    if not verbose and not progress:
+    if not verbose and not progress and not announce_run:
         return None
-    return CLIProgressReporter(verbose=verbose, progress=progress, stream=stream)
+    return CLIProgressReporter(
+        verbose=verbose,
+        progress=progress,
+        stream=stream,
+        announce_run=announce_run,
+    )
 
 
 def close_progress_reporter(observer: ProgressObserver | None) -> None:
