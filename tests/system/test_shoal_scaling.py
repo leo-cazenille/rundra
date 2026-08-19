@@ -72,7 +72,7 @@ def _prepare_scaling_target(
     assert worker_pool["max_workers"] >= 8
     assert worker_pool["max_task_slots_per_worker"] >= 40
     assert execution["max_active_tasks"] >= 320
-    worker_pool["activation_threshold"] = 1
+    worker_pool["activation_threshold"] = 2
     destination.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
     return destination
 
