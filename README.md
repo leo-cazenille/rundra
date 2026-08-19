@@ -132,8 +132,9 @@ Run the required development checks with:
 tools/check.sh
 ```
 
-This is also the push and pull-request quality gate. Packaging is checked
-separately as documented in [Continuous integration](docs/continuous-integration.md).
+This is also the `main`-push and pull-request quality gate. Packaging is
+checked separately as documented in
+[Continuous integration](docs/continuous-integration.md).
 
 Do not install project dependencies globally or use a different package
 manager.

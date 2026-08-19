@@ -1,8 +1,10 @@
 # Continuous integration
 
 Rundra separates deterministic commit gates from infrastructure system tests.
-The `CI` workflow runs on every push and pull request with read-only repository
-permissions. Superseded runs for the same branch are cancelled.
+The `CI` workflow runs on every pull request and every push to `main` with
+read-only repository permissions. Superseded runs for the same branch are
+cancelled. Feature-branch pushes begin validation when their pull request is
+opened, avoiding duplicate push and pull-request checks for the same commit.
 
 ## Required commit checks
 

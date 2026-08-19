@@ -2936,13 +2936,15 @@ They must not run by default in ordinary CI.
 
 ### 42.5 Continuous integration policy
 
-Every pushed commit and pull request runs two infrastructure-free status
-checks. The quality check executes ordinary pytest, Ruff lint and formatting,
-and strict mypy validation. The package check builds the wheel and source
-distribution, audits the public distribution boundary and metadata, installs
-the wheel into a clean Python 3.12 environment, and smoke-tests the installed
-CLI. Release validation reuses these repository commands and adds security,
-dependency, reproducibility, and publication checks.
+Every `main` commit and pull request runs two infrastructure-free status
+checks. Feature-branch pushes are validated through their pull request rather
+than duplicate push and pull-request events. The quality check executes
+ordinary pytest, Ruff lint and formatting, and strict mypy validation. The
+package check builds the wheel and source distribution, audits the public
+distribution boundary and metadata, installs the wheel into a clean Python
+3.12 environment, and smoke-tests the installed CLI. Release validation reuses
+these repository commands and adds security, dependency, reproducibility, and
+publication checks.
 
 The quality gate also runs actionlint across every GitHub Actions definition so
 workflow syntax and expression-context mistakes fail a still-valid commit

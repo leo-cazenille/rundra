@@ -2,7 +2,7 @@
 
 ## Objective
 
-Make every pushed commit and pull request receive fast, infrastructure-free
+Make every `main` commit and pull request receive fast, infrastructure-free
 quality and packaging checks while retaining scheduler-cluster and live-cluster
 tests at appropriate scheduled or explicit opt-in boundaries.
 
@@ -12,8 +12,9 @@ tests at appropriate scheduled or explicit opt-in boundaries.
    strict mypy validation.
 2. Provide one distribution command for privacy auditing, metadata checking,
    clean Python 3.12 installation, and installed-CLI smoke testing.
-3. Run both commands as independent GitHub status checks on pushes and pull
-   requests, cancelling superseded checks for the same branch.
+3. Run both commands as independent GitHub status checks on `main` pushes and
+   pull requests, cancelling superseded checks for the same branch without
+   duplicating feature-branch runs.
 4. Reuse the commands in release validation so release and commit gates cannot
    silently diverge.
 5. Run the Docker OpenPBS lifecycle boundary weekly and on demand, with cached
