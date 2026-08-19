@@ -51,8 +51,8 @@ def test_render_qsub_script_owns_portable_resources_and_logs() -> None:
         log_directory=PurePosixPath("/work/logs"),
     )
 
-    assert "#PBS -l select=1:ncpus=2:mpiprocs=1" in script
-    assert "#PBS -l mem=33mb" in script
+    assert "#PBS -l select=1:ncpus=2:mpiprocs=1:mem=33mb" in script
+    assert "#PBS -l mem=33mb" not in script
     assert "#PBS -l walltime=00:01:01" in script
     assert "${PBS_JOBID}.stdout" in script
     assert "/bin/echo seed=0" in script

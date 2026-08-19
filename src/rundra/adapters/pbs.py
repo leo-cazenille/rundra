@@ -410,11 +410,11 @@ def _directives(
     tasks_per_node = ceil(resources.tasks / resources.nodes)
     ncpus = tasks_per_node * resources.cpus_per_task
     select = f"select={resources.nodes}:ncpus={ncpus}:mpiprocs={tasks_per_node}"
+    if resources.memory_bytes is not None:
+        select += f":mem={ceil(resources.memory_bytes / _MIB)}mb"
     if resources.gpus_per_task:
         select += f":ngpus={tasks_per_node * resources.gpus_per_task}"
     lines = [f"#PBS -N {job_name}", f"#PBS -l {select}"]
-    if resources.memory_bytes is not None:
-        lines.append(f"#PBS -l mem={ceil(resources.memory_bytes / _MIB)}mb")
     if resources.walltime is not None:
         total = ceil(resources.walltime.total_seconds())
         hours, remainder = divmod(total, 3600)
