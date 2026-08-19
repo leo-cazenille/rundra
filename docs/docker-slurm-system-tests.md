@@ -52,3 +52,29 @@ The test is excluded from normal `pytest` runs. GitHub Actions runs it nightly
 and also exposes a manual `docker-slurm-system` workflow. The workflow caches
 the Docker build layers, loads one shared image, and uploads the diagnostic
 bundle for failed runs with a 14-day retention period.
+
+## Privileged cgroup-v2 memory test
+
+The default harness deliberately disables Slurm cgroups so it can run with
+rootless, non-privileged Docker. A separate test validates actual Slurm memory
+enforcement:
+
+```bash
+tools/run_docker_slurm_cgroup_tests.sh
+```
+
+This variant requires Docker to provide a privileged private cgroup-v2
+namespace with a writable `memory` controller. It enables Slurm
+`task/cgroup`, requests 64 MiB for a workload retaining 512 MiB, and requires
+the resulting job state to be `OUT_OF_MEMORY`. It runs a successful control job
+first so startup or scheduling failures cannot be mistaken for enforcement.
+
+The variant uses Slurm's `IgnoreSystemd=yes` development/testing mode. It is
+not a production Slurm deployment example; production cgroup-v2 deployments
+should run `slurmd` from systemd with delegation. The privileged variant is
+manual-only and is intentionally excluded from default and scheduled CI.
+
+Set `RUNDRA_DOCKER_SLURM_CGROUP_DIAGNOSTICS` to preserve diagnostics at a
+specific location when the test fails. The harness reuses
+`RUNDRA_DOCKER_SLURM_IMAGE` when provided and layers `stress-ng` into the local
+`rundra-slurm-cgroup-system:local` image.

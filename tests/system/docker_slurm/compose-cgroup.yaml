@@ -1,0 +1,48 @@
+name: rundra-slurm-cgroup-system
+
+x-cluster-service: &cluster-service
+  image: ${RUNDRA_DOCKER_SLURM_CGROUP_IMAGE:?set RUNDRA_DOCKER_SLURM_CGROUP_IMAGE}
+  platform: linux/amd64
+  security_opt:
+    - seccomp=unconfined
+    - systempaths=unconfined
+  devices:
+    - /dev/fuse:/dev/fuse
+  volumes:
+    - cluster-config:/cluster
+    - cluster-workspace:/workspace
+    - ${RUNDRA_DOCKER_STATE:?set RUNDRA_DOCKER_STATE}:/state
+    - ${RUNDRA_DOCKER_SLURM_CGROUP_SLURM_CONF:?set RUNDRA_DOCKER_SLURM_CGROUP_SLURM_CONF}:/etc/slurm/slurm.conf:ro
+    - ./cgroup-enabled.conf:/etc/slurm/cgroup.conf:ro
+
+services:
+  init:
+    <<: *cluster-service
+    command: init
+
+  controller:
+    <<: *cluster-service
+    hostname: controller
+    command: controller
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    cpus: 0.75
+    mem_limit: 768m
+
+  compute1:
+    <<: *cluster-service
+    hostname: compute1
+    command: compute
+    privileged: true
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      controller:
+        condition: service_started
+    cpus: 2
+    mem_limit: 2g
+
+volumes:
+  cluster-config:
+  cluster-workspace:

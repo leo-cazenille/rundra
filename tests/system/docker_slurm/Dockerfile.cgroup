@@ -1,0 +1,11 @@
+ARG BASE_IMAGE=rundra-slurm-system:local
+FROM ${BASE_IMAGE}
+
+USER root
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends stress-ng \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY cgroup-entrypoint.sh /opt/rundra-cluster/cgroup-entrypoint.sh
+RUN chmod 0755 /opt/rundra-cluster/cgroup-entrypoint.sh
+ENTRYPOINT ["/opt/rundra-cluster/cgroup-entrypoint.sh"]
