@@ -66,7 +66,7 @@ dev = [
     "pip-audit>=2.9,<3",
     "pytest>=8.3",
     "ruff>=0.9",
-    "twine>=6.2,<7",
+    "twine>=6.2,<8",
     "types-pyyaml>=6.0.12",
     "uv-build==0.12.5",
 ]
