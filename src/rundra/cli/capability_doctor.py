@@ -19,13 +19,14 @@ from rundra.adapters.ssh import SSHTransport
 from rundra.cli.doctor import DoctorCheck
 from rundra.cli.doctor import doctor_operation as target_doctor_operation
 from rundra.config.errors import ConfigError
-from rundra.config.targets import load_targets
+from rundra.config.targets import TargetsConfig, load_targets_config
 from rundra.domain.models import (
     Command,
     ResourceRequest,
     Target,
     TaskId,
 )
+from rundra.domain.preparation import PreparationStorageConfig
 from rundra.domain.states import ExecutionState
 from rundra.ports import Scheduler, SchedulerGroup, SchedulerReference, SchedulerUnit
 from rundra.results import OperationError, OperationResult
@@ -88,6 +89,7 @@ def doctor_operation(
     experiment_source: Path | None = None,
     config_source: Path | None = None,
     cache_root: Path | None = None,
+    local_target_access: bool = False,
     agent: str = "generic",
 ) -> OperationResult[DoctorValue]:
     """Audit effective client, target, staging, and optional scheduler access."""
@@ -95,6 +97,8 @@ def doctor_operation(
         return _usage("--probe-timeout must be from 1 to 600")
     if scheduler_probe and not write_probe:
         return _usage("--scheduler-probe requires local write probes")
+    if local_target_access and target_name is None:
+        return _usage("--local-target-access requires a selected target")
     connect = connect or scheduler_probe
     source = targets_file.expanduser().resolve()
     mode = (
@@ -108,9 +112,10 @@ def doctor_operation(
     requirements.append(
         _path_requirement(source, "read", "target definitions", target_config)
     )
+    targets_config: TargetsConfig | None = None
     if target_config.status == "pass":
         try:
-            load_targets(source)
+            targets_config = load_targets_config(source)
             checks.append(
                 DoctorCheck("target_config", "pass", "target configuration is valid")
             )
@@ -162,6 +167,7 @@ def doctor_operation(
         legacy = target_doctor_operation(source, target_name, connect=connect)
         if legacy.ok and legacy.value is not None:
             target = legacy.value.target
+            assert targets_config is not None
             checks.extend(legacy.value.checks)
             connected = connect and any(
                 item.name == "connect" and item.status == "pass"
@@ -169,6 +175,16 @@ def doctor_operation(
             )
             target_requirements = _target_requirements(target, connected)
             requirements.extend(target_requirements)
+            if local_target_access or target.staging.kind == "shared":
+                local_checks, local_requirements = _local_target_access_checks(
+                    target,
+                    targets_config.preparation.get(
+                        target_name, PreparationStorageConfig()
+                    ),
+                    write_probe,
+                )
+                checks.extend(local_checks)
+                requirements.extend(local_requirements)
             if target.transport.kind == "local":
                 workspace = _directory_check(
                     Path(target.workspace), "workspace", write_probe
@@ -367,6 +383,49 @@ def _target_requirements(target: Target, connected: bool) -> list[DoctorRequirem
     return requirements
 
 
+def _local_target_access_checks(
+    target: Target,
+    storage: PreparationStorageConfig,
+    write_probe: bool,
+) -> tuple[list[DoctorCheck], list[DoctorRequirement]]:
+    workspace = Path(target.workspace)
+    cache = Path(
+        storage.cache_root
+        if storage.cache_root is not None
+        else PurePath(target.workspace) / "cache"
+    )
+    checks: list[DoctorCheck] = []
+    requirements: list[DoctorRequirement] = []
+    for name, path, purpose in (
+        (
+            "local_target_workspace",
+            workspace,
+            "access the target workspace from this client",
+        ),
+        (
+            "local_target_preparation_cache",
+            cache,
+            "reuse target preparation artifacts from this client",
+        ),
+    ):
+        check = _directory_check(path, name, write_probe)
+        checks.append(check)
+        requirements.append(_path_requirement(path, "write", purpose, check))
+    for index, raw_path in enumerate(storage.image_search_paths):
+        path = Path(raw_path)
+        check = _read_path_check(path, f"local_target_image_search_path_{index}")
+        checks.append(check)
+        requirements.append(
+            _path_requirement(
+                path,
+                "read",
+                "reuse target-visible images from this client",
+                check,
+            )
+        )
+    return checks, requirements
+
+
 def _transport(target: Target) -> SSHTransport:
     config = target.transport.options.get("config_file")
     return SSHTransport(
@@ -377,6 +436,8 @@ def _transport(target: Target) -> SSHTransport:
 
 
 def _staging_roundtrip(target: Target) -> DoctorCheck:
+    if target.staging.kind == "shared":
+        return _shared_staging_roundtrip(target)
     transport = _transport(target)
     token = uuid.uuid4().hex
     root = PurePath(target.workspace) / f".rundra-doctor-{token}"
@@ -424,6 +485,36 @@ def _staging_roundtrip(target: Target) -> DoctorCheck:
             Command(("sh", "-c", script, "rundr-doctor", str(remote_file), str(root)))
         )
     return DoctorCheck("staging_roundtrip", "pass", "staging round trip succeeded")
+
+
+def _shared_staging_roundtrip(target: Target) -> DoctorCheck:
+    transport = _transport(target)
+    token = uuid.uuid4().hex
+    root = Path(target.workspace) / f".rundra-doctor-{token}"
+    local_file = root / "token"
+    try:
+        root.mkdir(mode=0o700)
+        local_file.write_text(token, encoding="ascii")
+        result = transport.run(Command(("cat", "--", str(local_file))))
+        if result.exit_code != 0 or result.stdout != token:
+            raise OSError("shared readback failed")
+    except OSError:
+        return DoctorCheck(
+            "staging_roundtrip",
+            "fail",
+            "shared staging is not visible from both client and target",
+        )
+    finally:
+        local_file.unlink(missing_ok=True)
+        try:
+            root.rmdir()
+        except OSError:
+            pass
+    return DoctorCheck(
+        "staging_roundtrip",
+        "pass",
+        "shared client-to-target staging round trip succeeded",
+    )
 
 
 def _remote_workspace_requirement(

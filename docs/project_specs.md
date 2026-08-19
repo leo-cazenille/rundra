@@ -1346,6 +1346,15 @@ audit may generate agent-specific configuration text but never applies it,
 reads credential contents into output, fetches sources, pulls images, builds
 applications, or creates a scientific RunRecord.
 
+An SSH target is remote-only unless topology is declared otherwise. Shared
+staging automatically audits client write access to the target workspace and
+preparation cache, read access to explicit target image-search paths, and a
+client-to-controller token round trip through the shared path. Rsync targets
+perform the same local path audit only with `--local-target-access`, intended
+for system tests and clients that separately mount target storage. This avoids
+both silently losing shared-filesystem optimizations under an agent sandbox and
+incorrectly requiring cluster paths on remote laptops.
+
 M12.1 adds an opt-in Docker Compose system boundary with one Slurm controller,
 two compute nodes, SSH/rsync staging, and restricted-capability nested
 Apptainer. It validates 1,000 logical Tasks through bounded worker allocations,

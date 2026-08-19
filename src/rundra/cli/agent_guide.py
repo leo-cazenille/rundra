@@ -22,6 +22,10 @@ GUIDE = f"""{START_MARKER}
   EXPERIMENT` before consuming cluster resources. Use the explicit
   `--scheduler-probe` only when a bounded no-op scheduler submission is wanted.
   Review task count, seeds, resources, concurrency, and retrieval strategy.
+- When the client mounts target storage directly, or before cluster system
+  tests that use target-resident files, add `--local-target-access`. Shared
+  staging enables this audit automatically. Apply the reported workspace,
+  preparation-cache, and image-search-path permissions before continuing.
 - Use explicit seeds for reproducibility. Above a target safety threshold, pass
   the exact requested `--confirm-tasks N` value only after reviewing the plan.
 - Use `rundr help` to discover available operations and the common workflow.

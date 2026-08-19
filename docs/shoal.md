@@ -476,6 +476,8 @@ The scaling suite has an independent opt-in and is never enabled by ordinary
 tests or another Shoal submission flag:
 
 ```bash
+rundr doctor --target shoal --local-target-access --agent codex --json
+
 RUNDRA_SHOAL_TARGETS_FILE=~/.config/rundra/targets.yaml \
 RUNDRA_SHOAL_CPU_IMAGE=/absolute/path/to/cpu-image.sif \
   uv run pytest tests/system/test_shoal_scaling.py \

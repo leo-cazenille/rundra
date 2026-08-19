@@ -10,7 +10,7 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 | `validate` | `EXPERIMENT` | `--json` | Validate experiment YAML without executing. |
 | `plan` | `EXPERIMENT` | `--config`, `--seed`/`--seeds`/`--random-seed`, `--target`, `--targets-file`, `--project-file`, `--profile`, preparation options, `--execution-strategy`, `--retrieval`, `--workers`, `--task-slots-per-worker`, `--json` | Resolve and inspect execution without target contact or state changes. |
 | `targets` | none | `--targets-file`, `--json` | Validate and list configured targets. |
-| `doctor` | optional `EXPERIMENT` | launch path overrides, `--connect`, `--scheduler-probe`, `--probe-timeout`, `--no-write-probe`, `--agent`, `--json` | Audit installation, sandbox paths, target access, reversible staging, and an optional bounded scheduler submission. |
+| `doctor` | optional `EXPERIMENT` | launch path overrides, `--connect`, `--local-target-access`, `--scheduler-probe`, `--probe-timeout`, `--no-write-probe`, `--agent`, `--json` | Audit installation, sandbox paths, target access, reversible staging, and an optional bounded scheduler submission. |
 | `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--workers`, `--task-slots-per-worker`, `--verbose`, `--progress`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
 | `wait` | `RUN_ID` or `--last` | `--timeout`, `--poll-interval`, `--data-dir`, `--verbose`, `--progress`, `--json` | Reconcile until terminal or a renewable timeout. |
 | `agent-guide` | none | `--write PATH`, `--check PATH`, `--json` | Print, install, or check portable agent instructions. |
@@ -33,6 +33,14 @@ timeout. `--no-write-probe` leaves write capabilities untested and cannot be
 combined with `--scheduler-probe`. Doctor JSON version 2 distinguishes `ready`
 from complete requested verification and can generate, but never apply, a
 Codex permission profile.
+
+`--local-target-access` requires a selected target and audits the target
+workspace, target preparation cache, and configured target image-search paths
+from the client. Use it for cluster system tests and when an SSH target's
+filesystem is also mounted on the client. Shared staging implies this audit;
+ordinary rsync targets do not, so remote-only laptops are not required to see
+cluster paths locally. A failed required local probe makes `ready` false and
+the generated Codex profile includes the missing paths.
 | `status` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Reconcile scheduler state and return portable Run/Task status. |
 | `tasks` | `RUN_ID` or `--last` | `--offset`, `--limit`, `--data-dir`, `--json` | Return one bounded page from materialized Run tasks or a compact version-4 TaskSpace sidecar. |
 | `list` | none | `--data-dir`, `--json` | List persisted Runs in deterministic order. |

@@ -140,6 +140,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--scheduler-probe", action="store_true")
     doctor.add_argument("--probe-timeout", type=int, default=120)
     doctor.add_argument("--no-write-probe", action="store_true")
+    doctor.add_argument("--local-target-access", action="store_true")
     doctor.add_argument("--agent", choices=("generic", "codex"), default="generic")
     _add_json_option(doctor)
 
@@ -552,6 +553,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 data_dir=arguments.data_dir,
                 destination=arguments.destination,
                 source_root=arguments.source_root,
+                local_target_access=arguments.local_target_access,
                 agent=arguments.agent,
             )
         else:
@@ -590,6 +592,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                             str(resolved_doctor.value.preparation_storage.cache_root)
                         )
                     ),
+                    local_target_access=arguments.local_target_access,
                     agent=arguments.agent,
                 )
     elif arguments.command == "run":
