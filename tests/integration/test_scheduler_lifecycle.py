@@ -147,6 +147,17 @@ class PreparedLifecycleScheduler:
         return (_observation(ExecutionState.CANCELLED, "CANCELLED"),)
 
 
+@dataclass
+class PreparationRaceScheduler(PreparedLifecycleScheduler):
+    def cancel(
+        self, references: tuple[SchedulerReference, ...]
+    ) -> tuple[SchedulerObservation, ...]:
+        self.cancelled.append(references)
+        if references == (SchedulerReference("900"),):
+            return (self.preparation_observation,)
+        return (_observation(ExecutionState.CANCELLED, "CANCELLED"),)
+
+
 class LogTransport:
     def __init__(self) -> None:
         self.calls: list[Command] = []
@@ -169,6 +180,23 @@ class PreparationManifestTransport(LogTransport):
             if path.endswith("preparation-actions.tsv")
             else f"{'12' * 32}\t1\texamples/model\n"
         )
+        return CommandResult(command, 0, content, "", _CREATED, _CREATED)
+
+
+class V6PreparationManifestTransport(LogTransport):
+    def run(self, command: Command) -> CommandResult:
+        self.calls.append(command)
+        path = str(command.argv[-1])
+        if path.endswith("preparation-actions.tsv"):
+            content = "image_action\tbuild_definition_image\nbuild_action\tnone\n"
+        elif path.endswith("preparation-outputs.tsv"):
+            content = ""
+        elif path.endswith("preparation-image.tsv"):
+            content = f"{'34' * 32}\t/remote/work/cache/images/final.sif\n"
+        elif path.endswith("preparation-build.txt"):
+            content = f"{'56' * 32}\n"
+        else:
+            return CommandResult(command, 1, "", "missing", _CREATED, _CREATED)
         return CommandResult(command, 0, content, "", _CREATED, _CREATED)
 
 
@@ -237,6 +265,32 @@ def _prepared_record() -> RunRecord:
                 PurePosixPath("/remote/logs/900.stdout"),
                 PurePosixPath("/remote/logs/900.stderr"),
             ),
+        ),
+    )
+
+
+def _pending_v6_prepared_record() -> RunRecord:
+    record = _prepared_record()
+    preparation = record.preparation
+    assert preparation is not None
+    image = PurePosixPath("/remote/work/cache/images/final.sif")
+    assert record.experiment.container is not None
+    return replace(
+        record,
+        format_version=6,
+        experiment=replace(
+            record.experiment,
+            container=replace(record.experiment.container, image=image),
+        ),
+        retrieval_destination=PurePosixPath("/retrieved"),
+        fetch_mode="auto",
+        container_digest=None,
+        preparation=replace(
+            preparation,
+            image_sha256=None,
+            image_path=image,
+            image_recipe_key="12" * 32,
+            build_cache_key=None,
         ),
     )
 
@@ -463,6 +517,38 @@ def test_queued_preparation_persists_as_submitted(tmp_path) -> None:
     assert refreshed.preparation.builder_state == "PENDING"
 
 
+def test_v6_completed_preparation_atomically_persists_verified_image(
+    tmp_path: Path,
+) -> None:
+    record = _pending_v6_prepared_record()
+    store = JsonRunStore(tmp_path / "records")
+    store.create(record)
+    scheduler = PreparedLifecycleScheduler(
+        SchedulerObservation(
+            SchedulerReference("900"), ExecutionState.SUCCEEDED, "COMPLETED"
+        ),
+        _observation(ExecutionState.SUCCEEDED, "COMPLETED", exit_code=0),
+    )
+
+    refreshed = SchedulerLifecycleService(
+        store=store,
+        scheduler=scheduler,
+        transport=V6PreparationManifestTransport(),
+    ).refresh(record)
+
+    assert refreshed.preparation is not None
+    assert refreshed.preparation.builder_status == "SUCCEEDED"
+    assert refreshed.preparation.image_sha256 == "34" * 32
+    assert refreshed.preparation.image_path == PurePosixPath(
+        "/remote/work/cache/images/final.sif"
+    )
+    assert refreshed.preparation.build_cache_key == "56" * 32
+    assert refreshed.container_digest == "34" * 32
+    assert refreshed.experiment.container is not None
+    assert refreshed.experiment.container.image == refreshed.preparation.image_path
+    assert refreshed.run.state is ExecutionState.SUCCEEDED
+
+
 def test_status_accepts_preparation_without_scientific_identities(tmp_path) -> None:
     record = replace(_prepared_record(), scheduler_job_ids=(), task_scheduler_ids={})
     store = JsonRunStore(tmp_path / "records")
@@ -546,6 +632,31 @@ def test_cancel_covers_preparation_and_dependent_scientific_job(tmp_path) -> Non
         (SchedulerReference("900"),),
         (_REFERENCE,),
     ]
+
+
+def test_cancel_reconciles_preparation_that_completed_during_cancellation(
+    tmp_path: Path,
+) -> None:
+    record = _pending_v6_prepared_record()
+    store = JsonRunStore(tmp_path / "records")
+    store.create(record)
+    completed = SchedulerObservation(
+        SchedulerReference("900"), ExecutionState.SUCCEEDED, "COMPLETED"
+    )
+    scheduler = PreparationRaceScheduler(
+        completed,
+        _observation(ExecutionState.CANCELLED, "CANCELLED"),
+    )
+
+    cancelled = SchedulerLifecycleService(
+        store=store,
+        scheduler=scheduler,
+        transport=V6PreparationManifestTransport(),
+    ).cancel(record)
+
+    assert cancelled.preparation is not None
+    assert cancelled.preparation.image_sha256 == "34" * 32
+    assert cancelled.container_digest == "34" * 32
 
 
 def test_cancel_closes_interrupted_preparation_only_run(tmp_path) -> None:

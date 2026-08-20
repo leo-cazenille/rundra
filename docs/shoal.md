@@ -55,6 +55,7 @@ files. The target name defaults to `shoal` and can be overridden when needed:
 | disconnected lifecycle and cancellation | `--run-shoal-lifecycle-test` | three bounded CPU jobs |
 | three-seed Pogosim array | `--run-shoal-pogosim-test` | yes |
 | two-node Python multiprocessing | `--run-shoal-multiprocessing-test` | yes |
+| cold/warm prepared submission | `--run-shoal-prepared-submission-test` | yes |
 
 Passing only a resource-specific switch is insufficient; the general switch is
 always required. Run one bounded module at a time and inspect its plan/preflight
@@ -535,6 +536,24 @@ RUNDRA_SHOAL_CPU_IMAGE=/absolute/path/to/python-capable-cpu-image.sif \
 The test process and analysis run on bigfish. `fishvision` remains limited to
 SSH, staging, retrieval, and Slurm control operations; all Python computation
 runs inside the two Slurm allocations.
+
+For a release-sized preparation check, a separate one-Task test forces one
+definition-image cache miss, verifies the scheduled build and its final image
+digest, submits the scientific Task on a Shoal compute node, reads an automatic
+shared-filesystem reference through `rundra.artifacts.open_result_set`, and then
+repeats the submission to prove that no second image build is scheduled:
+
+```bash
+RUNDRA_SHOAL_TARGETS_FILE=~/.config/rundra/targets.yaml \
+  uv run pytest tests/system/test_shoal_prepared_submission.py \
+    -m 'shoal_system and shoal_prepared_submission' \
+    --run-shoal-system-tests \
+    --run-shoal-prepared-submission-test \
+    -vv
+```
+
+This gate reserves at most one two-CPU preparation allocation and one four-CPU
+scientific allocation at a time. It is skipped by every ordinary test run.
 
 ## Production PyPI package acceptance
 

@@ -44,6 +44,7 @@ from rundra.orchestration.planner import create_plan, create_sweep_plan
 from rundra.orchestration.preparation import (
     RemotePreparationSpec,
     build_remote_preparation_command,
+    read_remote_preparation_result,
 )
 from rundra.orchestration.progress import ProgressEvent, ProgressObserver, ProgressPhase
 from rundra.orchestration.shards import read_verified_shard_index
@@ -102,6 +103,20 @@ def _preparation_status(state: ExecutionState) -> str:
         ExecutionState.SUBMITTED.value
         if state is ExecutionState.QUEUED
         else state.value
+    )
+
+
+def _record_workspace(record: RunRecord) -> StagedWorkspace:
+    root = record.run.target.workspace / "runs" / str(record.run.id)
+    return StagedWorkspace(
+        root=root,
+        source=root / "source",
+        inputs=root / "input",
+        config=root / "input/config.yaml",
+        runtime=root / "runtime",
+        outputs=root / "output",
+        logs=root / "logs",
+        metadata=root / "metadata",
     )
 
 
@@ -250,6 +265,58 @@ class SchedulerLifecycleService:
             self._scheduler.query((reference,)),
             reference,
         )
+        if (
+            observation.state is ExecutionState.SUCCEEDED
+            and record.format_version == 6
+            and preparation.image_sha256 is None
+        ):
+            if self._transport is None:
+                raise OrchestrationError(
+                    code="PREPARATION_PROVENANCE_UNAVAILABLE",
+                    message=(
+                        f"Run {record.run.id} requires transport access to finalize "
+                        "preparation provenance"
+                    ),
+                    run_id=record.run.id,
+                )
+            workspace = _record_workspace(record)
+            result = read_remote_preparation_result(self._transport, workspace)
+            if result is None:
+                return record
+            if result.image_sha256 is None or result.image_path is None:
+                raise OrchestrationError(
+                    code="PREPARATION_PROVENANCE_INVALID",
+                    message=(
+                        f"Run {record.run.id} completed preparation without a "
+                        "verified image identity"
+                    ),
+                    run_id=record.run.id,
+                )
+            if result.image_path != preparation.image_path:
+                raise OrchestrationError(
+                    code="PREPARATION_PROVENANCE_INVALID",
+                    message=(
+                        f"Run {record.run.id} preparation image path does not match "
+                        "its immutable definition"
+                    ),
+                    run_id=record.run.id,
+                )
+            updated = replace(
+                record,
+                container_digest=result.image_sha256,
+                preparation=replace(
+                    preparation,
+                    image_sha256=result.image_sha256,
+                    image_action=result.image_action,
+                    build_cache_key=result.build_key,
+                    build_action=result.build_action,
+                    build_outputs=result.outputs,
+                    builder_status=ExecutionState.SUCCEEDED.value,
+                    builder_state=observation.native_state,
+                ),
+            )
+            self._store.update(updated, expected=record)
+            return updated
         updated = replace(
             record,
             preparation=replace(
@@ -416,6 +483,8 @@ class SchedulerLifecycleService:
                 message=f"Run {record.run.id} preparation cancellation failed: {error}",
                 run_id=record.run.id,
             ) from error
+        if observation.state is ExecutionState.SUCCEEDED:
+            return self._refresh_preparation(record)
         updated = replace(
             record,
             preparation=replace(

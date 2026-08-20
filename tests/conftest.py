@@ -70,6 +70,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="enable the two-node Shoal Python multiprocessing test",
     )
+    parser.addoption(
+        "--run-shoal-prepared-submission-test",
+        action="store_true",
+        default=False,
+        help="enable the bounded cold/warm prepared submission test on Shoal",
+    )
 
 
 def pytest_collection_modifyitems(
@@ -87,6 +93,9 @@ def pytest_collection_modifyitems(
     run_pogosim = bool(config.getoption("--run-shoal-pogosim-test"))
     run_scaling = bool(config.getoption("--run-shoal-scaling-tests"))
     run_multiprocessing = bool(config.getoption("--run-shoal-multiprocessing-test"))
+    run_prepared_submission = bool(
+        config.getoption("--run-shoal-prepared-submission-test")
+    )
     skip_system = pytest.mark.skip(
         reason="requires the explicit --run-shoal-system-tests opt-in"
     )
@@ -120,6 +129,9 @@ def pytest_collection_modifyitems(
     skip_multiprocessing = pytest.mark.skip(
         reason="requires both Shoal system and multiprocessing opt-ins"
     )
+    skip_prepared_submission = pytest.mark.skip(
+        reason="requires both Shoal system and prepared-submission opt-ins"
+    )
     for item in items:
         if "docker_pbs" in item.keywords and not run_docker_pbs:
             item.add_marker(skip_docker_pbs)
@@ -131,6 +143,10 @@ def pytest_collection_modifyitems(
             run_system and run_multiprocessing
         ):
             item.add_marker(skip_multiprocessing)
+        elif "shoal_prepared_submission" in item.keywords and not (
+            run_system and run_prepared_submission
+        ):
+            item.add_marker(skip_prepared_submission)
         elif "shoal_pogosim" in item.keywords and not (run_system and run_pogosim):
             item.add_marker(skip_pogosim)
         elif "shoal_lifecycle" in item.keywords and not (run_system and run_lifecycle):
