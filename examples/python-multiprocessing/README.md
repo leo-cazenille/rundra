@@ -28,6 +28,10 @@ cache, and reuses it on later runs. The target must also permit two workers,
 ten Task slots per worker, 40 active Tasks, and at least 256 MiB per logical
 Task. Then run:
 
+The adjacent project uses schema version 4. Its definition context is explicit
+and empty because `python.def` needs no additional build inputs; unrelated
+working-tree changes therefore do not invalidate the SIF cache.
+
 Use `--prepare-location target` only when the target policy allows it and the
 compute nodes can reach the definition's base-image registry. Rundra submits a
 bounded scheduler preparation job and waits for its verified SIF before
@@ -42,6 +46,18 @@ uv run examples/python-multiprocessing/analyze.py \
   --input examples/python-multiprocessing/retrieved/shoal \
   --output examples/python-multiprocessing/derived/shoal-summary.json
 ```
+
+For a checked long, large-scale profile, plan and submit with:
+
+```bash
+uv run rundr plan examples/python-multiprocessing/prepared/experiment.yaml \
+  --profile shoal-scale-long --seeds 0:9999
+uv run rundr submit examples/python-multiprocessing/prepared/experiment.yaml \
+  --profile shoal-scale-long --seeds 0:9999 --confirm-tasks 10000 --json
+```
+
+The analyzer accepts either extracted `result.json` files or Rundra's verified
+uncompressed result shards directly. It never silently combines both forms.
 
 Each logical Task requests four CPUs and starts four processes. Rundra's Shoal
 profile independently creates two Slurm workers with ten Task slots each. Each
