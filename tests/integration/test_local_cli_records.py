@@ -141,7 +141,7 @@ def test_local_run_persists_native_runtime_provenance(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr or result.stdout
     record = JsonRunStore(data_dir).list()[0]
-    assert record.format_version == 5
+    assert record.format_version == 6
     assert record.run_kind == "materialized"
     assert record.retrieval_destination == tmp_path / "retrieved"
     assert record.scheduler_metadata["container_runtime"] == "native"

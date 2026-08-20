@@ -9,7 +9,7 @@ from rundra.cli.main import main
 from rundra.persistence import JsonRunStore
 
 
-def test_one_command_local_prepared_run_persists_v2_provenance(
+def test_one_command_local_prepared_run_persists_v6_provenance(
     tmp_path: Path,
     monkeypatch: object,
     capsys: object,
@@ -112,12 +112,12 @@ targets:
     document = json.loads(captured.out)
 
     assert exit_code == 0, document
-    assert document["format_version"] == 5
+    assert document["format_version"] == 6
     assert document["run"]["state"] == "SUCCEEDED"
     output = json.loads((destination / "result.json").read_text(encoding="utf-8"))
     assert output == {"config": "value: 4\n", "seed": 7}
     record = JsonRunStore(records).list()[0]
-    assert record.format_version == 5
+    assert record.format_version == 6
     assert record.retrieval_destination == destination
     assert record.container_digest == digest
     assert record.preparation is not None
