@@ -21,6 +21,7 @@ from rundra.security import is_credential_field
 
 _PROJECT_V1_FIELDS = frozenset({"version", "default_profile", "defaults", "profiles"})
 _PROJECT_V2_FIELDS = _PROJECT_V1_FIELDS | {"preparation"}
+_PROJECT_V3_FIELDS = _PROJECT_V2_FIELDS
 _LAUNCH_VALUE_FIELDS = frozenset(
     {
         "config",
@@ -109,8 +110,8 @@ class ProjectLaunchConfig:
     def __post_init__(self) -> None:
         if type(self.version) is not int:
             raise ValueError("ProjectLaunchConfig version must be an int")
-        if self.version not in (1, 2):
-            raise ValueError("ProjectLaunchConfig version must be 1 or 2")
+        if self.version not in (1, 2, 3):
+            raise ValueError("ProjectLaunchConfig version must be 1, 2, or 3")
         if not isinstance(self.source, Path) or not self.source.is_absolute():
             raise ValueError("ProjectLaunchConfig source must be an absolute Path")
         if type(self.defaults) is not LaunchValues:
@@ -133,8 +134,8 @@ class ProjectLaunchConfig:
                 raise ValueError("ProjectLaunchConfig default profile is invalid")
         if self.version == 1 and self.preparation is not None:
             raise ValueError("ProjectLaunchConfig v1 cannot define preparation")
-        if self.version == 2 and type(self.preparation) is not PreparationConfig:
-            raise ValueError("ProjectLaunchConfig v2 requires preparation")
+        if self.version in {2, 3} and type(self.preparation) is not PreparationConfig:
+            raise ValueError("ProjectLaunchConfig v2+ requires preparation")
         object.__setattr__(self, "profiles", MappingProxyType(profiles))
 
     @property
@@ -220,18 +221,24 @@ def load_project_launch(source: Path) -> ProjectLaunchConfig:
         path=("version",),
         minimum=1,
     )
-    if version not in {1, 2}:
+    if version not in {1, 2, 3}:
         fail(
             source=normalized_source,
             path=("version",),
             code="UNSUPPORTED_VERSION",
             message=(
-                "Unsupported project config version; supported versions are 1 and 2"
+                "Unsupported project config version; supported versions are 1, 2, and 3"
             ),
         )
     check_fields(
         document,
-        allowed=_PROJECT_V1_FIELDS if version == 1 else _PROJECT_V2_FIELDS,
+        allowed=(
+            _PROJECT_V1_FIELDS
+            if version == 1
+            else _PROJECT_V2_FIELDS
+            if version == 2
+            else _PROJECT_V3_FIELDS
+        ),
         required=(
             frozenset({"version"})
             if version == 1
@@ -287,8 +294,9 @@ def load_project_launch(source: Path) -> ProjectLaunchConfig:
         parse_preparation(
             document["preparation"],
             source=normalized_source,
+            version=version,
         )
-        if version_number == 2
+        if version_number in {2, 3}
         else None
     )
     return ProjectLaunchConfig(

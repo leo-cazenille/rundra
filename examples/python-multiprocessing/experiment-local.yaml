@@ -6,6 +6,10 @@ experiment:
 command:
   argv: [python3, main.py, --config, "{config}", --seed, "{seed}"]
 
+container:
+  image: python-multiprocessing.sif
+  gpu: false
+
 resources:
   nodes: 1
   tasks: 1

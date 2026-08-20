@@ -7,7 +7,7 @@ command:
   argv: [python3, main.py, --config, "{config}", --seed, "{seed}"]
 
 container:
-  image: /absolute/path/to/python-capable-cpu-image.sif
+  image: python-multiprocessing.sif
   gpu: false
 
 resources:

@@ -19,11 +19,15 @@ from typing import BinaryIO
 
 from rundra.domain.models import Command, ContainerSpec, ExperimentSpec, Target
 from rundra.domain.preparation import (
+    DefinitionBuildPolicy,
+    PreparationImage,
+    PreparationImageDefinition,
     PreparationOutput,
     PreparationPlan,
     PreparationRecord,
     PreparedOutput,
     build_cache_key,
+    definition_image_recipe_key,
     source_recipe_identity,
 )
 from rundra.ports import StagedWorkspace, Transport
@@ -51,6 +55,17 @@ class PreparedSource:
     digest: str
     action: str
     identity: str
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedImage:
+    """One verified immutable image and its measured identity."""
+
+    path: Path
+    sha256: str
+    uri: str
+    action: str
+    logs: tuple[PurePath, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +138,7 @@ def remote_platform_fingerprint(transport: Transport) -> str:
 def remote_preparation_index_key(
     plan: PreparationPlan, target: Target, platform_fingerprint: str
 ) -> str:
+    image = _prebuilt_image(plan)
     build = plan.recipe.build
     if build is None:
         raise PreparationError("Remote preparation index requires a build recipe")
@@ -139,7 +155,7 @@ def remote_preparation_index_key(
     scope = target.name if build.cache_scope == "target" else platform_fingerprint
     return build_cache_key(
         source_digest=identity_digest,
-        image_digest=plan.recipe.image.sha256,
+        image_digest=image.sha256,
         build=build,
         builder_scope=scope,
         platform_fingerprint=platform_fingerprint,
@@ -157,6 +173,7 @@ def probe_remote_preparation_cache(
     """Validate one exact pinned-source target cache entry without local source."""
     if plan.source_mode != "git" or plan.rebuild or plan.recipe.build is None:
         return None
+    image_recipe = _prebuilt_image(plan)
     fingerprint = remote_platform_fingerprint(transport)
     root = target.workspace / "cache" if cache_root is None else cache_root
     index_key = remote_preparation_index_key(plan, target, fingerprint)
@@ -192,7 +209,7 @@ def probe_remote_preparation_cache(
     scope = target.name if build.cache_scope == "target" else fingerprint
     expected_key = build_cache_key(
         source_digest=source_digest,
-        image_digest=plan.recipe.image.sha256,
+        image_digest=image_recipe.sha256,
         build=build,
         builder_scope=scope,
         platform_fingerprint=fingerprint,
@@ -201,7 +218,7 @@ def probe_remote_preparation_cache(
         raise PreparationError("Target preparation index build key mismatch")
     entry = root / "builds" / build_key
     prepared_source = entry / "source"
-    image = root / "images" / f"{plan.recipe.image.sha256}.sif"
+    image = root / "images" / f"{image_recipe.sha256}.sif"
     for command, message in (
         (Command(("test", "-f", str(entry / ".complete"))), "build cache incomplete"),
         (Command(("test", "-d", str(prepared_source))), "prepared source missing"),
@@ -242,7 +259,7 @@ def probe_remote_preparation_cache(
     if (
         image_result.exit_code != 0
         or not image_fields
-        or image_fields[0] != plan.recipe.image.sha256
+        or image_fields[0] != image_recipe.sha256
     ):
         raise PreparationError("Target cached image digest mismatch")
     if experiment.container is None:
@@ -251,8 +268,8 @@ def probe_remote_preparation_cache(
         source_identity=source_recipe_identity(plan.recipe.source),
         source_digest=source_digest,
         source_action="reuse_target_source_cache",
-        image_uri=plan.recipe.image.uri,
-        image_sha256=plan.recipe.image.sha256,
+        image_uri=image_recipe.uri,
+        image_sha256=image_recipe.sha256,
         image_path=image,
         image_action="reuse_image_cache",
         resolution_location="target",
@@ -270,6 +287,15 @@ def _is_sha256(value: str) -> bool:
     )
 
 
+def _prebuilt_image(plan: PreparationPlan) -> PreparationImage:
+    image = plan.recipe.image
+    if type(image) is not PreparationImage:
+        raise PreparationError(
+            "Legacy remote preparation requires a pinned prebuilt image"
+        )
+    return image
+
+
 def create_remote_preparation_spec(
     plan: PreparationPlan,
     source: PreparedSource,
@@ -281,12 +307,13 @@ def create_remote_preparation_spec(
 ) -> RemotePreparationSpec:
     """Create deterministic target preparation identities before submission."""
     build = plan.recipe.build
+    image = _prebuilt_image(plan)
     key = None
     if build is not None:
         scope = target.name if build.cache_scope == "target" else platform_fingerprint
         key = build_cache_key(
             source_digest=source.digest,
-            image_digest=plan.recipe.image.sha256,
+            image_digest=image.sha256,
             build=build,
             builder_scope=scope,
             platform_fingerprint=platform_fingerprint,
@@ -317,17 +344,18 @@ def remote_preparation_record(
     target: Target,
 ) -> PreparationRecord:
     """Create pre-submission target preparation provenance."""
+    recipe = _prebuilt_image(spec.plan)
     image = (
         (spec.target_cache_root or PurePath(str(target.workspace)) / "cache")
         / "images"
-        / (f"{spec.plan.recipe.image.sha256}.sif")
+        / (f"{recipe.sha256}.sif")
     )
     return PreparationRecord(
         source_identity=spec.source_identity,
         source_digest=spec.source_digest,
         source_action=spec.source_action,
-        image_uri=spec.plan.recipe.image.uri,
-        image_sha256=spec.plan.recipe.image.sha256,
+        image_uri=recipe.uri,
+        image_sha256=recipe.sha256,
         image_path=image,
         image_action="resolve_in_preparation_job",
         resolution_location="target",
@@ -343,9 +371,10 @@ def build_remote_preparation_command(
     """Render one bounded target job that verifies, builds, and publishes caches."""
     plan = spec.plan
     recipe = plan.recipe
+    image_recipe = _prebuilt_image(plan)
     target_cache = spec.target_cache_root or workspace.root.parent.parent / "cache"
-    image = target_cache / "images" / f"{recipe.image.sha256}.sif"
-    image_lock = target_cache / "locks" / f"image-{recipe.image.sha256}.lock"
+    image = target_cache / "images" / f"{image_recipe.sha256}.sif"
+    image_lock = target_cache / "locks" / f"image-{image_recipe.sha256}.lock"
     lines = [
         "set -eu",
         "umask 077",
@@ -364,17 +393,17 @@ def build_remote_preparation_command(
         "trap 'rmdir -- \"$image_lock\" 2>/dev/null || :' EXIT HUP INT TERM",
         'if [ -f "$image" ]; then',
         "  actual=$(sha256sum -- \"$image\" | cut -d' ' -f1)",
-        f"  [ \"$actual\" = {shlex.quote(recipe.image.sha256)} ] || {{ printf '%s\\n' 'cached image digest mismatch' >&2; exit 65; }}",
+        f"  [ \"$actual\" = {shlex.quote(image_recipe.sha256)} ] || {{ printf '%s\\n' 'cached image digest mismatch' >&2; exit 65; }}",
         "else",
     ]
     for search_root in spec.image_search_paths:
-        candidate = search_root / recipe.image.name
+        candidate = search_root / image_recipe.name
         lines.extend(
             (
                 f"  candidate={shlex.quote(str(candidate))}",
                 '  if [ -f "$candidate" ] && [ ! -L "$candidate" ]; then',
                 "    actual=$(sha256sum -- \"$candidate\" | cut -d' ' -f1)",
-                f'    if [ "$actual" = {shlex.quote(recipe.image.sha256)} ]; then',
+                f'    if [ "$actual" = {shlex.quote(image_recipe.sha256)} ]; then',
                 '      image_tmp=$(mktemp "$cache/images/.candidate.XXXXXX")',
                 '      cp -- "$candidate" "$image_tmp"',
                 '      chmod a-w -- "$image_tmp"',
@@ -395,9 +424,9 @@ def build_remote_preparation_command(
                 '  image_tmp_dir=$(mktemp -d "$cache/images/.pull.XXXXXX")',
                 '  image_tmp="$image_tmp_dir/image.sif"',
                 '  trap \'rm -rf -- "$image_tmp_dir"; rmdir -- "$image_lock" 2>/dev/null || :\' EXIT HUP INT TERM',
-                f'  apptainer pull --disable-cache "$image_tmp" {shlex.quote(recipe.image.uri)}',
+                f'  apptainer pull --disable-cache "$image_tmp" {shlex.quote(image_recipe.uri)}',
                 "  actual=$(sha256sum -- \"$image_tmp\" | cut -d' ' -f1)",
-                f"  [ \"$actual\" = {shlex.quote(recipe.image.sha256)} ] || {{ printf '%s\\n' 'pulled image digest mismatch' >&2; exit 65; }}",
+                f"  [ \"$actual\" = {shlex.quote(image_recipe.sha256)} ] || {{ printf '%s\\n' 'pulled image digest mismatch' >&2; exit 65; }}",
                 '  chmod a-w -- "$image_tmp"',
                 '  mv -- "$image_tmp" "$image"',
                 '  rmdir -- "$image_tmp_dir"',
@@ -604,6 +633,7 @@ def prepare_local(
     source_root: Path,
     cache_root: Path | None = None,
     image_search_paths: tuple[Path, ...] = (),
+    definition_build: DefinitionBuildPolicy | None = None,
     apptainer_executable: str = "apptainer",
 ) -> PreparedApplication:
     """Resolve and build one project recipe in local immutable caches."""
@@ -629,13 +659,16 @@ def prepare_local(
         cache_root=root,
         excludes=experiment.sync_excludes,
     )
-    image, image_action = _resolve_image(
+    image = _resolve_image(
         plan,
+        snapshot=snapshot,
+        source_digest=source_digest,
         project_root=project_root.expanduser().resolve(),
         cache_root=root,
         target=target,
         apptainer_executable=apptainer_executable,
         image_search_paths=image_search_paths,
+        definition_build=definition_build,
     )
     prepared_source = snapshot
     key: str | None = None
@@ -647,7 +680,8 @@ def prepare_local(
             plan,
             snapshot=snapshot,
             source_digest=source_digest,
-            image=image,
+            image=image.path,
+            image_digest=image.sha256,
             cache_root=root,
             target=target,
             apptainer_executable=apptainer_executable,
@@ -663,7 +697,7 @@ def prepare_local(
             working_directory=experiment.command.working_directory,
         ),
         resources=experiment.resources,
-        container=ContainerSpec(image=image, gpu=experiment.container.gpu),
+        container=ContainerSpec(image=image.path, gpu=experiment.container.gpu),
         outputs=experiment.outputs,
         sync_excludes=experiment.sync_excludes,
     )
@@ -675,16 +709,16 @@ def prepare_local(
         ),
         source_digest=source_digest,
         source_action=source_action,
-        image_uri=plan.recipe.image.uri,
-        image_sha256=plan.recipe.image.sha256,
-        image_path=image,
-        image_action=image_action,
+        image_uri=image.uri,
+        image_sha256=image.sha256,
+        image_path=image.path,
+        image_action=image.action,
         resolution_location="local",
         build_cache_key=key,
         builder_location="local" if key is not None else None,
         build_action=build_action,
         build_outputs=outputs,
-        logs=logs,
+        logs=(*image.logs, *logs),
     )
     return PreparedApplication(prepared_source, effective_experiment, record)
 
@@ -721,6 +755,8 @@ def _resolve_source(
 
 def _checkout_git(plan: PreparationPlan, destination: Path, cache_root: Path) -> None:
     recipe = plan.recipe.source
+    if not hasattr(recipe, "revision") or not hasattr(recipe, "url"):
+        raise PreparationError("Working-tree source cannot be acquired through Git")
     repositories = cache_root / "git"
     repositories.mkdir(parents=True, exist_ok=True)
     repository = repositories / source_recipe_identity(recipe)
@@ -802,13 +838,29 @@ def _git_has_commit(repository: Path, revision: str) -> bool:
 def _resolve_image(
     plan: PreparationPlan,
     *,
+    snapshot: Path,
+    source_digest: str,
     project_root: Path,
     cache_root: Path,
     target: Target,
     apptainer_executable: str,
     image_search_paths: tuple[Path, ...],
-) -> tuple[Path, str]:
+    definition_build: DefinitionBuildPolicy | None,
+) -> ResolvedImage:
     recipe = plan.recipe.image
+    if type(recipe) is PreparationImageDefinition:
+        return _resolve_definition_image(
+            plan,
+            recipe=recipe,
+            snapshot=snapshot,
+            source_digest=source_digest,
+            cache_root=cache_root,
+            target=target,
+            apptainer_executable=apptainer_executable,
+            policy=definition_build,
+        )
+    if type(recipe) is not PreparationImage:
+        raise PreparationError("Unsupported preparation image recipe")
     images = cache_root / "images"
     images.mkdir(parents=True, exist_ok=True)
     cached = images / f"{recipe.sha256}.sif"
@@ -826,8 +878,10 @@ def _resolve_image(
                 with _lock(cache_root / "locks" / f"image-{recipe.sha256}.lock"):
                     if not cached.exists():
                         _publish_file(candidate, cached)
-            return (
+            return ResolvedImage(
                 cached,
+                recipe.sha256,
+                recipe.uri,
                 "reuse_image_cache"
                 if candidate == cached
                 else "cache_verified_candidate",
@@ -840,7 +894,7 @@ def _resolve_image(
         if cached.is_file():
             if _file_digest(cached) != recipe.sha256:
                 raise PreparationError(f"Image cache entry has wrong digest: {cached}")
-            return cached, "reuse_image_cache"
+            return ResolvedImage(cached, recipe.sha256, recipe.uri, "reuse_image_cache")
         with tempfile.TemporaryDirectory(prefix="rundra-image-", dir=cache_root) as raw:
             pulled = Path(raw) / requested
             _run(
@@ -859,7 +913,157 @@ def _resolve_image(
                     f"Pulled image digest mismatch: expected {recipe.sha256}, got {actual}"
                 )
             _publish_file(pulled, cached)
-    return cached, "pull_image"
+    return ResolvedImage(cached, recipe.sha256, recipe.uri, "pull_image")
+
+
+def _resolve_definition_image(
+    plan: PreparationPlan,
+    *,
+    recipe: PreparationImageDefinition,
+    snapshot: Path,
+    source_digest: str,
+    cache_root: Path,
+    target: Target,
+    apptainer_executable: str,
+    policy: DefinitionBuildPolicy | None,
+) -> ResolvedImage:
+    if policy is None:
+        raise PreparationError(
+            "Definition image builds require target preparation.definition_build policy"
+        )
+    if "local" not in policy.allowed_locations:
+        raise PreparationError("Target policy does not allow local definition builds")
+    _validate_definition_resources(recipe, policy)
+    definition = snapshot / recipe.path
+    if definition.is_symlink() or not definition.is_file():
+        raise PreparationError(f"Definition file is missing: {recipe.path}")
+    builder_version = _builder_version(apptainer_executable)
+    fingerprint = _platform_fingerprint()
+    key = definition_image_recipe_key(
+        source_digest=source_digest,
+        image=recipe,
+        target_name=target.name,
+        mode=policy.mode,
+        platform_fingerprint=fingerprint,
+        builder_version=builder_version,
+    )
+    indexes = cache_root / "image-definitions"
+    images = cache_root / "images"
+    indexes.mkdir(parents=True, exist_ok=True)
+    images.mkdir(parents=True, exist_ok=True)
+    index = indexes / f"{key}.json"
+    stdout_path = indexes / f"{key}.stdout"
+    stderr_path = indexes / f"{key}.stderr"
+    with _lock(cache_root / "locks" / f"definition-{key}.lock"):
+        if index.is_file() and not plan.rebuild_image:
+            try:
+                document = json.loads(index.read_text(encoding="utf-8"))
+                digest = document["sha256"]
+            except (OSError, KeyError, TypeError, json.JSONDecodeError) as error:
+                raise PreparationError(
+                    f"Definition image cache index is invalid: {index}"
+                ) from error
+            cached = images / f"{digest}.sif"
+            if (
+                cached.is_file()
+                and not cached.is_symlink()
+                and _file_digest(cached) == digest
+            ):
+                return ResolvedImage(
+                    cached,
+                    digest,
+                    f"definition:{recipe.path}",
+                    "reuse_definition_image_cache",
+                    (stdout_path, stderr_path),
+                )
+        if plan.offline:
+            raise PreparationError(
+                "Definition image is absent from the cache in offline mode"
+            )
+        with tempfile.TemporaryDirectory(
+            prefix="rundra-definition-", dir=cache_root
+        ) as raw:
+            built = Path(raw) / str(recipe.name)
+            argv = [apptainer_executable, "build", "--disable-cache"]
+            if policy.mode == "fakeroot":
+                argv.append("--fakeroot")
+            argv.extend((str(built), str(definition)))
+            completed = subprocess.run(
+                tuple(argv),
+                cwd=snapshot,
+                check=False,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                shell=False,
+            )
+            stdout_path.write_text(completed.stdout, encoding="utf-8")
+            stderr_path.write_text(completed.stderr, encoding="utf-8")
+            if completed.returncode != 0:
+                raise PreparationError(
+                    "Definition image build failed with exit code "
+                    f"{completed.returncode}; logs: {stdout_path}, {stderr_path}"
+                )
+            if built.is_symlink() or not built.is_file():
+                raise PreparationError("Definition image build produced no SIF file")
+            digest = _file_digest(built)
+            cached = images / f"{digest}.sif"
+            if not cached.exists():
+                _publish_file(built, cached)
+            temporary_index = indexes / f".{key}.{os.getpid()}.tmp"
+            temporary_index.write_text(
+                json.dumps(
+                    {
+                        "builder_version": builder_version,
+                        "recipe_key": key,
+                        "sha256": digest,
+                        "version": 1,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            temporary_index.chmod(0o444)
+            os.replace(temporary_index, index)
+    return ResolvedImage(
+        cached,
+        digest,
+        f"definition:{recipe.path}",
+        "build_definition_image",
+        (stdout_path, stderr_path),
+    )
+
+
+def _validate_definition_resources(
+    recipe: PreparationImageDefinition, policy: DefinitionBuildPolicy
+) -> None:
+    requested = recipe.resources
+    maximum = policy.max_resources
+    if requested.cpus_per_task > maximum.cpus_per_task:
+        raise PreparationError("Definition build CPU request exceeds target policy")
+    assert requested.memory_bytes is not None and maximum.memory_bytes is not None
+    if requested.memory_bytes > maximum.memory_bytes:
+        raise PreparationError("Definition build memory request exceeds target policy")
+    assert requested.walltime is not None and maximum.walltime is not None
+    if requested.walltime > maximum.walltime:
+        raise PreparationError("Definition build walltime exceeds target policy")
+
+
+def _builder_version(executable: str) -> str:
+    completed = subprocess.run(
+        (executable, "version"),
+        check=False,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        shell=False,
+    )
+    value = completed.stdout.strip() or completed.stderr.strip()
+    if completed.returncode != 0 or not value:
+        raise PreparationError(f"Could not determine {executable} builder version")
+    return value
 
 
 def _resolve_build(
@@ -868,6 +1072,7 @@ def _resolve_build(
     snapshot: Path,
     source_digest: str,
     image: Path,
+    image_digest: str,
     cache_root: Path,
     target: Target,
     apptainer_executable: str,
@@ -884,7 +1089,7 @@ def _resolve_build(
     scope = target.name if build.cache_scope == "target" else fingerprint
     key = build_cache_key(
         source_digest=source_digest,
-        image_digest=plan.recipe.image.sha256,
+        image_digest=image_digest,
         build=build,
         builder_scope=scope,
         platform_fingerprint=fingerprint,

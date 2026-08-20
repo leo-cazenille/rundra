@@ -1498,6 +1498,28 @@ state and scheduler identity remain separate from scientific Task identities.
 After a synchronous prepared run, the version-2 record finalizes whether the
 target image was pulled, copied from a verified candidate, or reused and
 whether compiled outputs were built or reused.
+
+Project schema version 3 extends preparation without changing the portable
+experiment schema. Its `source` selects either pinned `git` or an explicit empty
+`working_tree` recipe. Its `image` selects either `prebuilt` with the existing
+URI and SHA-256 identity or `definition` with a safe snapshot-relative `.def`
+path and bounded CPU, memory, and walltime. Arbitrary definition files are
+trusted project input; external base tags may be mutable, so Rundra records and
+caches the measured SIF digest but cannot claim cold-build reproducibility
+unless the definition itself pins its base identity.
+
+Targets schema version 8 may authorize definition builds with
+`preparation.definition_build`. The target owner selects allowed `local` and/or
+`target` locations, `unprivileged` or `fakeroot` mode, and hard resource
+ceilings. Project files cannot select privilege. In `auto` mode for an SSH
+target, Rundra prefers a local content-addressed build followed by verified
+atomic publication to the target image cache. Local builds execute
+`apptainer build` as an argument array against the immutable source snapshot,
+never the developer tree. The definition recipe key includes source content,
+definition path, target, platform, builder version, mode, and resources; the
+published image cache is keyed by its measured SHA-256. `--rebuild-image`
+bypasses only the recipe index. `--offline` permits only an existing verified
+definition-image cache hit.
 For pinned Git sources, successful target preparation also publishes an
 immutable recipe index. A later warm `run` or `submit` validates the index,
 platform fingerprint, image digest, build marker, and every declared output on

@@ -88,8 +88,10 @@ execution:
   max_concurrent_jobs: 128
 ```
 
-Prepared project-v2 operations accept `--prepare-location auto|local|target`,
-`--rebuild`, and `--offline`. `plan` additionally accepts `--source-root` to
+Prepared project-v2/v3 operations accept `--prepare-location auto|local|target`,
+`--rebuild`, `--rebuild-image`, and `--offline`. `--rebuild` bypasses only the
+compiled-application cache; `--rebuild-image` bypasses only the definition-image
+cache. `plan` additionally accepts `--source-root` to
 describe mutable-working-tree mode; it snapshots nothing and does not probe
 caches. On `run` and `submit`, an explicit `--source-root` selects that mode,
 while omission uses the recipe's pinned Git commit.

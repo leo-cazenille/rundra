@@ -7,7 +7,13 @@ import pytest
 
 from rundra.config.errors import ConfigError
 from rundra.config.launch import load_project_launch
-from rundra.domain.preparation import build_cache_key, source_recipe_identity
+from rundra.domain.preparation import (
+    PreparationImageDefinition,
+    PreparationSourceWorkingTree,
+    build_cache_key,
+    definition_image_recipe_key,
+    source_recipe_identity,
+)
 
 _REVISION = "0123456789abcdef0123456789abcdef01234567"
 _DIGEST = "ab" * 32
@@ -137,3 +143,95 @@ def test_preparation_identities_and_build_keys_are_deterministic(
     assert len(identity) == 64
     assert first == second
     assert len(first) == 64
+
+
+def test_project_v3_loads_working_tree_definition_recipe(tmp_path: Path) -> None:
+    source = tmp_path / "rundra.yaml"
+    source.write_text(
+        """\
+version: 3
+preparation:
+  source:
+    working_tree: {}
+  image:
+    name: python.sif
+    definition:
+      path: containers/python.def
+      resources:
+        cpus_per_task: 2
+        memory: 2GiB
+        walltime: "00:15:00"
+""",
+        encoding="utf-8",
+    )
+
+    project = load_project_launch(source)
+
+    assert project.version == 3
+    assert project.preparation is not None
+    assert type(project.preparation.source) is PreparationSourceWorkingTree
+    assert type(project.preparation.image) is PreparationImageDefinition
+    assert project.preparation.image.path.as_posix() == "containers/python.def"
+    assert project.preparation.image.resources.memory_bytes == 2 * 1024**3
+
+
+def test_project_v3_definition_key_is_deterministic(tmp_path: Path) -> None:
+    source = tmp_path / "rundra.yaml"
+    source.write_text(
+        """\
+version: 3
+preparation:
+  source: {working_tree: {}}
+  image:
+    name: python.sif
+    definition:
+      path: python.def
+      resources: {cpus_per_task: 1, memory: 1GiB, walltime: "00:05:00"}
+""",
+        encoding="utf-8",
+    )
+    recipe = load_project_launch(source).preparation
+    assert recipe is not None and type(recipe.image) is PreparationImageDefinition
+
+    first = definition_image_recipe_key(
+        source_digest="12" * 32,
+        image=recipe.image,
+        target_name="local",
+        mode="fakeroot",
+        platform_fingerprint="linux-amd64",
+        builder_version="apptainer 1.4.0",
+    )
+    second = definition_image_recipe_key(
+        source_digest="12" * 32,
+        image=recipe.image,
+        target_name="local",
+        mode="fakeroot",
+        platform_fingerprint="linux-amd64",
+        builder_version="apptainer 1.4.0",
+    )
+
+    assert first == second
+    assert len(first) == 64
+
+
+def test_project_v3_rejects_unsafe_definition_path(tmp_path: Path) -> None:
+    source = tmp_path / "rundra.yaml"
+    source.write_text(
+        """\
+version: 3
+preparation:
+  source: {working_tree: {}}
+  image:
+    name: python.sif
+    definition:
+      path: ../python.def
+      resources: {cpus_per_task: 1, memory: 1GiB, walltime: "00:05:00"}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        load_project_launch(source)
+
+    assert caught.value.code == "INVALID_VALUE"
+    assert caught.value.path == ("preparation", "image", "definition", "path")

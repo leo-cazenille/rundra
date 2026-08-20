@@ -6,13 +6,15 @@ Rundra Task. The children evaluate disjoint intervals of the midpoint rule for
 
 ## Local run
 
-Use the checked local target directly, or install it as your user target:
+The checked target permits bounded fakeroot definition builds. Rundra builds
+`python.def` once and reuses the content-addressed SIF on later runs:
 
 ```bash
 uv run rundr plan examples/python-multiprocessing/experiment-local.yaml \
-  --targets-file examples/minimal/targets.yaml --seed 17
+  --targets-file examples/python-multiprocessing/targets-local.yaml --seed 17
 uv run rundr run examples/python-multiprocessing/experiment-local.yaml \
-  --targets-file examples/minimal/targets.yaml --seed 17 --progress
+  --targets-file examples/python-multiprocessing/targets-local.yaml \
+  --seed 17 --progress
 uv run examples/python-multiprocessing/analyze.py \
   --input examples/python-multiprocessing/retrieved/local \
   --output examples/python-multiprocessing/derived/local-summary.json
@@ -20,8 +22,10 @@ uv run examples/python-multiprocessing/analyze.py \
 
 ## Shoal run
 
-Set `container.image` in `experiment-shoal.yaml` to an absolute,
-Python-capable CPU SIF. The configured `shoal` target must permit two workers,
+The configured `shoal` target must use targets schema version 8 and permit local
+definition builds in `preparation.definition_build`. In `auto` mode Rundra
+builds the SIF on the client, publishes it by measured SHA-256 to the target
+cache, and reuses it on later runs. The target must also permit two workers,
 ten Task slots per worker, 40 active Tasks, and at least 256 MiB per logical
 Task. Then run:
 

@@ -57,8 +57,10 @@ from rundra.domain.parameters import ParameterSet
 from rundra.domain.preparation import (
     PREPARE_LOCATIONS,
     PreparationConfig,
+    PreparationImageDefinition,
     PreparationPlan,
     PreparationRecord,
+    PreparationSourceWorkingTree,
     PreparationStorageConfig,
 )
 from rundra.domain.purge import (
@@ -523,6 +525,7 @@ class ResolvedRunInputs:
     mutable_source: bool = False
     prepare_location: str = "auto"
     rebuild: bool = False
+    rebuild_image: bool = False
     offline: bool = False
     preparation_storage: PreparationStorageConfig = PreparationStorageConfig()
     sweep: SweepExpansion | None = None
@@ -563,6 +566,7 @@ class ResolvedRunInputs:
             self.mutable_source,
             self.prepare_location,
             self.rebuild,
+            self.rebuild_image,
             self.offline,
         )
 
@@ -570,9 +574,18 @@ class ResolvedRunInputs:
     def preparation_plan(self) -> PreparationPlan | None:
         return _preparation_plan(
             self.preparation,
-            source_root=self.source_root if self.mutable_source else None,
+            source_root=(
+                self.source_root
+                if self.mutable_source
+                or (
+                    self.preparation is not None
+                    and type(self.preparation.source) is PreparationSourceWorkingTree
+                )
+                else None
+            ),
             location=self.prepare_location,
             rebuild=self.rebuild,
+            rebuild_image=self.rebuild_image,
             offline=self.offline,
         )
 
@@ -635,6 +648,7 @@ class ResolvedPlanInputs:
     source_root: Path | None = None
     prepare_location: str = "auto"
     rebuild: bool = False
+    rebuild_image: bool = False
     offline: bool = False
     sweep: SweepExpansion | None = None
     workers: int | None = None
@@ -666,6 +680,7 @@ class ResolvedPlanInputs:
             self.source_root is not None,
             self.prepare_location,
             self.rebuild,
+            self.rebuild_image,
             self.offline,
         )
 
@@ -676,6 +691,7 @@ class ResolvedPlanInputs:
             source_root=self.source_root,
             location=self.prepare_location,
             rebuild=self.rebuild,
+            rebuild_image=self.rebuild_image,
             offline=self.offline,
         )
 
@@ -723,6 +739,7 @@ def _validate_preparation_inputs(
     mutable_source: bool,
     location: str,
     rebuild: bool,
+    rebuild_image: bool,
     offline: bool,
 ) -> None:
     if preparation is not None and type(preparation) is not PreparationConfig:
@@ -731,7 +748,7 @@ def _validate_preparation_inputs(
         raise TypeError("mutable_source must be a boolean")
     if location not in PREPARE_LOCATIONS:
         raise ValueError("prepare_location must be auto, local, or target")
-    if type(rebuild) is not bool or type(offline) is not bool:
+    if any(type(value) is not bool for value in (rebuild, rebuild_image, offline)):
         raise TypeError("preparation flags must be booleans")
 
 
@@ -741,18 +758,29 @@ def _preparation_plan(
     source_root: Path | None,
     location: str,
     rebuild: bool,
+    rebuild_image: bool,
     offline: bool,
 ) -> PreparationPlan | None:
     if recipe is None:
         return None
+    recipe_working_tree = type(recipe.source) is PreparationSourceWorkingTree
+    source_mode = (
+        "working_tree" if source_root is not None or recipe_working_tree else "git"
+    )
     actions = [
-        "snapshot_working_tree" if source_root is not None else "reuse_source_snapshot",
+        "snapshot_working_tree"
+        if source_mode == "working_tree"
+        else "reuse_source_snapshot",
         "use_verified_image_candidate",
         "reuse_image_cache",
     ]
-    if source_root is None and not offline:
+    if source_mode == "git" and not offline:
         actions.append("fetch_git_commit")
-    if not offline:
+    if type(recipe.image) is PreparationImageDefinition:
+        if not rebuild_image:
+            actions.append("reuse_definition_image_cache")
+        actions.append("build_definition_image")
+    elif not offline:
         actions.extend(("transfer_verified_image", "pull_image"))
     if recipe.build is not None:
         if not rebuild:
@@ -760,10 +788,11 @@ def _preparation_plan(
         actions.append("build_application")
     return PreparationPlan(
         recipe=recipe,
-        source_mode="working_tree" if source_root is not None else "git",
+        source_mode=source_mode,
         source_root=source_root,
         requested_location=location,
         rebuild=rebuild,
+        rebuild_image=rebuild_image,
         offline=offline,
         possible_actions=tuple(actions),
     )
@@ -965,6 +994,7 @@ def resolve_plan_inputs_operation(
     source_root: Path | None = None,
     prepare_location: str = "auto",
     rebuild: bool = False,
+    rebuild_image: bool = False,
     offline: bool = False,
     workers: int | None = None,
     task_slots_per_worker: int | None = None,
@@ -997,7 +1027,7 @@ def resolve_plan_inputs_operation(
                 not fully_explicit
                 or project_file is not None
                 or profile is not None
-                or (discovered_project is not None and discovered_project.version == 2)
+                or (discovered_project is not None and discovered_project.version >= 2)
             )
             else None
         )
@@ -1106,6 +1136,7 @@ def resolve_plan_inputs_operation(
             source_root=source_root,
             prepare_location=prepare_location,
             rebuild=rebuild,
+            rebuild_image=rebuild_image,
             offline=offline,
             sweep=sweep,
             workers=values.workers,
@@ -1133,6 +1164,7 @@ def resolve_run_inputs_operation(
     operation: str = "run",
     prepare_location: str = "auto",
     rebuild: bool = False,
+    rebuild_image: bool = False,
     offline: bool = False,
     workers: int | None = None,
     task_slots_per_worker: int | None = None,
@@ -1173,7 +1205,7 @@ def resolve_run_inputs_operation(
                 not fully_explicit
                 or project_file is not None
                 or profile is not None
-                or (discovered_project is not None and discovered_project.version == 2)
+                or (discovered_project is not None and discovered_project.version >= 2)
             )
             else None
         )
@@ -1306,6 +1338,7 @@ def resolve_run_inputs_operation(
             mutable_source=source_root is not None,
             prepare_location=prepare_location,
             rebuild=rebuild,
+            rebuild_image=rebuild_image,
             offline=offline,
             preparation_storage=(
                 user.preparation if user is not None else PreparationStorageConfig()
@@ -1410,18 +1443,19 @@ def _local_remote_preparation_inputs(
         image_search_paths=tuple(
             Path(str(path)) for path in local_storage.image_search_paths
         ),
+        definition_build=target_storage.definition_build,
     )
     target_cache = (
         target.workspace / "cache"
         if target_storage.cache_root is None
         else target_storage.cache_root
     )
-    target_image = target_cache / "images" / f"{plan.recipe.image.sha256}.sif"
+    target_image = target_cache / "images" / f"{prepared.record.image_sha256}.sif"
     try:
         image_action = stager.publish_verified_file(
             Path(str(prepared.record.image_path)),
             target_image,
-            plan.recipe.image.sha256,
+            prepared.record.image_sha256,
         )
     except RsyncUploadError as error:
         raise PreparationError(str(error)) from error
@@ -1541,12 +1575,16 @@ def run_operation(
                             *preparation_storage.image_search_paths,
                         )
                     ),
+                    definition_build=target_storage.definition_build,
                 )
                 effective_experiment = prepared.experiment
                 effective_source_root = prepared.source_root
                 preparation_record = prepared.record
             else:
-                if preparation.requested_location == "local":
+                if preparation.requested_location == "local" or (
+                    type(preparation.recipe.image) is PreparationImageDefinition
+                    and preparation.requested_location == "auto"
+                ):
                     (
                         effective_source_root,
                         effective_experiment,
@@ -1835,7 +1873,10 @@ def submit_operation(
                         {"target": target.name},
                     ),
                 )
-            if preparation.requested_location == "local":
+            if preparation.requested_location == "local" or (
+                type(preparation.recipe.image) is PreparationImageDefinition
+                and preparation.requested_location == "auto"
+            ):
                 (
                     effective_source_root,
                     effective_experiment,

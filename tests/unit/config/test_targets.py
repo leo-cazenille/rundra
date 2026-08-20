@@ -83,6 +83,60 @@ targets:
     )
 
 
+def test_version_eight_loads_definition_build_policy(tmp_path: Path) -> None:
+    from rundra.config.targets import load_targets_config
+
+    source = tmp_path / "targets.yaml"
+    source.write_text(
+        """\
+version: 8
+targets:
+  local:
+    transport: {type: local}
+    scheduler: {type: local}
+    staging: {type: local}
+    container: {type: apptainer}
+    workspace: /tmp/rundra
+    preparation:
+      definition_build:
+        allowed_locations: [local]
+        mode: fakeroot
+        max_resources:
+          cpus_per_task: 4
+          memory: 8GiB
+          walltime: "01:00:00"
+    execution:
+      hard_task_limit: 1000
+      confirmation_threshold: 100
+      max_active_tasks: 40
+      max_concurrent_jobs: 16
+      max_array_size: 100
+      output_shard_tasks: 100
+      automatic_retrieval_threshold: 100
+      max_memory_per_worker: 8GiB
+      worker_pool:
+        activation_threshold: 100
+        max_workers: 4
+        default_workers: 1
+        tasks_per_lease: 10
+        default_task_slots_per_worker: 1
+        max_task_slots_per_worker: 4
+        infrastructure_retry_limit: 1
+        requeue_limit: 2
+""",
+        encoding="utf-8",
+    )
+
+    config = load_targets_config(source)
+    policy = config.preparation["local"].definition_build
+
+    assert config.version == 8
+    assert policy is not None
+    assert policy.allowed_locations == ("local",)
+    assert policy.mode == "fakeroot"
+    assert policy.max_resources.memory_bytes == 8 * 1024**3
+
+
 def test_version_three_target_requires_explicit_execution_policy(
     tmp_path: Path,
 ) -> None:
@@ -181,7 +235,7 @@ targets:
 @pytest.mark.parametrize(
     "content, code, path",
     [
-        ("version: 8\ntargets: {}\n", "UNSUPPORTED_VERSION", ("version",)),
+        ("version: 9\ntargets: {}\n", "UNSUPPORTED_VERSION", ("version",)),
         ("version: 1\n", "MISSING_FIELD", ("targets",)),
         (
             "version: 1\ntargets: []\n",

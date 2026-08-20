@@ -29,7 +29,13 @@ from rundra.cli.operations import (
     WaitValue,
 )
 from rundra.domain.models import Artifact, Command, ResourceRequest, Target, Task
-from rundra.domain.preparation import PreparationPlan, source_recipe_identity
+from rundra.domain.preparation import (
+    PreparationImage,
+    PreparationImageDefinition,
+    PreparationPlan,
+    PreparationSourceGit,
+    source_recipe_identity,
+)
 from rundra.domain.states import ExecutionState, RetrievalState
 from rundra.orchestration.models import ExecutionPlan, ExecutionUnit
 from rundra.persistence import receipt_document, record_to_dict
@@ -68,9 +74,9 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
             "schema_version": value.experiment.version,
             "source": str(value.source),
         }
-        if value.project is not None and value.project.version == 2:
+        if value.project is not None and value.project.version >= 2:
             document["project"] = {
-                "schema_version": 2,
+                "schema_version": value.project.version,
                 "source": str(value.project.source),
                 "preparation": "validated",
             }
@@ -327,12 +333,20 @@ def render_human(result: OperationResult[Any]) -> str:
             rendered = f"{rendered}\nArray mapping: {mapping}"
         if plan.preparation is not None:
             preparation = plan.preparation
+            image = preparation.recipe.image
+            image_identity = (
+                f"sha256:{image.sha256}"
+                if type(image) is PreparationImage
+                else f"definition:{image.path}"
+                if type(image) is PreparationImageDefinition
+                else "unsupported"
+            )
             rendered += (
                 "\nPreparation: "
-                f"{preparation.source_mode}, image sha256:"
-                f"{preparation.recipe.image.sha256}, "
+                f"{preparation.source_mode}, image {image_identity}, "
                 f"location={preparation.requested_location}, "
-                f"offline={preparation.offline}, rebuild={preparation.rebuild}"
+                f"offline={preparation.offline}, rebuild={preparation.rebuild}, "
+                f"rebuild_image={preparation.rebuild_image}"
             )
         return _with_launch(rendered, value.launch)
     if isinstance(value, TargetsValue):
@@ -645,21 +659,39 @@ def _plan_document(plan: ExecutionPlan) -> dict[str, Any]:
 def _preparation_document(plan: PreparationPlan) -> dict[str, Any]:
     recipe = plan.recipe
     build = recipe.build
+    source = recipe.source
+    image = recipe.image
     return {
         "source": {
             "mode": plan.source_mode,
             "root": None if plan.source_root is None else str(plan.source_root),
-            "git": {
-                "url": recipe.source.url,
-                "revision": recipe.source.revision,
-                "recipe_identity": source_recipe_identity(recipe.source),
-            },
+            "git": (
+                {
+                    "url": source.url,
+                    "revision": source.revision,
+                    "recipe_identity": source_recipe_identity(source),
+                }
+                if type(source) is PreparationSourceGit
+                else None
+            ),
         },
-        "image": {
-            "name": str(recipe.image.name),
-            "uri": recipe.image.uri,
-            "sha256": recipe.image.sha256,
-        },
+        "image": (
+            {
+                "kind": "prebuilt",
+                "name": str(image.name),
+                "uri": image.uri,
+                "sha256": image.sha256,
+            }
+            if type(image) is PreparationImage
+            else {
+                "kind": "definition",
+                "name": str(image.name),
+                "path": str(image.path),
+                "resources": _resources_document(image.resources),
+            }
+            if type(image) is PreparationImageDefinition
+            else {"kind": "unsupported", "name": str(image.name)}
+        ),
         "build": (
             None
             if build is None
@@ -677,6 +709,7 @@ def _preparation_document(plan: PreparationPlan) -> dict[str, Any]:
             "requested_location": plan.requested_location,
             "offline": plan.offline,
             "rebuild": plan.rebuild,
+            "rebuild_image": plan.rebuild_image,
             "possible_actions": list(plan.possible_actions),
             "cache_hits_known": False,
         },

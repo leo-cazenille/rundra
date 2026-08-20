@@ -4,6 +4,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
+from datetime import timedelta
 from pathlib import Path, PurePath
 from types import MappingProxyType
 
@@ -16,8 +17,8 @@ from rundra.config._schema import (
     fail,
 )
 from rundra.config._yaml import read_yaml_document
-from rundra.domain.models import BackendConfig, NativeValue, Target
-from rundra.domain.preparation import PreparationStorageConfig
+from rundra.domain.models import BackendConfig, NativeValue, ResourceRequest, Target
+from rundra.domain.preparation import DefinitionBuildPolicy, PreparationStorageConfig
 from rundra.domain.scaling import (
     DEFAULT_MAX_CONCURRENT_JOBS,
     ExecutionPolicy,
@@ -34,7 +35,9 @@ _TARGET_V4_FIELDS = _TARGET_V3_FIELDS
 _TARGET_V5_FIELDS = _TARGET_V4_FIELDS
 _TARGET_V6_FIELDS = _TARGET_V5_FIELDS
 _TARGET_V7_FIELDS = _TARGET_V6_FIELDS
+_TARGET_V8_FIELDS = _TARGET_V7_FIELDS
 _MEMORY_PATTERN = re.compile(r"([1-9][0-9]*)(B|KiB|MiB|GiB|TiB)\Z")
+_WALLTIME_PATTERN = re.compile(r"([0-9]{2,}):([0-5][0-9]):([0-5][0-9])\Z")
 _MEMORY_FACTORS = {
     "B": 1,
     "KiB": 1024,
@@ -68,8 +71,8 @@ class TargetsConfig:
     execution: Mapping[str, ExecutionPolicy] = dataclass_field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.version not in {1, 2, 3, 4, 5, 6, 7}:
-            raise ValueError("TargetsConfig version must be 1 through 7")
+        if self.version not in {1, 2, 3, 4, 5, 6, 7, 8}:
+            raise ValueError("TargetsConfig version must be 1 through 8")
         object.__setattr__(self, "targets", MappingProxyType(dict(self.targets)))
         object.__setattr__(
             self, "preparation", MappingProxyType(dict(self.preparation))
@@ -95,12 +98,12 @@ def load_targets_config(source: Path) -> TargetsConfig:
     version = expect_integer(
         document["version"], source=source, path=("version",), minimum=1
     )
-    if version not in {1, 2, 3, 4, 5, 6, 7}:
+    if version not in {1, 2, 3, 4, 5, 6, 7, 8}:
         fail(
             source=source,
             path=("version",),
             code="UNSUPPORTED_VERSION",
-            message=("Unsupported targets version; supported versions are 1 through 7"),
+            message=("Unsupported targets version; supported versions are 1 through 8"),
         )
     raw_targets = expect_mapping(document["targets"], source=source, path=("targets",))
     targets: dict[str, Target] = {}
@@ -130,7 +133,11 @@ def load_targets_config(source: Path) -> TargetsConfig:
                                 else (
                                     _TARGET_V6_FIELDS
                                     if version == 6
-                                    else _TARGET_V7_FIELDS
+                                    else (
+                                        _TARGET_V7_FIELDS
+                                        if version == 7
+                                        else _TARGET_V8_FIELDS
+                                    )
                                 )
                             )
                         )
@@ -196,7 +203,10 @@ def load_targets_config(source: Path) -> TargetsConfig:
         targets[name] = target
         if "preparation" in section:
             preparation[name] = _preparation_storage(
-                section["preparation"], source, (*path, "preparation")
+                section["preparation"],
+                source,
+                (*path, "preparation"),
+                version=version,
             )
         if "execution" in section:
             execution[name] = _execution_policy(
@@ -392,11 +402,17 @@ def _preparation_storage(
     value: object,
     source: Path,
     path: tuple[str, ...],
+    *,
+    version: int,
 ) -> PreparationStorageConfig:
     section = expect_mapping(value, source=source, path=path)
     check_fields(
         section,
-        allowed=frozenset({"cache_root", "image_search_paths"}),
+        allowed=(
+            frozenset({"cache_root", "image_search_paths", "definition_build"})
+            if version >= 8
+            else frozenset({"cache_root", "image_search_paths"})
+        ),
         required=frozenset(),
         source=source,
         path=path,
@@ -439,7 +455,92 @@ def _preparation_storage(
             )
         )
     )
-    return PreparationStorageConfig(cache_root, search_paths)
+    definition_build = None
+    if "definition_build" in section:
+        policy_path = (*path, "definition_build")
+        policy = expect_mapping(
+            section["definition_build"], source=source, path=policy_path
+        )
+        check_fields(
+            policy,
+            allowed=frozenset({"allowed_locations", "mode", "max_resources"}),
+            required=frozenset({"allowed_locations", "mode", "max_resources"}),
+            source=source,
+            path=policy_path,
+        )
+        resources_path = (*policy_path, "max_resources")
+        resources = expect_mapping(
+            policy["max_resources"], source=source, path=resources_path
+        )
+        resource_fields = frozenset({"cpus_per_task", "memory", "walltime"})
+        check_fields(
+            resources,
+            allowed=resource_fields,
+            required=resource_fields,
+            source=source,
+            path=resources_path,
+        )
+        walltime_text = expect_string(
+            resources["walltime"],
+            source=source,
+            path=(*resources_path, "walltime"),
+            nonblank=True,
+        )
+        walltime_match = _WALLTIME_PATTERN.fullmatch(walltime_text)
+        if walltime_match is None:
+            fail(
+                source=source,
+                path=(*resources_path, "walltime"),
+                code="INVALID_VALUE",
+                message=(
+                    "Walltime must use HH:MM:SS with two-digit minutes and seconds"
+                ),
+            )
+        hours, minutes, seconds = (int(part) for part in walltime_match.groups())
+        walltime = timedelta(hours=hours, minutes=minutes, seconds=seconds)
+        if walltime <= timedelta(0):
+            fail(
+                source=source,
+                path=(*resources_path, "walltime"),
+                code="INVALID_VALUE",
+                message="Walltime must be positive",
+            )
+        try:
+            definition_build = DefinitionBuildPolicy(
+                allowed_locations=tuple(
+                    expect_string_list(
+                        policy["allowed_locations"],
+                        source=source,
+                        path=(*policy_path, "allowed_locations"),
+                    )
+                ),
+                mode=expect_string(
+                    policy["mode"],
+                    source=source,
+                    path=(*policy_path, "mode"),
+                    nonblank=True,
+                ),
+                max_resources=ResourceRequest(
+                    cpus_per_task=expect_integer(
+                        resources["cpus_per_task"],
+                        source=source,
+                        path=(*resources_path, "cpus_per_task"),
+                        minimum=1,
+                    ),
+                    memory_bytes=_parse_memory(
+                        resources["memory"], source, (*resources_path, "memory")
+                    ),
+                    walltime=walltime,
+                ),
+            )
+        except (TypeError, ValueError) as error:
+            fail(
+                source=source,
+                path=policy_path,
+                code="INVALID_DEFINITION_BUILD_POLICY",
+                message=str(error),
+            )
+    return PreparationStorageConfig(cache_root, search_paths, definition_build)
 
 
 def _backend_config(

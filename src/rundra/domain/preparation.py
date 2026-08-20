@@ -10,6 +10,7 @@ from rundra.domain.models import ResourceRequest
 
 PREPARE_LOCATIONS = frozenset({"auto", "local", "target"})
 CACHE_SCOPES = frozenset({"target", "architecture"})
+DEFINITION_BUILD_MODES = frozenset({"unprivileged", "fakeroot"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +29,11 @@ class PreparationSourceGit:
             or any(character not in "0123456789abcdef" for character in self.revision)
         ):
             raise ValueError("Preparation Git revision must be a lowercase full SHA-1")
+
+
+@dataclass(frozen=True, slots=True)
+class PreparationSourceWorkingTree:
+    """An explicit working-tree-only source recipe."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,18 +98,40 @@ class PreparationImage:
 
 
 @dataclass(frozen=True, slots=True)
+class PreparationImageDefinition:
+    """A SIF image built from one definition inside the source snapshot."""
+
+    name: PurePath
+    path: PurePath
+    resources: ResourceRequest
+
+    def __post_init__(self) -> None:
+        _require_safe_relative(self.name, field_name="Preparation image name")
+        if len(self.name.parts) != 1 or self.name.suffix != ".sif":
+            raise ValueError("Preparation image name must be one .sif filename")
+        _require_safe_relative(self.path, field_name="Definition path")
+        if type(self.resources) is not ResourceRequest:
+            raise TypeError("Definition build resources must be a ResourceRequest")
+        if self.resources.memory_bytes is None or self.resources.walltime is None:
+            raise ValueError("Definition build memory and walltime must be bounded")
+
+
+@dataclass(frozen=True, slots=True)
 class PreparationConfig:
     """Project-owned source, image, and optional application build recipe."""
 
-    source: PreparationSourceGit
-    image: PreparationImage
+    source: PreparationSourceGit | PreparationSourceWorkingTree
+    image: PreparationImage | PreparationImageDefinition
     build: PreparationBuild | None
 
     def __post_init__(self) -> None:
-        if type(self.source) is not PreparationSourceGit:
-            raise TypeError("Preparation source must be a Git source")
-        if type(self.image) is not PreparationImage:
-            raise TypeError("Preparation image must be an image identity")
+        if type(self.source) not in {
+            PreparationSourceGit,
+            PreparationSourceWorkingTree,
+        }:
+            raise TypeError("Preparation source is unsupported")
+        if type(self.image) not in {PreparationImage, PreparationImageDefinition}:
+            raise TypeError("Preparation image recipe is unsupported")
         if self.build is not None and type(self.build) is not PreparationBuild:
             raise TypeError("Preparation build must be a build recipe or None")
 
@@ -117,6 +145,7 @@ class PreparationPlan:
     source_root: PurePath | None
     requested_location: str = "auto"
     rebuild: bool = False
+    rebuild_image: bool = False
     offline: bool = False
     possible_actions: tuple[str, ...] = ()
 
@@ -131,7 +160,10 @@ class PreparationPlan:
             raise TypeError("PreparationPlan source root must be a path or None")
         if self.requested_location not in PREPARE_LOCATIONS:
             raise ValueError("PreparationPlan location is unsupported")
-        if type(self.rebuild) is not bool or type(self.offline) is not bool:
+        if any(
+            type(value) is not bool
+            for value in (self.rebuild, self.rebuild_image, self.offline)
+        ):
             raise TypeError("PreparationPlan flags must be booleans")
         object.__setattr__(
             self,
@@ -234,6 +266,7 @@ class PreparationStorageConfig:
 
     cache_root: PurePath | None = None
     image_search_paths: tuple[PurePath, ...] = ()
+    definition_build: DefinitionBuildPolicy | None = None
 
     def __post_init__(self) -> None:
         if self.cache_root is not None and not isinstance(self.cache_root, PurePath):
@@ -243,14 +276,93 @@ class PreparationStorageConfig:
             raise TypeError("Preparation image search paths must be paths")
         if len(set(paths)) != len(paths):
             raise ValueError("Preparation image search paths must be unique")
+        if (
+            self.definition_build is not None
+            and type(self.definition_build) is not DefinitionBuildPolicy
+        ):
+            raise TypeError("Definition build policy has an invalid type")
         object.__setattr__(self, "image_search_paths", paths)
 
 
-def source_recipe_identity(source: PreparationSourceGit) -> str:
+@dataclass(frozen=True, slots=True)
+class DefinitionBuildPolicy:
+    """Target-owned privilege, location, and resource limits for SIF builds."""
+
+    allowed_locations: tuple[str, ...]
+    mode: str
+    max_resources: ResourceRequest
+
+    def __post_init__(self) -> None:
+        locations = tuple(self.allowed_locations)
+        if not locations or any(item not in {"local", "target"} for item in locations):
+            raise ValueError("Definition build locations must be local or target")
+        if len(set(locations)) != len(locations):
+            raise ValueError("Definition build locations must be unique")
+        if self.mode not in DEFINITION_BUILD_MODES:
+            raise ValueError("Definition build mode is unsupported")
+        if type(self.max_resources) is not ResourceRequest:
+            raise TypeError("Definition build resource ceiling is invalid")
+        if (
+            self.max_resources.memory_bytes is None
+            or self.max_resources.walltime is None
+        ):
+            raise ValueError("Definition build resource ceilings must be bounded")
+        object.__setattr__(self, "allowed_locations", locations)
+
+
+def source_recipe_identity(
+    source: PreparationSourceGit | PreparationSourceWorkingTree,
+) -> str:
     """Return a deterministic identity for an acquired-source recipe."""
-    if type(source) is not PreparationSourceGit:
-        raise TypeError("source_recipe_identity requires PreparationSourceGit")
-    return _digest({"kind": "git", "revision": source.revision, "url": source.url})
+    if type(source) is PreparationSourceGit:
+        return _digest({"kind": "git", "revision": source.revision, "url": source.url})
+    if type(source) is PreparationSourceWorkingTree:
+        return _digest({"kind": "working_tree"})
+    raise TypeError("source_recipe_identity source is unsupported")
+
+
+def definition_image_recipe_key(
+    *,
+    source_digest: str,
+    image: PreparationImageDefinition,
+    target_name: str,
+    mode: str,
+    platform_fingerprint: str,
+    builder_version: str,
+) -> str:
+    """Return a deterministic cache key for one definition image build."""
+    _require_sha256(source_digest, field_name="Source digest")
+    if type(image) is not PreparationImageDefinition:
+        raise TypeError("definition image key requires a definition recipe")
+    for name, value in (
+        ("target_name", target_name),
+        ("platform_fingerprint", platform_fingerprint),
+        ("builder_version", builder_version),
+    ):
+        if type(value) is not str or not value.strip() or "\x00" in value:
+            raise ValueError(f"{name} must be safe and nonblank")
+    if mode not in DEFINITION_BUILD_MODES:
+        raise ValueError("definition build mode is unsupported")
+    return _digest(
+        {
+            "builder_version": builder_version,
+            "definition": str(image.path),
+            "mode": mode,
+            "name": str(image.name),
+            "platform": platform_fingerprint,
+            "resources": {
+                "cpus_per_task": image.resources.cpus_per_task,
+                "memory_bytes": image.resources.memory_bytes,
+                "walltime_seconds": (
+                    None
+                    if image.resources.walltime is None
+                    else int(image.resources.walltime.total_seconds())
+                ),
+            },
+            "source_digest": source_digest,
+            "target": target_name,
+        }
+    )
 
 
 def build_cache_key(

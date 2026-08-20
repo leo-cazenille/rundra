@@ -18,12 +18,15 @@ from rundra.domain.models import (
     Target,
 )
 from rundra.domain.preparation import (
+    DefinitionBuildPolicy,
     PreparationBuild,
     PreparationConfig,
     PreparationImage,
+    PreparationImageDefinition,
     PreparationOutput,
     PreparationPlan,
     PreparationSourceGit,
+    PreparationSourceWorkingTree,
 )
 from rundra.orchestration.preparation import (
     PreparationError,
@@ -99,6 +102,16 @@ import subprocess
 import sys
 
 args = sys.argv[1:]
+if args[0] == "version":
+    print("apptainer version 1.4.0")
+    raise SystemExit(0)
+if args[0] == "build":
+    output = args[-2]
+    definition = args[-1]
+    with open(definition, "rb") as source, open(output, "wb") as target:
+        target.write(b"fake-sif:")
+        target.write(source.read())
+    raise SystemExit(0)
 if args[0] != "exec":
     raise SystemExit(64)
 bind = args[args.index("--bind") + 1]
@@ -203,6 +216,72 @@ def test_working_tree_content_change_invalidates_source_and_build_keys(
 
     assert first.record.source_digest != second.record.source_digest
     assert first.record.build_cache_key != second.record.build_cache_key
+
+
+def test_definition_image_build_is_content_addressed_and_reused(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "python.def").write_text(
+        "Bootstrap: docker\nFrom: python:3.12-slim\n", encoding="utf-8"
+    )
+    recipe = PreparationConfig(
+        source=PreparationSourceWorkingTree(),
+        image=PreparationImageDefinition(
+            PurePath("python.sif"),
+            PurePath("python.def"),
+            ResourceRequest(
+                cpus_per_task=1,
+                memory_bytes=1024**3,
+                walltime=timedelta(minutes=5),
+            ),
+        ),
+        build=None,
+    )
+    plan = PreparationPlan(
+        recipe,
+        source_mode="working_tree",
+        source_root=source,
+    )
+    policy = DefinitionBuildPolicy(
+        ("local",),
+        "fakeroot",
+        ResourceRequest(
+            cpus_per_task=2,
+            memory_bytes=2 * 1024**3,
+            walltime=timedelta(minutes=15),
+        ),
+    )
+    executable = _fake_apptainer(tmp_path)
+    cache = tmp_path / "cache"
+
+    cold = prepare_local(
+        plan,
+        _experiment(recipe),
+        _target(tmp_path),
+        project_root=source,
+        source_root=source,
+        cache_root=cache,
+        definition_build=policy,
+        apptainer_executable=str(executable),
+    )
+    warm = prepare_local(
+        plan,
+        _experiment(recipe),
+        _target(tmp_path),
+        project_root=source,
+        source_root=source,
+        cache_root=cache,
+        definition_build=policy,
+        apptainer_executable=str(executable),
+    )
+
+    assert cold.record.image_action == "build_definition_image"
+    assert warm.record.image_action == "reuse_definition_image_cache"
+    assert cold.record.image_sha256 == warm.record.image_sha256
+    assert cold.record.image_path.name == f"{cold.record.image_sha256}.sif"
+    assert cold.record.image_uri == "definition:python.def"
 
 
 def test_working_tree_preparation_applies_default_sync_exclusions(

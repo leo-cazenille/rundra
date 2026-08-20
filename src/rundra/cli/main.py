@@ -449,6 +449,11 @@ def _add_preparation_arguments(parser: argparse.ArgumentParser) -> None:
         help="bypass only the compiled-output cache",
     )
     parser.add_argument(
+        "--rebuild-image",
+        action="store_true",
+        help="bypass only the definition-image cache",
+    )
+    parser.add_argument(
         "--offline",
         action="store_true",
         help="prohibit Git fetches and image pulls",
@@ -561,6 +566,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             source_root=arguments.source_root,
             prepare_location=arguments.prepare_location,
             rebuild=arguments.rebuild,
+            rebuild_image=arguments.rebuild_image,
             offline=arguments.offline,
             workers=arguments.workers,
             task_slots_per_worker=arguments.task_slots_per_worker,
@@ -657,6 +663,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             random_seed=arguments.random_seed,
             prepare_location=arguments.prepare_location,
             rebuild=arguments.rebuild,
+            rebuild_image=arguments.rebuild_image,
             offline=arguments.offline,
             workers=arguments.workers,
             task_slots_per_worker=arguments.task_slots_per_worker,
@@ -702,6 +709,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             operation="submit",
             prepare_location=arguments.prepare_location,
             rebuild=arguments.rebuild,
+            rebuild_image=arguments.rebuild_image,
             offline=arguments.offline,
             workers=arguments.workers,
             task_slots_per_worker=arguments.task_slots_per_worker,

@@ -21,8 +21,10 @@ from rundra.domain.preparation import (
     PreparationBuild,
     PreparationConfig,
     PreparationImage,
+    PreparationImageDefinition,
     PreparationOutput,
     PreparationSourceGit,
+    PreparationSourceWorkingTree,
 )
 
 _SHA256_PATTERN = re.compile(r"[0-9a-fA-F]{64}\Z")
@@ -43,6 +45,7 @@ def parse_preparation(
     *,
     source: Path,
     path: ConfigPath = ("preparation",),
+    version: int = 2,
 ) -> PreparationConfig:
     """Parse one strict project-v2 preparation section."""
     section = expect_mapping(value, source=source, path=path)
@@ -54,8 +57,8 @@ def parse_preparation(
         path=path,
     )
     return PreparationConfig(
-        source=_source(section["source"], source, (*path, "source")),
-        image=_image(section["image"], source, (*path, "image")),
+        source=_source(section["source"], source, (*path, "source"), version=version),
+        image=_image(section["image"], source, (*path, "image"), version=version),
         build=(
             _build(section["build"], source, (*path, "build"))
             if "build" in section
@@ -64,15 +67,38 @@ def parse_preparation(
     )
 
 
-def _source(value: object, source: Path, path: ConfigPath) -> PreparationSourceGit:
+def _source(
+    value: object, source: Path, path: ConfigPath, *, version: int
+) -> PreparationSourceGit | PreparationSourceWorkingTree:
     section = expect_mapping(value, source=source, path=path)
     check_fields(
         section,
-        allowed=frozenset({"git"}),
-        required=frozenset({"git"}),
+        allowed=frozenset({"git"})
+        if version == 2
+        else frozenset({"git", "working_tree"}),
+        required=frozenset(),
         source=source,
         path=path,
     )
+    if len(section) != 1:
+        fail(
+            source=source,
+            path=path,
+            code="INVALID_VALUE",
+            message="Source must select exactly one acquisition mode",
+        )
+    if "working_tree" in section:
+        working = expect_mapping(
+            section["working_tree"], source=source, path=(*path, "working_tree")
+        )
+        check_fields(
+            working,
+            allowed=frozenset(),
+            required=frozenset(),
+            source=source,
+            path=(*path, "working_tree"),
+        )
+        return PreparationSourceWorkingTree()
     git_path = (*path, "git")
     git = expect_mapping(section["git"], source=source, path=git_path)
     check_fields(
@@ -102,12 +128,22 @@ def _source(value: object, source: Path, path: ConfigPath) -> PreparationSourceG
     return PreparationSourceGit(url=url, revision=revision.lower())
 
 
-def _image(value: object, source: Path, path: ConfigPath) -> PreparationImage:
+def _image(
+    value: object, source: Path, path: ConfigPath, *, version: int
+) -> PreparationImage | PreparationImageDefinition:
     section = expect_mapping(value, source=source, path=path)
     check_fields(
         section,
-        allowed=frozenset({"name", "uri", "sha256"}),
-        required=frozenset({"name", "uri", "sha256"}),
+        allowed=(
+            frozenset({"name", "uri", "sha256"})
+            if version == 2
+            else frozenset({"name", "prebuilt", "definition"})
+        ),
+        required=(
+            frozenset({"name", "uri", "sha256"})
+            if version == 2
+            else frozenset({"name"})
+        ),
         source=source,
         path=path,
     )
@@ -120,6 +156,51 @@ def _image(value: object, source: Path, path: ConfigPath) -> PreparationImage:
             code="INVALID_VALUE",
             message="Image name must be one logical filename",
         )
+    if version >= 3:
+        variants = [name for name in ("prebuilt", "definition") if name in section]
+        if len(variants) != 1:
+            fail(
+                source=source,
+                path=path,
+                code="INVALID_VALUE",
+                message="Image must select exactly one source",
+            )
+        if variants[0] == "definition":
+            definition_path = (*path, "definition")
+            definition = expect_mapping(
+                section["definition"], source=source, path=definition_path
+            )
+            check_fields(
+                definition,
+                allowed=frozenset({"path", "resources"}),
+                required=frozenset({"path", "resources"}),
+                source=source,
+                path=definition_path,
+            )
+            return PreparationImageDefinition(
+                name=name,
+                path=_safe_relative_path(
+                    definition["path"], source, (*definition_path, "path")
+                ),
+                resources=_build_resources(
+                    definition["resources"],
+                    source,
+                    (*definition_path, "resources"),
+                ),
+            )
+        prebuilt_path = (*path, "prebuilt")
+        prebuilt = expect_mapping(
+            section["prebuilt"], source=source, path=prebuilt_path
+        )
+        check_fields(
+            prebuilt,
+            allowed=frozenset({"uri", "sha256"}),
+            required=frozenset({"uri", "sha256"}),
+            source=source,
+            path=prebuilt_path,
+        )
+        section = {"name": str(name), **prebuilt}
+        path = prebuilt_path
     uri = expect_string(
         section["uri"], source=source, path=(*path, "uri"), nonblank=True
     )
