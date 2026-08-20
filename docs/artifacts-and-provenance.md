@@ -144,6 +144,27 @@ select an analysis-produced file as a raw output for transfer, but v0.1 provides
 no derived-analysis model or lineage claim. Keep post-processing outputs in a
 separate project location when that distinction matters.
 
+## Reading fetched result sets
+
+The public Python API opens both materialized fetch destinations and
+`rundra-reference.json` manifests through the same read-only interface:
+
+```python
+from pathlib import Path
+
+from rundra.artifacts import open_result_set
+
+results = open_result_set(Path("retrieved/my-config"))
+for result in results.iter_files("task_000000"):
+    print(result.relative_path, result.path, result.size_bytes)
+```
+
+`ResultSet.iter_files()` returns deterministic paths to regular files and can
+select one Task without materializing a shared-filesystem reference. Scientific
+code remains responsible for interpreting formats with libraries such as
+PyArrow or pandas. Write derived data outside the referenced or materialized
+raw-result workspace.
+
 ## Reproducibility boundary
 
 The checked local criterion is byte identity of the raw result for the same
