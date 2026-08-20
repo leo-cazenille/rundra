@@ -7,10 +7,11 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from pathlib import Path
+from pathlib import Path, PurePath
 from types import MappingProxyType
 
 from rundra.domain.models import RunId, TaskId
+from rundra.domain.scaling import SeedRange, TaskSpace
 from rundra.persistence.errors import RunStoreError
 
 
@@ -41,17 +42,49 @@ class SubmissionReceipt:
     failure_classification: str | None = None
     exit_code: int | None = None
     updated_at: datetime | None = None
+    task_space: TaskSpace | None = None
+    execution_strategy: str | None = None
+    retrieval_policy: str | None = None
+    task_state_store: PurePath | None = None
 
     def __post_init__(self) -> None:
-        if self.format_version not in {1, 2}:
-            raise ValueError("Submission receipt format_version must be 1 or 2")
+        if self.format_version not in {1, 2, 3}:
+            raise ValueError("Submission receipt format_version must be 1, 2, or 3")
         if type(self.run_id) is not RunId:
             raise TypeError("Submission receipt run_id must be a RunId")
         task_ids = tuple(self.task_ids)
-        if not task_ids or any(type(item) is not TaskId for item in task_ids):
+        if any(type(item) is not TaskId for item in task_ids):
             raise TypeError("Submission receipt task_ids must contain TaskIds")
         if len(set(task_ids)) != len(task_ids):
             raise ValueError("Submission receipt task_ids must be unique")
+        compact_values = (
+            self.task_space,
+            self.execution_strategy,
+            self.retrieval_policy,
+            self.task_state_store,
+        )
+        if self.format_version == 3:
+            if task_ids:
+                raise ValueError("Version-3 receipt cannot materialize Task IDs")
+            if type(self.task_space) is not TaskSpace:
+                raise TypeError("Version-3 receipt requires a TaskSpace")
+            if self.execution_strategy not in {"multi-array", "worker-pool"}:
+                raise ValueError("Version-3 receipt execution strategy is unsupported")
+            if self.retrieval_policy not in {"all", "manifest", "none"}:
+                raise ValueError("Version-3 receipt retrieval policy is unsupported")
+            if (
+                not isinstance(self.task_state_store, PurePath)
+                or self.task_state_store.is_absolute()
+                or self.task_state_store.name != str(self.task_state_store)
+            ):
+                raise ValueError(
+                    "Version-3 receipt task_state_store must be one relative filename"
+                )
+        else:
+            if not task_ids:
+                raise ValueError("Version-1 and version-2 receipts require Task IDs")
+            if any(value is not None for value in compact_values):
+                raise ValueError("Legacy receipts cannot contain compact Task metadata")
         if (
             not isinstance(self.started_at, datetime)
             or self.started_at.utcoffset() is None
@@ -107,8 +140,12 @@ class SubmissionReceipt:
                 or self.completed_at < self.started_at
             ):
                 raise ValueError("Submission receipt completed_at is invalid")
-            if not jobs or set(mapping) != set(task_ids):
+            if not jobs:
+                raise ValueError("Accepted submission receipt requires scheduler IDs")
+            if self.format_version != 3 and set(mapping) != set(task_ids):
                 raise ValueError("Accepted submission receipt must map every Task")
+            if self.format_version == 3 and mapping:
+                raise ValueError("Compact receipt cannot materialize Task mappings")
         elif jobs or mapping:
             raise ValueError("Non-accepted receipt cannot contain scheduler IDs")
         if outcome in {
@@ -199,6 +236,42 @@ class SubmissionReceiptStore:
         self._write(receipt, replace=False)
         return receipt
 
+    def begin_compact(
+        self,
+        run_id: RunId,
+        task_space: TaskSpace,
+        started_at: datetime,
+        *,
+        execution_strategy: str,
+        retrieval_policy: str,
+        task_state_store: PurePath,
+        backend: str | None = None,
+    ) -> SubmissionReceipt:
+        """Start a constant-size receipt for one compact submission."""
+        del backend
+        receipt = SubmissionReceipt(
+            3,
+            run_id,
+            (),
+            started_at,
+            outcome=SubmissionReceiptOutcome.PENDING,
+            updated_at=started_at,
+            task_space=task_space,
+            execution_strategy=execution_strategy,
+            retrieval_policy=retrieval_policy,
+            task_state_store=task_state_store,
+        )
+        path = self.path(run_id)
+        if path.exists():
+            previous = self.load(run_id)
+            if previous == receipt:
+                return previous
+            raise RunStoreError(
+                f"Run {run_id} already has a scheduler submission receipt"
+            )
+        self._write(receipt, replace=False)
+        return receipt
+
     def complete(
         self,
         pending: SubmissionReceipt,
@@ -218,6 +291,41 @@ class SubmissionReceiptStore:
             completed_at,
             SubmissionReceiptOutcome.ACCEPTED,
             updated_at=completed_at,
+        )
+        current = self.load(pending.run_id)
+        if current == receipt:
+            return current
+        if current != pending:
+            raise RunStoreError(
+                f"Run {pending.run_id} submission receipt changed concurrently"
+            )
+        self._write(receipt, replace=True)
+        return receipt
+
+    def complete_compact(
+        self,
+        pending: SubmissionReceipt,
+        scheduler_job_ids: Sequence[str],
+        completed_at: datetime,
+    ) -> SubmissionReceipt:
+        """Accept a compact receipt after its scheduler identities are durable."""
+        if pending.format_version != 3:
+            raise ValueError("complete_compact requires a version-3 receipt")
+        if pending.completed:
+            return pending
+        receipt = SubmissionReceipt(
+            3,
+            pending.run_id,
+            (),
+            pending.started_at,
+            tuple(scheduler_job_ids),
+            completed_at=completed_at,
+            outcome=SubmissionReceiptOutcome.ACCEPTED,
+            updated_at=completed_at,
+            task_space=pending.task_space,
+            execution_strategy=pending.execution_strategy,
+            retrieval_policy=pending.retrieval_policy,
+            task_state_store=pending.task_state_store,
         )
         current = self.load(pending.run_id)
         if current == receipt:
@@ -313,8 +421,9 @@ class SubmissionReceiptStore:
                 f"Run {pending.run_id} submission receipt is already "
                 f"{current_outcome.value}"
             )
+        version = 3 if pending.format_version == 3 else 2
         receipt = SubmissionReceipt(
-            2,
+            version,
             pending.run_id,
             pending.task_ids,
             pending.started_at,
@@ -333,6 +442,10 @@ class SubmissionReceiptStore:
             failure_classification=failure_classification,
             exit_code=exit_code,
             updated_at=updated_at,
+            task_space=pending.task_space,
+            execution_strategy=pending.execution_strategy,
+            retrieval_policy=pending.retrieval_policy,
+            task_state_store=pending.task_state_store,
         )
         current = self.load(pending.run_id)
         if current == receipt:
@@ -421,7 +534,7 @@ def _receipt_document(receipt: SubmissionReceipt) -> dict[str, object]:
             None if receipt.completed_at is None else receipt.completed_at.isoformat()
         ),
     }
-    if receipt.format_version == 2:
+    if receipt.format_version in {2, 3}:
         if receipt.outcome is None or receipt.updated_at is None:
             raise ValueError("version-2 receipt is missing outcome metadata")
         document.update(
@@ -432,6 +545,26 @@ def _receipt_document(receipt: SubmissionReceipt) -> dict[str, object]:
                 "failure_classification": receipt.failure_classification,
                 "exit_code": receipt.exit_code,
                 "updated_at": receipt.updated_at.isoformat(),
+            }
+        )
+    if receipt.format_version == 3:
+        assert receipt.task_space is not None
+        document.pop("task_ids")
+        document.pop("task_scheduler_ids")
+        document.update(
+            {
+                "task_space": {
+                    "parameter_set_count": receipt.task_space.parameter_set_count,
+                    "seeds": {
+                        "start": receipt.task_space.seeds.start,
+                        "stop": receipt.task_space.seeds.stop,
+                        "step": receipt.task_space.seeds.step,
+                    },
+                    "task_count": receipt.task_space.task_count,
+                },
+                "execution_strategy": receipt.execution_strategy,
+                "retrieval_policy": receipt.retrieval_policy,
+                "task_state_store": str(receipt.task_state_store),
             }
         )
     return document
@@ -455,19 +588,33 @@ def _receipt_from_document(value: object, run_id: RunId) -> SubmissionReceipt:
         "exit_code",
         "updated_at",
     }
+    version_three = (
+        (common - {"task_ids", "task_scheduler_ids"})
+        | version_two
+        | {
+            "task_space",
+            "execution_strategy",
+            "retrieval_policy",
+            "task_state_store",
+        }
+    )
     if not isinstance(value, dict):
         raise ValueError("invalid receipt fields")
     version = value.get("format_version")
-    if version not in (1, 2):
+    if version not in (1, 2, 3):
         raise ValueError("unsupported receipt format version")
-    expected = common if version == 1 else common | version_two
+    expected = (
+        common
+        if version == 1
+        else (common | version_two if version == 2 else version_three)
+    )
     if set(value) != expected:
         raise ValueError("invalid receipt fields")
     if value["run_id"] != str(run_id):
         raise ValueError("receipt Run ID mismatch")
-    task_ids = value["task_ids"]
+    task_ids = value.get("task_ids", [])
     jobs = value["scheduler_job_ids"]
-    mapping = value["task_scheduler_ids"]
+    mapping = value.get("task_scheduler_ids", {})
     if (
         not isinstance(task_ids, list)
         or not isinstance(jobs, list)
@@ -475,6 +622,24 @@ def _receipt_from_document(value: object, run_id: RunId) -> SubmissionReceipt:
     ):
         raise TypeError("invalid receipt collections")
     completed = value["completed_at"]
+    task_space: TaskSpace | None = None
+    if version == 3:
+        task_space_document = value["task_space"]
+        if not isinstance(task_space_document, dict) or set(task_space_document) != {
+            "parameter_set_count",
+            "seeds",
+            "task_count",
+        }:
+            raise ValueError("invalid compact receipt TaskSpace")
+        seeds = task_space_document["seeds"]
+        if not isinstance(seeds, dict) or set(seeds) != {"start", "stop", "step"}:
+            raise ValueError("invalid compact receipt seed range")
+        task_space = TaskSpace(
+            task_space_document["parameter_set_count"],
+            SeedRange(seeds["start"], seeds["stop"], seeds["step"]),
+        )
+        if task_space_document["task_count"] != task_space.task_count:
+            raise ValueError("compact receipt task_count does not match TaskSpace")
     return SubmissionReceipt(
         version,
         run_id,
@@ -489,4 +654,8 @@ def _receipt_from_document(value: object, run_id: RunId) -> SubmissionReceipt:
         None if version == 1 else value["failure_classification"],
         None if version == 1 else value["exit_code"],
         None if version == 1 else datetime.fromisoformat(value["updated_at"]),
+        task_space,
+        None if version != 3 else value["execution_strategy"],
+        None if version != 3 else value["retrieval_policy"],
+        None if version != 3 else PurePath(value["task_state_store"]),
     )

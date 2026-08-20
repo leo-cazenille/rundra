@@ -6,6 +6,8 @@ All notable user-visible changes are recorded here.
 
 ### Added
 
+- Large compact submissions use bounded version-3 receipts and can resume an
+  interrupted post-acceptance RunRecord compaction from their Task-state sidecar.
 - Slurm worker-pool submissions with at least 1,000 logical Tasks now persist a
   version-4 `CompactRun` plus a per-Run SQLite Task-state sidecar.
 - Run stores expose a narrowly validated, atomic one-way materialized-to-v4

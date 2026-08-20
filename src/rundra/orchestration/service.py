@@ -27,7 +27,7 @@ from rundra.domain.preparation import (
     PreparationRecord,
 )
 from rundra.domain.records import RunRecord
-from rundra.domain.scaling import CompactRun
+from rundra.domain.scaling import CompactRun, TaskSpace
 from rundra.domain.states import (
     ExecutionState,
     RetrievalState,
@@ -665,6 +665,19 @@ class OrchestrationService:
                     run_id=run_id,
                 )
             if not receipt.completed:
+                if receipt.format_version == 3 and self._task_store is not None:
+                    try:
+                        scheduler_job_ids = self._task_store.submission_job_ids(run_id)
+                        self._task_store.all_states(run_id)
+                        if scheduler_job_ids:
+                            receipt = self._submission_receipts.complete_compact(
+                                receipt,
+                                scheduler_job_ids,
+                                self._clock(),
+                            )
+                    except RunStoreError:
+                        pass
+            if not receipt.completed:
                 description = (
                     "has an uncertain scheduler submission outcome"
                     if receipt.outcome is SubmissionReceiptOutcome.UNCERTAIN
@@ -678,16 +691,77 @@ class OrchestrationService:
                     ),
                     run_id=run_id,
                 )
-            if receipt.task_ids != tuple(task.id for task in record.run.tasks):
-                raise OrchestrationError(
-                    code="SUBMISSION_RECEIPT_MISMATCH",
-                    message=f"Run {run_id} receipt does not match its persisted Tasks",
-                    run_id=run_id,
-                )
+            if receipt.format_version != 3:
+                if record.format_version != 4:
+                    expected_task_ids = tuple(task.id for task in record.run.tasks)
+                else:
+                    assert record.task_space is not None
+                    expected_task_ids = tuple(
+                        record.task_space.coordinate(ordinal).task_id
+                        for ordinal in range(record.task_space.task_count)
+                    )
+                if receipt.task_ids != expected_task_ids:
+                    raise OrchestrationError(
+                        code="SUBMISSION_RECEIPT_MISMATCH",
+                        message=(
+                            f"Run {run_id} receipt does not match its persisted Tasks"
+                        ),
+                        run_id=run_id,
+                    )
+            if receipt.format_version == 3:
+                if self._task_store is None or not isinstance(
+                    self.store, CompactRunStore
+                ):
+                    raise OrchestrationError(
+                        code="SUBMISSION_RECOVERY_UNAVAILABLE",
+                        message=f"Run {run_id} requires compact Task persistence",
+                        run_id=run_id,
+                    )
+                assert receipt.task_space is not None
+                if (
+                    receipt.task_state_store
+                    != PurePath(self._task_store.path(run_id).name)
+                    or self._task_store.task_space(run_id) != receipt.task_space
+                    or self._task_store.submission_job_ids(run_id)
+                    != receipt.scheduler_job_ids
+                ):
+                    raise OrchestrationError(
+                        code="SUBMISSION_RECEIPT_MISMATCH",
+                        message=f"Run {run_id} compact receipt does not match its sidecar",
+                        run_id=run_id,
+                    )
+                self._task_store.all_states(run_id)
+                if record.format_version != 4:
+                    assert receipt.execution_strategy is not None
+                    assert receipt.retrieval_policy is not None
+                    compact = _compact_record_from_metadata(
+                        record,
+                        task_space=receipt.task_space,
+                        execution_strategy=receipt.execution_strategy,
+                        retrieval_policy=receipt.retrieval_policy,
+                        task_store=self._task_store,
+                    )
+                    self.store.compact(compact, expected=record)
+                    record = compact
+                elif (
+                    record.task_space != receipt.task_space
+                    or record.execution_strategy != receipt.execution_strategy
+                    or record.retrieval_policy != receipt.retrieval_policy
+                    or record.task_state_store != receipt.task_state_store
+                ):
+                    raise OrchestrationError(
+                        code="SUBMISSION_RECEIPT_MISMATCH",
+                        message=f"Run {run_id} compact receipt does not match its record",
+                        run_id=run_id,
+                    )
             updated = replace(
                 _with_execution_state(record, ExecutionState.SUBMITTED),
                 scheduler_job_ids=receipt.scheduler_job_ids,
-                task_scheduler_ids=receipt.task_scheduler_ids or {},
+                task_scheduler_ids=(
+                    {}
+                    if receipt.format_version == 3 or record.format_version == 4
+                    else receipt.task_scheduler_ids or {}
+                ),
                 submitted_at=receipt.started_at,
                 native_state="SUBMISSION_RESUMED",
             )
@@ -1028,16 +1102,36 @@ class OrchestrationService:
 
         submission_started_at = self._clock()
         submission_receipts = self._submission_receipts
-        pending_receipt = (
-            submission_receipts.begin(
-                run_id,
-                tuple(unit.task_id for unit in units),
-                submission_started_at,
-                backend=record.run.target.scheduler.kind,
-            )
-            if submission_receipts is not None
-            else None
-        )
+        if request.compact_plan is not None:
+            if self._task_store is None:
+                raise OrchestrationError(
+                    code="TASK_STATE_UNAVAILABLE",
+                    message=f"Run {run_id} requires a compact Task state store",
+                    run_id=run_id,
+                )
+            assert request.compact_plan.task_space is not None
+            self._task_store.create(run_id, request.compact_plan.task_space)
+        pending_receipt = None
+        if submission_receipts is not None:
+            if request.compact_plan is not None:
+                assert request.compact_plan.task_space is not None
+                assert self._task_store is not None
+                pending_receipt = submission_receipts.begin_compact(
+                    run_id,
+                    request.compact_plan.task_space,
+                    submission_started_at,
+                    execution_strategy=request.compact_plan.strategy,
+                    retrieval_policy=request.compact_plan.retrieval_policy or "all",
+                    task_state_store=PurePath(self._task_store.path(run_id).name),
+                    backend=record.run.target.scheduler.kind,
+                )
+            else:
+                pending_receipt = submission_receipts.begin(
+                    run_id,
+                    tuple(unit.task_id for unit in units),
+                    submission_started_at,
+                    backend=record.run.target.scheduler.kind,
+                )
         try:
             scheduler_group = SchedulerGroup(
                 tuple(
@@ -1100,12 +1194,26 @@ class OrchestrationService:
                 )
             if pending_receipt is not None:
                 assert submission_receipts is not None
-                submission_receipts.complete(
-                    pending_receipt,
-                    tuple(reference.native_id for reference in submission.references),
-                    submission.task_native_ids,
-                    self._clock(),
+                scheduler_job_ids = tuple(
+                    reference.native_id for reference in submission.references
                 )
+                if request.compact_plan is not None:
+                    assert self._task_store is not None
+                    self._task_store.initialize_submission(
+                        run_id,
+                        submission.task_native_ids,
+                        scheduler_job_ids=scheduler_job_ids,
+                    )
+                    submission_receipts.complete_compact(
+                        pending_receipt, scheduler_job_ids, self._clock()
+                    )
+                else:
+                    submission_receipts.complete(
+                        pending_receipt,
+                        scheduler_job_ids,
+                        submission.task_native_ids,
+                        self._clock(),
+                    )
         except SchedulerSubmissionFailure as error:
             if error.outcome is SchedulerSubmissionOutcome.REJECTED:
                 if pending_receipt is not None:
@@ -1178,18 +1286,8 @@ class OrchestrationService:
             submission.task_native_ids
         )
         if request.compact_plan is not None:
-            if self._task_store is None:
-                raise OrchestrationError(
-                    code="TASK_STATE_UNAVAILABLE",
-                    message=f"Run {run_id} requires a compact Task state store",
-                    run_id=run_id,
-                )
             try:
-                assert request.compact_plan.task_space is not None
-                self._task_store.create(run_id, request.compact_plan.task_space)
-                self._task_store.initialize_submission(
-                    run_id, submission.task_native_ids
-                )
+                assert self._task_store is not None
                 compact = _compact_record(
                     record, request.compact_plan, self._task_store
                 )
@@ -1582,6 +1680,24 @@ def _compact_record(
     task_store: SqliteTaskStore,
 ) -> RunRecord:
     assert plan.task_space is not None
+    assert plan.retrieval_policy is not None
+    return _compact_record_from_metadata(
+        record,
+        task_space=plan.task_space,
+        execution_strategy=plan.strategy,
+        retrieval_policy=plan.retrieval_policy,
+        task_store=task_store,
+    )
+
+
+def _compact_record_from_metadata(
+    record: RunRecord,
+    *,
+    task_space: TaskSpace,
+    execution_strategy: str,
+    retrieval_policy: str,
+    task_store: SqliteTaskStore,
+) -> RunRecord:
     run = CompactRun(
         id=record.run.id,
         experiment_name=record.run.experiment_name,
@@ -1600,9 +1716,9 @@ def _compact_record(
         task_native_states={},
         task_retrieval_states={},
         task_exit_codes={},
-        task_space=plan.task_space,
-        execution_strategy=plan.strategy,
-        retrieval_policy=plan.retrieval_policy,
+        task_space=task_space,
+        execution_strategy=execution_strategy,
+        retrieval_policy=retrieval_policy,
         task_state_store=PurePath(task_store.path(record.run.id).name),
     )
 

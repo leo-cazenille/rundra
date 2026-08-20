@@ -32,7 +32,13 @@ from rundra.orchestration.service import (
     RunExecutionRequest,
     SchedulerLifecycleService,
 )
-from rundra.persistence import JsonRunStore, SqliteTaskStore
+from rundra.persistence import (
+    JsonRunStore,
+    RunStoreError,
+    SqliteTaskStore,
+    SubmissionReceiptOutcome,
+    SubmissionReceiptStore,
+)
 from rundra.ports import (
     CapabilityCheck,
     CommandResult,
@@ -329,6 +335,8 @@ def test_large_worker_pool_persists_and_reconciles_compact_task_state(
         compact_plan=compact_plan,
         worker_resources=compact_plan.worker_resources,
     )
+    receipts = SubmissionReceiptStore(tmp_path / "records")
+    service._submission_receipts = receipts
 
     submitted = service.submit_one(request).record
 
@@ -338,6 +346,8 @@ def test_large_worker_pool_persists_and_reconciles_compact_task_state(
     assert submitted.task_space.task_count == 1_000
     assert task_store.counts(_RUN_ID).execution[ExecutionState.SUBMITTED] == 1_000
     assert (tmp_path / "records" / f"{_RUN_ID}.json").stat().st_size < 100_000
+    assert receipts.load(_RUN_ID).format_version == 3
+    assert receipts.path(_RUN_ID).stat().st_size < 2_000
 
     accounting = (
         "42_0|COMPLETED|0:0|2026-08-15T10:00:00|"
@@ -358,6 +368,97 @@ def test_large_worker_pool_persists_and_reconciles_compact_task_state(
 
     assert refreshed.run.state is ExecutionState.SUCCEEDED
     assert task_store.counts(_RUN_ID).execution[ExecutionState.SUCCEEDED] == 1_000
+
+
+def test_compact_submission_resume_finishes_interrupted_record_compaction(
+    tmp_path: Path,
+) -> None:
+    task_store = SqliteTaskStore(tmp_path / "records")
+    service, _, store = _service(
+        tmp_path,
+        deque(
+            [
+                (0, "MaxArraySize = 1001\n", ""),
+                (0, "", ""),
+                (0, "", ""),
+                (0, "42\n", ""),
+            ]
+        ),
+        task_store=task_store,
+    )
+    receipts = SubmissionReceiptStore(tmp_path / "records")
+    service._submission_receipts = receipts
+    request = _request(tmp_path, seeds=tuple(range(1_000)))
+    compact_plan = _compact_plan(request)
+    request = replace(
+        request,
+        max_concurrent_jobs=2,
+        max_workers=2,
+        compact_plan=compact_plan,
+        worker_resources=compact_plan.worker_resources,
+    )
+    original_compact = store.compact
+
+    def interrupt_compaction(record: RunRecord, *, expected: RunRecord) -> None:
+        raise RunStoreError("simulated compact record interruption")
+
+    store.compact = interrupt_compaction  # type: ignore[method-assign]
+    with pytest.raises(OrchestrationError, match="compact Task state failed"):
+        service.submit_one(request)
+
+    store.compact = original_compact  # type: ignore[method-assign]
+    recovered, action = service.recover_submission(_RUN_ID)
+
+    assert action == "resumed"
+    assert recovered.format_version == 4
+    assert recovered.run.state is ExecutionState.SUBMITTED
+    assert recovered.scheduler_job_ids == ("42",)
+    assert task_store.counts(_RUN_ID).execution[ExecutionState.SUBMITTED] == 1_000
+
+
+def test_compact_submission_resume_promotes_durable_sidecar_receipt(
+    tmp_path: Path,
+) -> None:
+    task_store = SqliteTaskStore(tmp_path / "records")
+    service, _, _ = _service(
+        tmp_path,
+        deque(
+            [
+                (0, "MaxArraySize = 1001\n", ""),
+                (0, "", ""),
+                (0, "", ""),
+                (0, "42\n", ""),
+            ]
+        ),
+        task_store=task_store,
+    )
+    receipts = SubmissionReceiptStore(tmp_path / "records")
+    service._submission_receipts = receipts
+    request = _request(tmp_path, seeds=tuple(range(1_000)))
+    compact_plan = _compact_plan(request)
+    request = replace(
+        request,
+        max_concurrent_jobs=2,
+        max_workers=2,
+        compact_plan=compact_plan,
+        worker_resources=compact_plan.worker_resources,
+    )
+    original_complete = receipts.complete_compact
+
+    def interrupt_receipt(*args: object, **kwargs: object) -> None:
+        raise KeyboardInterrupt("simulated receipt interruption")
+
+    receipts.complete_compact = interrupt_receipt  # type: ignore[method-assign]
+    with pytest.raises(KeyboardInterrupt, match="receipt interruption"):
+        service.submit_one(request)
+
+    receipts.complete_compact = original_complete  # type: ignore[method-assign]
+    recovered, action = service.recover_submission(_RUN_ID)
+
+    assert action == "resumed"
+    assert recovered.format_version == 4
+    assert recovered.run.state is ExecutionState.SUBMITTED
+    assert receipts.load(_RUN_ID).outcome is SubmissionReceiptOutcome.ACCEPTED
 
 
 @pytest.mark.parametrize(

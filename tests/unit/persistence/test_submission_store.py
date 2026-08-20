@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from rundra.domain.models import RunId, TaskId
+from rundra.domain.scaling import SeedRange, TaskSpace
 from rundra.persistence import SubmissionReceiptOutcome, SubmissionReceiptStore
 from rundra.persistence.errors import RunStoreError
 
@@ -105,3 +106,29 @@ def test_submission_receipt_reads_pending_version_one_without_rewriting(
     assert loaded.format_version == 1
     assert loaded.outcome is SubmissionReceiptOutcome.PENDING
     assert json.loads(path.read_text(encoding="utf-8")) == document
+
+
+def test_compact_submission_receipt_is_constant_size_and_strict(tmp_path: Path) -> None:
+    store = SubmissionReceiptStore(tmp_path)
+    run_id = RunId("run_0123456789abcdef0123456789abcdef")
+    started = datetime(2026, 8, 19, 10, 0, tzinfo=UTC)
+    task_space = TaskSpace(2, SeedRange(0, 999_999))
+
+    pending = store.begin_compact(
+        run_id,
+        task_space,
+        started,
+        execution_strategy="worker-pool",
+        retrieval_policy="all",
+        task_state_store=Path(f"{run_id}.tasks.sqlite3"),
+    )
+    accepted = store.complete_compact(
+        pending, ("1234", "1235"), started + timedelta(seconds=1)
+    )
+
+    assert accepted.format_version == 3
+    assert accepted.task_ids == ()
+    assert accepted.task_scheduler_ids == {}
+    assert accepted.task_space == task_space
+    assert store.load(run_id) == accepted
+    assert store.path(run_id).stat().st_size < 2_000

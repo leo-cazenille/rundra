@@ -101,6 +101,10 @@ class SqliteTaskStore:
                         exit_code INTEGER,
                         attempt INTEGER NOT NULL
                     );
+                    CREATE TABLE IF NOT EXISTS submission_job (
+                        position INTEGER PRIMARY KEY,
+                        native_id TEXT NOT NULL UNIQUE
+                    );
                     """
                 )
                 expected = {
@@ -244,7 +248,11 @@ class SqliteTaskStore:
             ) from error
 
     def initialize_submission(
-        self, run_id: RunId, scheduler_ids: Mapping[TaskId, str]
+        self,
+        run_id: RunId,
+        scheduler_ids: Mapping[TaskId, str],
+        *,
+        scheduler_job_ids: Sequence[str] = (),
     ) -> None:
         """Persist the accepted scheduler identity for every compact Task."""
 
@@ -254,6 +262,14 @@ class SqliteTaskStore:
         if len(scheduler_ids) != task_space.task_count:
             raise RunStoreError(
                 f"Compact submission for Run {run_id} does not map every Task"
+            )
+        jobs = tuple(scheduler_job_ids)
+        if any(
+            type(native_id) is not str or not native_id.strip() or "\x00" in native_id
+            for native_id in jobs
+        ) or len(set(jobs)) != len(jobs):
+            raise RunStoreError(
+                f"Compact submission for Run {run_id} has invalid root identities"
             )
         rows: list[tuple[object, ...]] = []
         for ordinal in range(task_space.task_count):
@@ -284,17 +300,34 @@ class SqliteTaskStore:
                 existing = connection.execute(
                     "SELECT COUNT(*) FROM task_state"
                 ).fetchone()[0]
-                if existing:
+                existing_jobs = connection.execute(
+                    "SELECT COUNT(*) FROM submission_job"
+                ).fetchone()[0]
+                if existing or existing_jobs:
                     raise RunStoreError(
                         f"Compact submission for Run {run_id} is already initialized"
                     )
                 connection.executemany(
                     "INSERT INTO task_state VALUES (?, ?, ?, ?, ?, ?, ?)", rows
                 )
+                connection.executemany(
+                    "INSERT INTO submission_job VALUES (?, ?)", enumerate(jobs)
+                )
         except sqlite3.Error as error:
             raise RunStoreError(
                 f"Could not initialize compact submission for Run {run_id}: {error}"
             ) from error
+
+    def submission_job_ids(self, run_id: RunId) -> tuple[str, ...]:
+        """Return compact root scheduler identities in submission order."""
+
+        with self._open_existing(run_id) as connection:
+            return tuple(
+                row[0]
+                for row in connection.execute(
+                    "SELECT native_id FROM submission_job ORDER BY position"
+                )
+            )
 
     def all_states(self, run_id: RunId) -> tuple[TaskState, ...]:
         """Return every explicitly initialized compact Task state."""
