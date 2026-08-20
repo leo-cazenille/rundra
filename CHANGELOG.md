@@ -70,6 +70,8 @@ All notable user-visible changes are recorded here.
 
 ### Fixed
 
+- The local multiprocessing integration test now respects the CPU affinity
+  exposed by constrained CI runners while retaining parallel-process coverage.
 - Definitive Slurm and OpenPBS submission rejection now fails the registered
   Run instead of stranding it as an unknown outcome; genuinely ambiguous and
   partial submissions remain blocked against duplicate retry.
