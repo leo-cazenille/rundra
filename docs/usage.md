@@ -229,13 +229,15 @@ preparation:
       walltime: "01:00:00"
 ```
 
-`auto` builds locally and transfers the measured content-addressed SIF for a
-remote target. `--prepare-location target` submits a bounded scheduler build
-and waits for its verified digest before scientific submission. The privilege
-mode always comes from target policy. `--offline` allows only verified cache
-hits; `--rebuild-image` bypasses only the definition recipe index. Arbitrary
-definition files are trusted executable build input. Pin external base images
-inside the definition when cold-build reproducibility is required.
+`auto` builds locally and transfers the measured content-addressed SIF when the
+target policy authorizes `local`; otherwise it submits a bounded scheduler
+build when `target` is authorized. `--prepare-location target` forces the
+scheduler path. Target builds finish with a verified digest before scientific
+submission. The privilege mode always comes from target policy. `--offline`
+allows only verified cache hits; `--rebuild-image` bypasses only the definition
+recipe index. Arbitrary definition files are trusted executable build input.
+Pin external base images inside the definition when cold-build reproducibility
+is required.
 
 See `examples/python-multiprocessing/prepared/` for a complete working-tree
 example and `rundr plan ... --json` for its network-free preparation plan.

@@ -98,6 +98,7 @@ from rundra.orchestration.preparation import (
     remote_builder_version,
     remote_platform_fingerprint,
     remote_preparation_record,
+    select_remote_preparation_location,
 )
 from rundra.orchestration.progress import ProgressEvent, ProgressObserver, ProgressPhase
 from rundra.orchestration.service import (
@@ -1630,9 +1631,11 @@ def run_operation(
                 effective_source_root = prepared.source_root
                 preparation_record = prepared.record
             else:
-                if preparation.requested_location == "local" or (
-                    type(preparation.recipe.image) is PreparationImageDefinition
-                    and preparation.requested_location == "auto"
+                if (
+                    select_remote_preparation_location(
+                        preparation, target_storage.definition_build
+                    )
+                    == "local"
                 ):
                     (
                         effective_source_root,
@@ -1938,9 +1941,11 @@ def submit_operation(
                         {"target": target.name},
                     ),
                 )
-            if preparation.requested_location == "local" or (
-                type(preparation.recipe.image) is PreparationImageDefinition
-                and preparation.requested_location == "auto"
+            if (
+                select_remote_preparation_location(
+                    preparation, target_storage.definition_build
+                )
+                == "local"
             ):
                 (
                     effective_source_root,

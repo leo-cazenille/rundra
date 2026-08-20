@@ -123,10 +123,12 @@ caches. On `run` and `submit`, an explicit `--source-root` selects that mode,
 while omission uses the recipe's pinned Git commit.
 
 Project schema v3 definition recipes require targets schema v8
-`preparation.definition_build` policy. `auto` builds on the client and
-publishes by measured SHA-256 for remote execution. Forced `target` builds run
-as bounded scheduler work, not on an SSH controller, and complete before
-scientific submission because their SIF digest is not known in advance.
+`preparation.definition_build` policy. `auto` prefers a client build only when
+the target policy authorizes `local`; otherwise it selects a scheduler build
+when `target` is authorized. Client builds publish by measured SHA-256 for
+remote execution. Forced or automatic target builds run as bounded scheduler
+work, not on an SSH controller, and complete before scientific submission
+because their SIF digest is not known in advance.
 
 Project schema v4 additionally requires `definition.context.include`, a list of
 exact safe snapshot-relative files or directories. The definition itself is

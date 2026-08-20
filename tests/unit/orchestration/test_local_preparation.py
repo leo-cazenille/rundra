@@ -38,6 +38,7 @@ from rundra.orchestration.preparation import (
     probe_remote_preparation_cache,
     read_remote_preparation_result,
     remote_platform_fingerprint,
+    select_remote_preparation_location,
 )
 from rundra.ports import StagedWorkspace
 
@@ -81,6 +82,50 @@ def _recipe(image: Path, *, build: bool) -> PreparationConfig:
             else None
         ),
     )
+
+
+@pytest.mark.parametrize(
+    ("requested", "allowed", "expected"),
+    (
+        ("auto", ("target",), "target"),
+        ("auto", ("local",), "local"),
+        ("auto", ("local", "target"), "local"),
+        ("local", ("target",), "local"),
+        ("target", ("local",), "target"),
+    ),
+)
+def test_remote_definition_build_location_respects_target_policy(
+    tmp_path: Path,
+    requested: str,
+    allowed: tuple[str, ...],
+    expected: str,
+) -> None:
+    image = PreparationImageDefinition(
+        PurePath("python.sif"),
+        PurePath("python.def"),
+        ResourceRequest(
+            cpus_per_task=1,
+            memory_bytes=1024**3,
+            walltime=timedelta(minutes=5),
+        ),
+    )
+    plan = PreparationPlan(
+        PreparationConfig(PreparationSourceWorkingTree(), image, None),
+        source_mode="working_tree",
+        source_root=tmp_path,
+        requested_location=requested,
+    )
+    policy = DefinitionBuildPolicy(
+        allowed,
+        "unprivileged",
+        ResourceRequest(
+            cpus_per_task=2,
+            memory_bytes=2 * 1024**3,
+            walltime=timedelta(minutes=15),
+        ),
+    )
+
+    assert select_remote_preparation_location(plan, policy) == expected
 
 
 def _experiment(recipe: PreparationConfig) -> ExperimentSpec:

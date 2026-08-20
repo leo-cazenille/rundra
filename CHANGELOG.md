@@ -14,6 +14,9 @@ All notable user-visible changes are recorded here.
 
 - A later `fetch RUN_ID` now reuses the destination resolved by `submit` unless
   an explicit fetch destination overrides it.
+- Automatic definition-image preparation now honors target-authorized build
+  locations and selects a scheduled target build when local builds are not
+  permitted.
 
 ## [0.1.2] - 2026-08-20
 

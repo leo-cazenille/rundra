@@ -38,6 +38,22 @@ class PreparationError(RuntimeError):
     """An actionable local preparation failure."""
 
 
+def select_remote_preparation_location(
+    plan: PreparationPlan,
+    policy: DefinitionBuildPolicy | None,
+) -> str:
+    """Resolve local versus scheduled preparation without overriding target policy."""
+    if plan.requested_location != "auto":
+        return plan.requested_location
+    if (
+        type(plan.recipe.image) is PreparationImageDefinition
+        and policy is not None
+        and "local" in policy.allowed_locations
+    ):
+        return "local"
+    return "target"
+
+
 @dataclass(frozen=True, slots=True)
 class PreparedApplication:
     """Effective immutable inputs produced by preparation."""
