@@ -4,10 +4,29 @@ All notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-08-21
+
+### Added
+
+- RunRecord version 6 records typed fetch mode and definition-image recipe
+  identity while keeping pending and verified image identities distinct.
+- `rundra.artifacts.open_result_set` provides one read-only Python interface for
+  materialized results and shared-filesystem reference manifests.
+- A separately gated cold/warm prepared-submission acceptance test verifies
+  scheduled image construction, cache reuse, result references, and execution
+  on Shoal compute nodes.
+
+### Changed
+
+- Public schema support and current-version declarations now use one central
+  registry.
+
 ### Fixed
 
 - Plain `agent-guide --list-topics` and `--topic` output now renders guidance
   content instead of a path-oriented `None` placeholder.
+- Completed remote preparation now atomically persists the verified image
+  digest before publishing a successful state, including cancellation races.
 
 ## [0.1.3] - 2026-08-20
 

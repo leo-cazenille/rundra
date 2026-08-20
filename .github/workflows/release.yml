@@ -19,8 +19,13 @@ jobs:
       - name: Verify release identity
         run: |
           version=$(uv run --no-sync python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
-          if test "${GITHUB_EVENT_NAME}" = "release"; then
-            test "${GITHUB_REF_NAME}" = "v${version}"
+          if ! [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release version must be stable X.Y.Z, got: ${version}" >&2
+            exit 1
+          fi
+          if test "${GITHUB_REF_TYPE}" != "tag" || test "${GITHUB_REF_NAME}" != "v${version}"; then
+            echo "Release workflow must run from matching tag v${version}" >&2
+            exit 1
           fi
       - name: Synchronize locked environment
         run: uv sync --locked
