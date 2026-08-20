@@ -4,7 +4,7 @@ import base64
 import gzip
 from collections import deque
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -21,11 +21,24 @@ from rundra.domain.models import (
     RunId,
     Target,
 )
+from rundra.domain.preparation import (
+    DefinitionBuildPolicy,
+    PreparationConfig,
+    PreparationImageDefinition,
+    PreparationPlan,
+    PreparationSourceWorkingTree,
+)
 from rundra.domain.records import RunRecord
 from rundra.domain.scaling import ExecutionPolicy, SeedRange, WorkerPoolPolicy
 from rundra.domain.states import ExecutionState, RetrievalState
 from rundra.domain.sweeps import ExpandedConfig
 from rundra.orchestration.planner import create_plan, create_scalable_plan
+from rundra.orchestration.preparation import (
+    PreparedSource,
+    create_remote_preparation_spec,
+    remote_preparation_record,
+    select_remote_preparation_location,
+)
 from rundra.orchestration.service import (
     OrchestrationError,
     OrchestrationService,
@@ -68,6 +81,43 @@ class ScriptedTransport:
             raise outcome
         exit_code, stdout, stderr = outcome
         return CommandResult(command, exit_code, stdout, stderr, _NOW, _NOW)
+
+
+class DefinitionBuildTransport:
+    def __init__(self, image_path: PurePosixPath) -> None:
+        self.commands: list[Command] = []
+        self.next_job_id = 41
+        self.image_path = image_path
+
+    def check(self) -> CapabilityCheck:
+        return CapabilityCheck("fake-ssh")
+
+    def run(self, command: Command) -> CommandResult:
+        self.commands.append(command)
+        rendered = " ".join(command.argv)
+        exit_code = 0
+        stdout = ""
+        if "scontrol show config" in rendered:
+            stdout = "MaxArraySize = 1001\n"
+        elif "sbatch" in rendered:
+            stdout = f"{self.next_job_id}\n"
+            self.next_job_id += 1
+        elif "sacct" in rendered:
+            stdout = (
+                "41|COMPLETED|0:0|2026-08-15T10:00:00|2026-08-15T10:01:00|node01|\n"
+            )
+        elif command.argv[:2] == ("cat", "--"):
+            path = command.argv[-1]
+            if path.endswith("preparation-actions.tsv"):
+                stdout = (
+                    "image_action\tbuild_definition_image\n"
+                    "build_action\tno_application_build\n"
+                )
+            elif path.endswith("preparation-image.tsv"):
+                stdout = f"{'ab' * 32}\t{self.image_path}\n"
+            else:
+                exit_code = 1
+        return CommandResult(command, exit_code, stdout, "", _NOW, _NOW)
 
 
 class FakeRemoteStager:
@@ -193,6 +243,101 @@ def _terminal_rows(state: str, exit_code: int) -> tuple[tuple[int, str, str], ..
         f"42|{state}|{exit_code}:0|2026-08-15T10:00:00|2026-08-15T10:00:00|node01|\n"
     )
     return ((0, "", ""), (0, accounting, ""))
+
+
+def test_target_only_auto_definition_build_uses_fake_slurm_dependency(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "python.def").write_text(
+        "Bootstrap: docker\nFrom: python:3.12-slim\n", encoding="utf-8"
+    )
+    resources = ResourceRequest(
+        cpus_per_task=2,
+        memory_bytes=2 * 1024**3,
+        walltime=timedelta(minutes=15),
+    )
+    preparation = PreparationPlan(
+        PreparationConfig(
+            PreparationSourceWorkingTree(),
+            PreparationImageDefinition(
+                PurePosixPath("python.sif"),
+                PurePosixPath("python.def"),
+                resources,
+                context=(),
+            ),
+            None,
+        ),
+        source_mode="working_tree",
+        source_root=source,
+    )
+    policy = DefinitionBuildPolicy(("target",), "unprivileged", resources)
+    assert select_remote_preparation_location(preparation, policy) == "target"
+
+    original = _request(tmp_path)
+    target = original.plan.target
+    prepared_source = PreparedSource(
+        source,
+        "cd" * 32,
+        "snapshot_working_tree",
+        "working-tree",
+    )
+    remote = create_remote_preparation_spec(
+        preparation,
+        prepared_source,
+        target,
+        "ef" * 32,
+        definition_build=policy,
+        builder_version="apptainer version 1.4.0",
+    )
+    provenance = remote_preparation_record(remote, target)
+    assert original.experiment.container is not None
+    experiment = replace(
+        original.experiment,
+        container=replace(
+            original.experiment.container,
+            image=provenance.image_path,
+        ),
+    )
+    request = RunExecutionRequest(
+        create_plan(
+            experiment,
+            original.plan.units[0].config,
+            target,
+            seeds=(17,),
+            preparation=preparation,
+        ),
+        experiment,
+        source,
+        tmp_path / "retrieved",
+        preparation=provenance,
+        remote_preparation=remote,
+    )
+    transport = DefinitionBuildTransport(PurePosixPath(provenance.image_path))
+    store = JsonRunStore(tmp_path / "records")
+    service = OrchestrationService(
+        store=store,
+        stager=FakeRemoteStager(),
+        runtime=FakeRuntime(),
+        scheduler=SlurmScheduler(
+            transport,
+            timezone=UTC,
+            log_directory=PurePosixPath("/remote/.scheduler-logs"),
+        ),
+        transport=transport,
+        run_id_factory=lambda: _RUN_ID,
+        clock=lambda: _NOW,
+        framework_version="0.1.0.dev0",
+    )
+
+    submitted = service.submit_one(request).record
+
+    assert submitted.preparation is not None
+    assert submitted.preparation.builder_scheduler_id == "41"
+    assert submitted.preparation.builder_location == "target"
+    assert submitted.scheduler_job_ids == ("42",)
+    assert any("afterok:41" in command.argv for command in transport.commands)
 
 
 def test_bundled_array_reconciles_atomic_task_journals(tmp_path: Path) -> None:

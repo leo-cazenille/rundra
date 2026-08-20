@@ -111,8 +111,6 @@ def test_shoal_runs_bounded_python_processes_on_two_full_nodes(
         "2",
         "--task-slots-per-worker",
         "10",
-        "--prepare-location",
-        "target",
     )
 
     experiment = source / "prepared/experiment.yaml"
@@ -157,6 +155,10 @@ def test_shoal_runs_bounded_python_processes_on_two_full_nodes(
     assert isinstance(status, dict)
     assert status["state"] == "SUCCEEDED"
     assert status["tasks"] == {"total": _TASK_COUNT, "succeeded": _TASK_COUNT}
+    preparation_status = status["preparation"]
+    assert isinstance(preparation_status, dict)
+    assert preparation_status["location"] == "target"
+    assert preparation_status["state"] == "SUCCEEDED"
 
     fetched = _invoke(
         (
