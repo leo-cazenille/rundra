@@ -1,18 +1,17 @@
-# v0.1.1 release checklist
+# v0.1.2 release checklist
 
-This checklist turns the validated `0.1.1` source tree into the v0.1.1 release.
+This checklist turns the validated `0.1.2` source tree into the v0.1.2 release.
 Checking it does not itself authorize publishing, pushing, tagging, or changing
 external services.
 
-Release status: `v0.1.1` was published to TestPyPI and production PyPI on
-2026-08-19. The production wheel passed a clean Python 3.12 installation and
-local execution/retrieval smoke test before development resumed.
+Release status: the `v0.1.2` source candidate was frozen on 2026-08-20. It has
+not been tagged, pushed, or published to TestPyPI or production PyPI.
 
 ## Scope and contracts
 
 - [ ] Confirm the release contains only the documented local, SSH/Slurm,
   SSH/OpenPBS, and optional MCP paths and the exclusions in the specification.
-- [ ] Review [`CHANGELOG.md`](../CHANGELOG.md), confirm the `0.1.1` date and
+- [ ] Review [`CHANGELOG.md`](../CHANGELOG.md), confirm the `0.1.2` date and
   contents, and leave a new empty Unreleased section.
 - [ ] Review the [CLI reference](cli-reference.md),
   [stability policy](stability.md), and every checked
@@ -60,13 +59,13 @@ tools/check_distribution.sh dist/*.whl dist/*.tar.gz
 ## Version and publication
 
 - [ ] Confirm `pyproject.toml`, `uv.lock`, `rundr --version`, and artifact
-  metadata all report `0.1.1`.
+  metadata all report `0.1.2`.
 - [ ] Rebuild from the exact intended commit and repeat the clean wheel smoke
   test against the final artifacts.
 - [ ] Confirm the GitHub repository and PyPI project names are `rundra`, while
   the console command remains `rundr`.
 - [ ] Commit the release metadata and changelog, obtain project-owner approval,
-  then create/push the signed or annotated `v0.1.1` tag according to repository
+  then create/push the signed or annotated `v0.1.2` tag according to repository
   policy.
 - [ ] Publish the exact validated sdist and wheel to PyPI only with explicit
   authorization; verify their hashes and installed `rundr` behavior.

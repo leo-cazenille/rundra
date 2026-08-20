@@ -4,6 +4,8 @@ All notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-08-20
+
 ### Added
 
 - Actual Run submission now records the selected container runtime and its

@@ -15,7 +15,8 @@ The project, GitHub repository, Python package, and PyPI distribution are named
 ## Development status
 
 M0 through M6 implementation and release hardening are complete. Version
-`0.1.1` is published on PyPI; source development continues as `0.1.2.dev0`.
+`0.1.1` is published on PyPI; the source tree is frozen as the `0.1.2` release
+candidate and has not yet been tagged or published.
 The checked
 Shoal path has passed separately gated CPU, GPU, controlled-failure, and
 three-element Slurm-array system tests. M6.1 audits every public CLI operation,
@@ -109,13 +110,14 @@ User documentation:
 - [portable agent instructions](docs/agent-instructions.md);
 - [task-oriented tutorials](docs/tutorials/01-local-first-run.md);
 - [interface stability and internal Python API policy](docs/stability.md);
-- [v0.1.1 release checklist](docs/release-checklist.md);
+- [v0.1.2 release checklist](docs/release-checklist.md);
 - [continuous integration and system-test triggers](docs/continuous-integration.md);
 - [Shoal setup and explicitly opted-in system tests](docs/shoal.md).
 
 ## Development setup
 
-The project is not yet published on PyPI. It requires Python 3.12 and uses
+The latest published package is available on PyPI. Development requires Python
+3.12 and uses
 [`uv`](https://docs.astral.sh/uv/) for environment and dependency management.
 See the [installation and target setup guide](docs/getting-started.md) for a
 source tool installation and backend requirements.
