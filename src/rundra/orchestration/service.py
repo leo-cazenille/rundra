@@ -21,7 +21,11 @@ from rundra.domain.models import (
     Task,
     TaskId,
 )
-from rundra.domain.preparation import PreparationRecord
+from rundra.domain.preparation import (
+    PreparationBuild,
+    PreparationImageDefinition,
+    PreparationRecord,
+)
 from rundra.domain.records import RunRecord
 from rundra.domain.states import (
     ExecutionState,
@@ -39,6 +43,7 @@ from rundra.orchestration.planner import create_plan, create_sweep_plan
 from rundra.orchestration.preparation import (
     RemotePreparationSpec,
     build_remote_preparation_command,
+    read_remote_preparation_result,
 )
 from rundra.orchestration.progress import ProgressEvent, ProgressObserver, ProgressPhase
 from rundra.persistence.base import RunStore
@@ -81,6 +86,25 @@ _TERMINAL_STATES = frozenset(
         ExecutionState.CANCELLED,
     }
 )
+
+
+def _remote_preparation_resources(
+    image: object,
+    build: PreparationBuild | None,
+) -> ResourceRequest | None:
+    if type(image) is not PreparationImageDefinition:
+        return None if build is None else build.resources
+    if build is None:
+        return image.resources
+    assert image.resources.memory_bytes is not None
+    assert build.resources.memory_bytes is not None
+    assert image.resources.walltime is not None
+    assert build.resources.walltime is not None
+    return ResourceRequest(
+        cpus_per_task=max(image.resources.cpus_per_task, build.resources.cpus_per_task),
+        memory_bytes=max(image.resources.memory_bytes, build.resources.memory_bytes),
+        walltime=image.resources.walltime + build.resources.walltime,
+    )
 
 
 class OrchestrationError(RuntimeError):
@@ -770,7 +794,9 @@ class OrchestrationService:
         preparation_reference = None
         if request.remote_preparation is not None:
             build = request.remote_preparation.plan.recipe.build
-            if build is None:
+            image_recipe = request.remote_preparation.plan.recipe.image
+            resources = _remote_preparation_resources(image_recipe, build)
+            if resources is None:
                 self._fail_before_completion(record, "PREPARATION_RESOURCES_REQUIRED")
                 raise OrchestrationError(
                     code="PREPARATION_RESOURCES_REQUIRED",
@@ -787,7 +813,7 @@ class OrchestrationService:
                                     request.remote_preparation,
                                     workspace,
                                 ),
-                                build.resources,
+                                resources,
                             ),
                         )
                     )
@@ -826,6 +852,70 @@ class OrchestrationService:
                 run_id,
                 len(units),
             )
+            if type(image_recipe) is PreparationImageDefinition:
+                while True:
+                    observation = _single_observation(
+                        self._scheduler.query((preparation_reference,)),
+                        preparation_reference,
+                    )
+                    assert record.preparation is not None
+                    updated = replace(
+                        record,
+                        preparation=replace(
+                            record.preparation,
+                            builder_status=observation.state.value,
+                            builder_state=observation.native_state,
+                        ),
+                    )
+                    self.store.update(updated, expected=record)
+                    record = updated
+                    if observation.state in _TERMINAL_STATES:
+                        break
+                    sleep(1.0)
+                if observation.state is not ExecutionState.SUCCEEDED:
+                    self._fail_before_completion(record, "PREPARATION_FAILED")
+                    raise OrchestrationError(
+                        code="PREPARATION_FAILED",
+                        message=(
+                            f"Run {run_id} target definition image build "
+                            f"finished as {observation.state.value}"
+                        ),
+                        run_id=run_id,
+                    )
+                preparation_result = read_remote_preparation_result(
+                    self._transport, workspace
+                )
+                if (
+                    preparation_result is None
+                    or preparation_result.image_sha256 is None
+                    or preparation_result.image_path is None
+                ):
+                    self._fail_before_completion(record, "PREPARATION_MANIFEST_MISSING")
+                    raise OrchestrationError(
+                        code="PREPARATION_MANIFEST_MISSING",
+                        message=(
+                            f"Run {run_id} target definition build produced no "
+                            "verified image manifest"
+                        ),
+                        run_id=run_id,
+                    )
+                assert record.preparation is not None
+                updated = replace(
+                    record,
+                    container_digest=preparation_result.image_sha256,
+                    preparation=replace(
+                        record.preparation,
+                        image_sha256=preparation_result.image_sha256,
+                        image_path=preparation_result.image_path,
+                        image_action=preparation_result.image_action,
+                        build_cache_key=preparation_result.build_key,
+                        build_action=preparation_result.build_action,
+                        build_outputs=preparation_result.outputs,
+                        builder_status=ExecutionState.SUCCEEDED.value,
+                    ),
+                )
+                self.store.update(updated, expected=record)
+                record = updated
 
         try:
             scheduled_units = tuple(

@@ -49,3 +49,14 @@ def test_python_multiprocessing_project_profiles_separate_local_and_shoal() -> N
     assert shoal.destination == _EXAMPLE / "retrieved/shoal"
     assert shoal.workers == 2
     assert shoal.task_slots_per_worker == 10
+
+
+def test_python_multiprocessing_prepared_project_builds_logical_image() -> None:
+    experiment = load_experiment(_EXAMPLE / "prepared/experiment.yaml")
+    project = load_project_launch(_EXAMPLE / "prepared/rundra.yaml")
+
+    assert experiment.container is not None
+    assert str(experiment.container.image) == "python-multiprocessing.sif"
+    assert project.version == 3
+    assert project.preparation is not None
+    assert str(project.preparation.image.name) == "python-multiprocessing.sif"

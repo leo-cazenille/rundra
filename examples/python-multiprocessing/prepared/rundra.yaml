@@ -1,0 +1,25 @@
+version: 3
+default_profile: shoal
+
+defaults:
+  config: ../config.json
+  source_root: ..
+
+profiles:
+  shoal:
+    target: shoal
+    destination: ../retrieved/shoal-prepared
+    workers: 2
+    task_slots_per_worker: 10
+
+preparation:
+  source:
+    working_tree: {}
+  image:
+    name: python-multiprocessing.sif
+    definition:
+      path: python.def
+      resources:
+        cpus_per_task: 2
+        memory: 2GiB
+        walltime: "00:15:00"

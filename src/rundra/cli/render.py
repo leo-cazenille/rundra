@@ -258,8 +258,8 @@ def render_human(result: OperationResult[Any]) -> str:
             f"Valid experiment: {value.experiment.name} "
             f"(schema v{value.experiment.version})"
         )
-        if value.project is not None and value.project.version == 2:
-            rendered += "; project preparation v2 validated"
+        if value.project is not None and value.project.version >= 2:
+            rendered += f"; project preparation v{value.project.version} validated"
         return rendered
     if isinstance(value, PlanValue):
         plan = value.plan
@@ -754,7 +754,7 @@ def _result_format_version(value: object) -> int:
     if (
         isinstance(value, ValidationValue)
         and value.project is not None
-        and value.project.version == 2
+        and value.project.version >= 2
     ):
         return 2
     return _FORMAT_VERSION

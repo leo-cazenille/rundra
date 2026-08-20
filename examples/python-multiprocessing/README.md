@@ -6,14 +6,13 @@ Rundra Task. The children evaluate disjoint intervals of the midpoint rule for
 
 ## Local run
 
-The checked target permits bounded fakeroot definition builds. Rundra builds
-`python.def` once and reuses the content-addressed SIF on later runs:
+The native local baseline does not require Apptainer:
 
 ```bash
 uv run rundr plan examples/python-multiprocessing/experiment-local.yaml \
-  --targets-file examples/python-multiprocessing/targets-local.yaml --seed 17
+  --targets-file examples/minimal/targets.yaml --seed 17
 uv run rundr run examples/python-multiprocessing/experiment-local.yaml \
-  --targets-file examples/python-multiprocessing/targets-local.yaml \
+  --targets-file examples/minimal/targets.yaml \
   --seed 17 --progress
 uv run examples/python-multiprocessing/analyze.py \
   --input examples/python-multiprocessing/retrieved/local \
@@ -29,10 +28,15 @@ cache, and reuses it on later runs. The target must also permit two workers,
 ten Task slots per worker, 40 active Tasks, and at least 256 MiB per logical
 Task. Then run:
 
+Use `--prepare-location target` only when the target policy allows it and the
+compute nodes can reach the definition's base-image registry. Rundra submits a
+bounded scheduler preparation job and waits for its verified SIF before
+submitting these Python Tasks.
+
 ```bash
-uv run rundr plan examples/python-multiprocessing/experiment-shoal.yaml \
+uv run rundr plan examples/python-multiprocessing/prepared/experiment.yaml \
   --profile shoal --seeds 0:19
-uv run rundr run examples/python-multiprocessing/experiment-shoal.yaml \
+uv run rundr run examples/python-multiprocessing/prepared/experiment.yaml \
   --profile shoal --seeds 0:19 --confirm-tasks 20 --progress
 uv run examples/python-multiprocessing/analyze.py \
   --input examples/python-multiprocessing/retrieved/shoal \

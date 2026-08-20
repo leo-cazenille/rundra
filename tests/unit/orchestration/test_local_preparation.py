@@ -472,6 +472,111 @@ def test_remote_preparation_script_builds_and_reuses_target_cache(
     assert cached.record.source_action == "reuse_target_source_cache"
 
 
+def test_remote_definition_build_runs_in_bounded_preparation_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "remote/runs/run_0/source"
+    source.mkdir(parents=True)
+    (source / "python.def").write_text(
+        "Bootstrap: docker\nFrom: python:3.12-slim\n", encoding="utf-8"
+    )
+    image = PreparationImageDefinition(
+        PurePath("python.sif"),
+        PurePath("python.def"),
+        ResourceRequest(
+            cpus_per_task=2,
+            memory_bytes=2 * 1024**3,
+            walltime=timedelta(minutes=15),
+        ),
+    )
+    application_build = PreparationBuild(
+        argv=(
+            "python3",
+            "-c",
+            "from pathlib import Path; p=Path('bin/model'); p.parent.mkdir(); "
+            "p.write_text('built'); p.chmod(0o755)",
+        ),
+        outputs=(PreparationOutput(PurePath("bin/model"), True),),
+        cache_scope="target",
+        resources=ResourceRequest(
+            cpus_per_task=1,
+            memory_bytes=1024**3,
+            walltime=timedelta(minutes=5),
+        ),
+    )
+    recipe = PreparationConfig(PreparationSourceWorkingTree(), image, application_build)
+    plan = PreparationPlan(
+        recipe,
+        source_mode="working_tree",
+        source_root=tmp_path,
+        requested_location="target",
+    )
+    policy = DefinitionBuildPolicy(
+        ("target",),
+        "fakeroot",
+        ResourceRequest(
+            cpus_per_task=2,
+            memory_bytes=2 * 1024**3,
+            walltime=timedelta(minutes=15),
+        ),
+    )
+    target = _target(tmp_path)
+    prepared_source = PreparedSource(source, "34" * 32, "snapshot", "working-tree")
+    cache = tmp_path / "cache"
+    spec = create_remote_preparation_spec(
+        plan,
+        prepared_source,
+        target,
+        "56" * 32,
+        cache_root=cache,
+        definition_build=policy,
+        builder_version="apptainer version 1.4.0",
+    )
+    run_root = source.parent
+    workspace = StagedWorkspace(
+        root=run_root,
+        source=source,
+        inputs=run_root / "input",
+        config=run_root / "input/config.yaml",
+        runtime=run_root / "runtime",
+        outputs=run_root / "output",
+        logs=run_root / "logs",
+        metadata=run_root / "metadata",
+    )
+    workspace.metadata.mkdir()
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _fake_apptainer(fake_bin).rename(fake_bin / "apptainer")
+    monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ['PATH']}")
+    command = build_remote_preparation_command(spec, workspace)
+
+    cold = subprocess.run(
+        command.argv, check=False, capture_output=True, text=True, timeout=10
+    )
+    cold_result = read_remote_preparation_result(LocalTransport(), workspace)
+    warm = subprocess.run(
+        command.argv, check=False, capture_output=True, text=True, timeout=10
+    )
+    warm_result = read_remote_preparation_result(LocalTransport(), workspace)
+
+    assert (cold.returncode, cold.stderr) == (0, "")
+    assert (warm.returncode, warm.stderr) == (0, "")
+    assert "apptainer build --disable-cache --fakeroot" in command.argv[-1]
+    assert "apptainer pull" not in command.argv[-1]
+    assert cold_result is not None and cold_result.image_sha256 is not None
+    assert cold_result.image_action == "build_definition_image"
+    assert cold_result.build_action == "build_and_publish"
+    assert cold_result.build_key is not None
+    assert (workspace.source / "bin/model").read_text(encoding="utf-8") == "built"
+    assert warm_result is not None
+    assert warm_result.image_action == "reuse_definition_image_cache"
+    assert warm_result.build_action == "reuse_build_cache"
+    assert warm_result.build_key == cold_result.build_key
+    assert warm_result.image_sha256 == cold_result.image_sha256
+    assert warm_result.image_path is not None and Path(warm_result.image_path).is_file()
+
+
 def test_remote_preparation_pull_uses_a_nonexistent_destination(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

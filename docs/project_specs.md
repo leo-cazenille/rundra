@@ -1520,6 +1520,18 @@ definition path, target, platform, builder version, mode, and resources; the
 published image cache is keyed by its measured SHA-256. `--rebuild-image`
 bypasses only the recipe index. `--offline` permits only an existing verified
 definition-image cache hit.
+
+Forced `--prepare-location target` submits one scheduler job with the
+definition recipe's bounded resources and the target-owned privilege mode; it
+never builds on the SSH controller. Rundra waits for this job because the SIF
+digest does not exist before the build, reads a framework-owned manifest,
+updates `container_digest` to the measured SHA-256, and only then submits the
+scientific jobs. If an application build is also configured, the same job runs
+it sequentially inside the newly verified SIF. Its cache key is derived from
+the measured image digest, declared outputs are verified before publication,
+and the scheduler request uses the maximum CPU/memory requirement plus the sum
+of both walltimes. A failed image or application build prevents scientific
+submission and retains scheduler logs.
 For pinned Git sources, successful target preparation also publishes an
 immutable recipe index. A later warm `run` or `submit` validates the index,
 platform fingerprint, image digest, build marker, and every declared output on

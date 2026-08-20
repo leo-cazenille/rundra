@@ -167,6 +167,10 @@ def build_server(
         profile: str | None,
         execution_strategy: str,
         retrieval: str,
+        prepare_location: str,
+        rebuild: bool,
+        rebuild_image: bool,
+        offline: bool,
     ) -> tuple[OperationResult[Any], str | None]:
         experiment_path = settings.path(experiment)
         resolved = resolve_plan_inputs_operation(
@@ -176,6 +180,10 @@ def build_server(
             target=target,
             targets_file=settings.targets_file,
             profile=profile,
+            prepare_location=prepare_location,
+            rebuild=rebuild,
+            rebuild_image=rebuild_image,
+            offline=offline,
         )
         if not resolved.ok:
             return resolved, None
@@ -232,10 +240,24 @@ def build_server(
         profile: str | None = None,
         execution_strategy: str = "auto",
         retrieval: str = "manifest",
+        prepare_location: str = "auto",
+        rebuild: bool = False,
+        rebuild_image: bool = False,
+        offline: bool = False,
     ) -> dict[str, Any]:
         """Create an offline plan and a digest required for execution tools."""
         result, digest = plan_result(
-            experiment, config, seeds, target, profile, execution_strategy, retrieval
+            experiment,
+            config,
+            seeds,
+            target,
+            profile,
+            execution_strategy,
+            retrieval,
+            prepare_location,
+            rebuild,
+            rebuild_image,
+            offline,
         )
         rendered = document(result)
         if digest is not None:
@@ -253,9 +275,23 @@ def build_server(
         source_root: str | None,
         destination: str | None,
         confirm_tasks: int | None,
+        prepare_location: str,
+        rebuild: bool,
+        rebuild_image: bool,
+        offline: bool,
     ) -> dict[str, Any]:
         planned, current_digest = plan_result(
-            experiment, config, seeds, target, profile, "auto", "manifest"
+            experiment,
+            config,
+            seeds,
+            target,
+            profile,
+            "auto",
+            "manifest",
+            prepare_location,
+            rebuild,
+            rebuild_image,
+            offline,
         )
         if not planned.ok:
             return document(planned)
@@ -281,6 +317,10 @@ def build_server(
             data_dir=settings.data_dir,
             profile=profile,
             operation=operation,
+            prepare_location=prepare_location,
+            rebuild=rebuild,
+            rebuild_image=rebuild_image,
+            offline=offline,
         )
         if not resolved.ok:
             return document(resolved)
@@ -334,6 +374,10 @@ def build_server(
         source_root: str | None = None,
         destination: str | None = None,
         confirm_tasks: int | None = None,
+        prepare_location: str = "auto",
+        rebuild: bool = False,
+        rebuild_image: bool = False,
+        offline: bool = False,
     ) -> dict[str, Any]:
         """Submit an approved plan and return after durable scheduler submission."""
         return execute(
@@ -347,6 +391,10 @@ def build_server(
             source_root,
             destination,
             confirm_tasks,
+            prepare_location,
+            rebuild,
+            rebuild_image,
+            offline,
         )
 
     @server.tool()
@@ -360,6 +408,10 @@ def build_server(
         source_root: str | None = None,
         destination: str | None = None,
         confirm_tasks: int | None = None,
+        prepare_location: str = "auto",
+        rebuild: bool = False,
+        rebuild_image: bool = False,
+        offline: bool = False,
     ) -> dict[str, Any]:
         """Execute an approved short Run synchronously and retrieve results."""
         return execute(
@@ -373,6 +425,10 @@ def build_server(
             source_root,
             destination,
             confirm_tasks,
+            prepare_location,
+            rebuild,
+            rebuild_image,
+            offline,
         )
 
     @server.tool()

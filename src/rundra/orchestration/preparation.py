@@ -81,6 +81,10 @@ class RemotePreparationSpec:
     index_key: str | None = None
     target_cache_root: PurePath | None = None
     image_search_paths: tuple[PurePath, ...] = ()
+    definition_build: DefinitionBuildPolicy | None = None
+    image_recipe_key: str | None = None
+    build_key_prefix: str | None = None
+    build_key_suffix: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +92,9 @@ class RemotePreparationResult:
     outputs: tuple[PreparedOutput, ...]
     image_action: str
     build_action: str
+    image_sha256: str | None = None
+    image_path: PurePath | None = None
+    build_key: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +140,15 @@ def remote_platform_fingerprint(transport: Transport) -> str:
     if result.exit_code != 0 or not result.stdout.strip():
         raise PreparationError("Could not fingerprint target preparation platform")
     return hashlib.sha256(result.stdout.strip().encode("utf-8")).hexdigest()
+
+
+def remote_builder_version(transport: Transport) -> str:
+    """Read the target Apptainer version without performing a build."""
+    result = transport.run(Command(("apptainer", "version")))
+    value = result.stdout.strip() or result.stderr.strip()
+    if result.exit_code != 0 or not value:
+        raise PreparationError("Could not determine target Apptainer builder version")
+    return value
 
 
 def remote_preparation_index_key(
@@ -304,20 +320,68 @@ def create_remote_preparation_spec(
     *,
     cache_root: PurePath | None = None,
     image_search_paths: tuple[PurePath, ...] = (),
+    definition_build: DefinitionBuildPolicy | None = None,
+    builder_version: str | None = None,
 ) -> RemotePreparationSpec:
     """Create deterministic target preparation identities before submission."""
     build = plan.recipe.build
-    image = _prebuilt_image(plan)
+    image = plan.recipe.image
+    image_recipe_key = None
+    if type(image) is PreparationImageDefinition:
+        if (
+            definition_build is None
+            or "target" not in definition_build.allowed_locations
+        ):
+            raise PreparationError(
+                "Target policy does not allow target definition builds"
+            )
+        _validate_definition_resources(image, definition_build)
+        if builder_version is None:
+            raise PreparationError("Target definition build requires a builder version")
+        image_recipe_key = definition_image_recipe_key(
+            source_digest=source.digest,
+            image=image,
+            target_name=target.name,
+            mode=definition_build.mode,
+            platform_fingerprint=platform_fingerprint,
+            builder_version=builder_version,
+        )
+    elif type(image) is not PreparationImage:
+        raise PreparationError("Unsupported remote image recipe")
     key = None
+    build_key_prefix = None
+    build_key_suffix = None
     if build is not None:
         scope = target.name if build.cache_scope == "target" else platform_fingerprint
-        key = build_cache_key(
-            source_digest=source.digest,
-            image_digest=image.sha256,
-            build=build,
-            builder_scope=scope,
-            platform_fingerprint=platform_fingerprint,
-        )
+        if type(image) is PreparationImage:
+            key = build_cache_key(
+                source_digest=source.digest,
+                image_digest=image.sha256,
+                build=build,
+                builder_scope=scope,
+                platform_fingerprint=platform_fingerprint,
+            )
+        else:
+            marker = "RUNDRA_IMAGE_DIGEST"
+            canonical = json.dumps(
+                {
+                    "build": {
+                        "argv": list(build.argv),
+                        "cache_scope": build.cache_scope,
+                        "outputs": [
+                            {"executable": item.executable, "path": str(item.path)}
+                            for item in build.outputs
+                        ],
+                    },
+                    "builder_scope": scope,
+                    "image_digest": marker,
+                    "platform_fingerprint": platform_fingerprint,
+                    "source_digest": source.digest,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            build_key_prefix, build_key_suffix = canonical.split(marker)
     return RemotePreparationSpec(
         plan=plan,
         source_digest=source.digest,
@@ -327,7 +391,7 @@ def create_remote_preparation_spec(
         build_key=key,
         index_key=(
             None
-            if build is None
+            if build is None or type(image) is PreparationImageDefinition
             else remote_preparation_index_key(plan, target, platform_fingerprint)
         ),
         target_cache_root=(
@@ -336,6 +400,10 @@ def create_remote_preparation_spec(
             else cache_root
         ),
         image_search_paths=image_search_paths,
+        definition_build=definition_build,
+        image_recipe_key=image_recipe_key,
+        build_key_prefix=build_key_prefix,
+        build_key_suffix=build_key_suffix,
     )
 
 
@@ -344,7 +412,27 @@ def remote_preparation_record(
     target: Target,
 ) -> PreparationRecord:
     """Create pre-submission target preparation provenance."""
-    recipe = _prebuilt_image(spec.plan)
+    recipe = spec.plan.recipe.image
+    if type(recipe) is PreparationImageDefinition:
+        assert spec.image_recipe_key is not None
+        image = (
+            (spec.target_cache_root or PurePath(str(target.workspace)) / "cache")
+            / "image-definitions"
+            / f"{spec.image_recipe_key}.sif"
+        )
+        return PreparationRecord(
+            source_identity=spec.source_identity,
+            source_digest=spec.source_digest,
+            source_action=spec.source_action,
+            image_uri=f"definition:{recipe.path}",
+            image_sha256=spec.image_recipe_key,
+            image_path=image,
+            image_action="build_definition_on_target",
+            resolution_location="target",
+            builder_location="target",
+        )
+    if type(recipe) is not PreparationImage:
+        raise PreparationError("Unsupported remote image recipe")
     image = (
         (spec.target_cache_root or PurePath(str(target.workspace)) / "cache")
         / "images"
@@ -371,6 +459,8 @@ def build_remote_preparation_command(
     """Render one bounded target job that verifies, builds, and publishes caches."""
     plan = spec.plan
     recipe = plan.recipe
+    if type(recipe.image) is PreparationImageDefinition:
+        return _build_remote_definition_command(spec, workspace)
     image_recipe = _prebuilt_image(plan)
     target_cache = spec.target_cache_root or workspace.root.parent.parent / "cache"
     image = target_cache / "images" / f"{image_recipe.sha256}.sif"
@@ -571,6 +661,213 @@ def build_remote_preparation_command(
     return Command(("/bin/sh", "-c", "\n".join(lines)))
 
 
+def _build_remote_definition_command(
+    spec: RemotePreparationSpec,
+    workspace: StagedWorkspace,
+) -> Command:
+    recipe = spec.plan.recipe.image
+    policy = spec.definition_build
+    if type(recipe) is not PreparationImageDefinition or policy is None:
+        raise PreparationError("Remote definition preparation is incomplete")
+    assert spec.image_recipe_key is not None
+    cache = spec.target_cache_root or workspace.root.parent.parent / "cache"
+    index_root = cache / "image-definitions"
+    index = index_root / f"{spec.image_recipe_key}.sha256"
+    stable_image = index_root / f"{spec.image_recipe_key}.sif"
+    lock = cache / "locks" / f"definition-{spec.image_recipe_key}.lock"
+    definition = workspace.source / recipe.path
+    lines = [
+        "set -eu",
+        "umask 077",
+        f"cache={shlex.quote(str(cache))}",
+        f"index_root={shlex.quote(str(index_root))}",
+        f"index={shlex.quote(str(index))}",
+        f"image={shlex.quote(str(stable_image))}",
+        f"lock={shlex.quote(str(lock))}",
+        f"definition={shlex.quote(str(definition))}",
+        'mkdir -p -- "$cache/images" "$index_root" "$cache/locks"',
+        "test -f \"$definition\" && test ! -L \"$definition\" || { printf '%s\\n' 'definition missing or symlinked' >&2; exit 66; }",
+        "attempt=0",
+        'while ! mkdir -- "$lock" 2>/dev/null; do',
+        "  attempt=$((attempt + 1))",
+        "  [ \"$attempt\" -lt 900 ] || { printf '%s\\n' 'definition cache lock timeout' >&2; exit 75; }",
+        "  sleep 1",
+        "done",
+        "trap 'rmdir -- \"$lock\" 2>/dev/null || :' EXIT HUP INT TERM",
+        "image_action=reuse_definition_image_cache",
+        "build_action=not_requested",
+        f'if [ -f "$index" ] && [ -f "$image" ] && [ {"false" if spec.plan.rebuild_image else "true"} = true ]; then',
+        '  digest=$(cat -- "$index")',
+        "  actual=$(sha256sum -- \"$image\" | cut -d' ' -f1)",
+        "  [ \"$actual\" = \"$digest\" ] || { printf '%s\\n' 'definition image cache mismatch' >&2; exit 65; }",
+        "else",
+    ]
+    if spec.plan.offline:
+        lines.append(
+            "  printf '%s\\n' 'definition image unavailable in offline mode' >&2; exit 69"
+        )
+    else:
+        build_args = ["apptainer", "build", "--disable-cache"]
+        if policy.mode == "fakeroot":
+            build_args.append("--fakeroot")
+        lines.extend(
+            (
+                '  work=$(mktemp -d "$index_root/.build.XXXXXX")',
+                '  built="$work/image.sif"',
+                "  "
+                + shlex.join((*build_args, "$built", "$definition"))
+                .replace("'$built'", '"$built"')
+                .replace("'$definition'", '"$definition"'),
+                "  digest=$(sha256sum -- \"$built\" | cut -d' ' -f1)",
+                '  content="$cache/images/$digest.sif"',
+                '  if [ ! -f "$content" ]; then chmod a-w -- "$built"; mv -- "$built" "$content"; else rm -f -- "$built"; fi',
+                '  image_tmp="$work/stable.sif"',
+                '  cp -- "$content" "$image_tmp"',
+                '  chmod a-w -- "$image_tmp"',
+                '  mv -f -- "$image_tmp" "$image"',
+                '  index_tmp="$work/index"',
+                '  printf \'%s\\n\' "$digest" > "$index_tmp"',
+                '  chmod a-w -- "$index_tmp"',
+                '  mv -f -- "$index_tmp" "$index"',
+                '  rmdir -- "$work"',
+                "  image_action=build_definition_image",
+            )
+        )
+    lines.extend(
+        (
+            "  actual=$(sha256sum -- \"$image\" | cut -d' ' -f1)",
+            "  [ \"$actual\" = \"$digest\" ] || { printf '%s\\n' 'published image digest mismatch' >&2; exit 65; }",
+            "fi",
+            'rmdir -- "$lock"',
+            "trap - EXIT HUP INT TERM",
+        )
+    )
+    if spec.plan.recipe.build is not None:
+        lines.extend(_remote_definition_application_lines(spec, workspace))
+    lines.extend(
+        (
+            f"actions_tmp={shlex.quote(str(workspace.metadata / '.preparation-actions.tmp'))}",
+            f"actions={shlex.quote(str(workspace.metadata / 'preparation-actions.tsv'))}",
+            'printf \'image_action\\t%s\\nbuild_action\\t%s\\n\' "$image_action" "$build_action" > "$actions_tmp"',
+            'chmod a-w -- "$actions_tmp"',
+            'mv -- "$actions_tmp" "$actions"',
+            f"image_manifest_tmp={shlex.quote(str(workspace.metadata / '.preparation-image.tmp'))}",
+            f"image_manifest={shlex.quote(str(workspace.metadata / 'preparation-image.tsv'))}",
+            'printf \'%s\\t%s\\n\' "$digest" "$image" > "$image_manifest_tmp"',
+            'chmod a-w -- "$image_manifest_tmp"',
+            'mv -- "$image_manifest_tmp" "$image_manifest"',
+        )
+    )
+    return Command(("/bin/sh", "-c", "\n".join(lines)))
+
+
+def _remote_definition_application_lines(
+    spec: RemotePreparationSpec,
+    workspace: StagedWorkspace,
+) -> tuple[str, ...]:
+    build = spec.plan.recipe.build
+    if build is None or spec.build_key_prefix is None or spec.build_key_suffix is None:
+        raise PreparationError("Remote definition application key is incomplete")
+    lines = [
+        f"build_prefix={shlex.quote(spec.build_key_prefix)}",
+        f"build_suffix={shlex.quote(spec.build_key_suffix)}",
+        'build_key=$(printf \'%s%s%s\' "$build_prefix" "$digest" "$build_suffix" | sha256sum | cut -d\' \' -f1)',
+        'entry="$cache/builds/$build_key"',
+        'build_lock="$cache/locks/build-$build_key.lock"',
+        'mkdir -p -- "$cache/builds"',
+        "attempt=0",
+        'while ! mkdir -- "$build_lock" 2>/dev/null; do',
+        "  attempt=$((attempt + 1))",
+        "  [ \"$attempt\" -lt 900 ] || { printf '%s\\n' 'build cache lock timeout' >&2; exit 75; }",
+        "  sleep 1",
+        "done",
+        "trap 'rmdir -- \"$build_lock\" 2>/dev/null || :' EXIT HUP INT TERM",
+        f'if [ ! -f "$entry/.complete" ] || {"true" if spec.plan.rebuild else "false"}; then',
+        "  build_action=build_and_publish",
+        '  work=$(mktemp -d "$cache/builds/.work.XXXXXX")',
+        '  publish=$(mktemp -d "$cache/builds/.publish.XXXXXX")',
+        f'  cp -a -- {shlex.quote(str(workspace.source))}/. "$work"/',
+        '  chmod -R u+w -- "$work"',
+        "  "
+        + shlex.join(
+            (
+                "apptainer",
+                "exec",
+                "--cleanenv",
+                "--no-eval",
+                "--bind",
+                "$work:/workspace:rw",
+                "--cwd",
+                "/workspace",
+                "$image",
+                *build.argv,
+            )
+        )
+        .replace("'$work:/workspace:rw'", '"$work:/workspace:rw"')
+        .replace("'$image'", '"$image"'),
+    ]
+    for output in build.outputs:
+        rendered = shlex.quote(str(output.path))
+        lines.extend(
+            (
+                f'  output="$work"/{rendered}',
+                "  [ -f \"$output\" ] || { printf '%s\\n' 'declared output missing' >&2; exit 66; }",
+            )
+        )
+        if output.executable:
+            lines.append(
+                "  [ -x \"$output\" ] || { printf '%s\\n' 'declared output not executable' >&2; exit 66; }"
+            )
+    lines.extend(
+        (
+            '  mkdir -p -- "$publish/source"',
+            '  cp -a -- "$work"/. "$publish/source"/',
+            '  : > "$publish/.complete"',
+            '  chmod -R a-w -- "$publish"',
+            '  rm -rf -- "$entry"',
+            '  mv -- "$publish" "$entry"',
+            '  rm -rf -- "$work"',
+            "else",
+            "  build_action=reuse_build_cache",
+            "fi",
+            f"run_source_tmp={shlex.quote(str(workspace.root / '.prepared-source'))}",
+            'rm -rf -- "$run_source_tmp"',
+            'cp -a -- "$entry/source" "$run_source_tmp"',
+            'chmod -R a-w -- "$run_source_tmp"',
+            f"chmod -R u+w -- {shlex.quote(str(workspace.source))}",
+            f"rm -rf -- {shlex.quote(str(workspace.source))}",
+            f'mv -- "$run_source_tmp" {shlex.quote(str(workspace.source))}',
+            'rmdir -- "$build_lock"',
+            "trap - EXIT HUP INT TERM",
+            f"manifest_tmp={shlex.quote(str(workspace.metadata / '.preparation-outputs.tmp'))}",
+            f"manifest={shlex.quote(str(workspace.metadata / 'preparation-outputs.tsv'))}",
+            'rm -f -- "$manifest_tmp"',
+        )
+    )
+    for output in build.outputs:
+        rendered = shlex.quote(str(output.path))
+        executable = "1" if output.executable else "0"
+        lines.extend(
+            (
+                f"output={shlex.quote(str(workspace.source))}/{rendered}",
+                "output_digest=$(sha256sum -- \"$output\" | cut -d' ' -f1)",
+                f'printf \'%s\\t%s\\t%s\\n\' "$output_digest" {executable} {rendered} >> "$manifest_tmp"',
+            )
+        )
+    lines.extend(
+        (
+            'chmod a-w -- "$manifest_tmp"',
+            'mv -- "$manifest_tmp" "$manifest"',
+            f"build_manifest_tmp={shlex.quote(str(workspace.metadata / '.preparation-build.tmp'))}",
+            f"build_manifest={shlex.quote(str(workspace.metadata / 'preparation-build.txt'))}",
+            'printf \'%s\\n\' "$build_key" > "$build_manifest_tmp"',
+            'chmod a-w -- "$build_manifest_tmp"',
+            'mv -- "$build_manifest_tmp" "$build_manifest"',
+        )
+    )
+    return tuple(lines)
+
+
 def read_remote_preparation_result(
     transport: Transport,
     workspace: StagedWorkspace,
@@ -590,10 +887,29 @@ def read_remote_preparation_result(
     if set(actions) != {"image_action", "build_action"}:
         raise PreparationError("Target preparation action manifest is incomplete")
     outputs = read_remote_prepared_outputs(transport, workspace) or ()
+    image_sha256 = None
+    image_path = None
+    image_result = transport.run(
+        Command(("cat", "--", str(workspace.metadata / "preparation-image.tsv")))
+    )
+    if image_result.exit_code == 0:
+        fields = image_result.stdout.strip().split("\t")
+        if len(fields) == 2 and _is_sha256(fields[0]):
+            image_sha256 = fields[0]
+            image_path = PurePath(fields[1])
+    build_key = None
+    build_result = transport.run(
+        Command(("cat", "--", str(workspace.metadata / "preparation-build.txt")))
+    )
+    if build_result.exit_code == 0 and _is_sha256(build_result.stdout.strip()):
+        build_key = build_result.stdout.strip()
     return RemotePreparationResult(
         outputs,
         actions["image_action"],
         actions["build_action"],
+        image_sha256,
+        image_path,
+        build_key,
     )
 
 

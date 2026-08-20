@@ -96,6 +96,7 @@ from rundra.orchestration.preparation import (
     prepare_source_snapshot,
     probe_remote_preparation_cache,
     read_remote_preparation_result,
+    remote_builder_version,
     remote_platform_fingerprint,
     remote_preparation_record,
 )
@@ -1359,10 +1360,9 @@ def _remote_preparation_inputs(
     local_storage: PreparationStorageConfig,
     target_storage: PreparationStorageConfig,
 ) -> tuple[Path, ExperimentSpec, PreparationRecord, RemotePreparationSpec]:
-    if plan.recipe.build is None:
-        raise PreparationError(
-            "Remote preparation requires an explicit build recipe and resources"
-        )
+    image = plan.recipe.image
+    if plan.recipe.build is None and type(image) is not PreparationImageDefinition:
+        raise PreparationError("Remote preparation requires bounded build resources")
     source = prepare_source_snapshot(
         plan,
         source_root=source_root,
@@ -1381,6 +1381,12 @@ def _remote_preparation_inputs(
         fingerprint,
         cache_root=target_storage.cache_root,
         image_search_paths=target_storage.image_search_paths,
+        definition_build=target_storage.definition_build,
+        builder_version=(
+            remote_builder_version(transport)
+            if type(image) is PreparationImageDefinition
+            else None
+        ),
     )
     record = remote_preparation_record(spec, target)
     assert experiment.container is not None
@@ -1398,6 +1404,8 @@ def _cached_remote_preparation_inputs(
     transport: Transport,
     target_storage: PreparationStorageConfig,
 ) -> tuple[ExperimentSpec, PreparationRecord, PurePath] | None:
+    if type(plan.recipe.image) is PreparationImageDefinition:
+        return None
     cached = probe_remote_preparation_cache(
         plan,
         experiment,

@@ -1,13 +1,13 @@
 version: 1
 
 experiment:
-  name: python-multiprocessing-shoal
+  name: python-multiprocessing-shoal-prepared
 
 command:
   argv: [python3, main.py, --config, "{config}", --seed, "{seed}"]
 
 container:
-  image: /absolute/path/to/python-capable-cpu-image.sif
+  image: python-multiprocessing.sif
   gpu: false
 
 resources:
