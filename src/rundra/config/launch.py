@@ -135,7 +135,10 @@ class ProjectLaunchConfig:
                 raise ValueError("ProjectLaunchConfig default profile is invalid")
         if self.version == 1 and self.preparation is not None:
             raise ValueError("ProjectLaunchConfig v1 cannot define preparation")
-        if self.version in {2, 3, 4} and type(self.preparation) is not PreparationConfig:
+        if (
+            self.version in {2, 3, 4}
+            and type(self.preparation) is not PreparationConfig
+        ):
             raise ValueError("ProjectLaunchConfig v2+ requires preparation")
         object.__setattr__(self, "profiles", MappingProxyType(profiles))
 

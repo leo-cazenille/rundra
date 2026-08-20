@@ -265,7 +265,10 @@ preparation:
         "package",
     )
 
-    source.write_text(document.replace("      context: {include: [requirements.txt, package]}\n", ""), encoding="utf-8")
+    source.write_text(
+        document.replace("      context: {include: [requirements.txt, package]}\n", ""),
+        encoding="utf-8",
+    )
     with pytest.raises(ConfigError) as caught:
         load_project_launch(source)
     assert caught.value.path == ("preparation", "image", "definition", "context")

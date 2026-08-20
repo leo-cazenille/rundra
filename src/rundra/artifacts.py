@@ -5,7 +5,12 @@ import tarfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from rundra.orchestration.shards import IndexedShardMember, ShardError, ShardIndex, read_shard_index
+from rundra.orchestration.shards import (
+    IndexedShardMember,
+    ShardError,
+    ShardIndex,
+    read_shard_index,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,11 +21,15 @@ class ResultShard:
     def members(self) -> tuple[PurePosixPath, ...]:
         return tuple(member.path for member in self.index.members)
 
-    def read_bytes(self, member: str | PurePosixPath, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
+    def read_bytes(
+        self, member: str | PurePosixPath, *, max_bytes: int = 64 * 1024 * 1024
+    ) -> bytes:
         """Read one indexed regular member after size and SHA-256 verification."""
 
         relative = PurePosixPath(member)
-        indexed = next((item for item in self.index.members if item.path == relative), None)
+        indexed = next(
+            (item for item in self.index.members if item.path == relative), None
+        )
         if indexed is None:
             raise ShardError(f"Member is not indexed by output shard: {relative}")
         if indexed.size_bytes > max_bytes:
@@ -35,7 +44,11 @@ def open_result_shard(path: Path) -> ResultShard:
     if not checksum.is_file() or checksum.is_symlink():
         raise ShardError(f"Output shard checksum is missing: {checksum}")
     fields = checksum.read_text(encoding="ascii").split()
-    if not fields or len(fields[0]) != 64 or any(c not in "0123456789abcdef" for c in fields[0]):
+    if (
+        not fields
+        or len(fields[0]) != 64
+        or any(c not in "0123456789abcdef" for c in fields[0])
+    ):
         raise ShardError("Output shard checksum is invalid")
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -50,7 +63,12 @@ def _read_verified_member(path: Path, indexed: IndexedShardMember) -> bytes:
     try:
         with tarfile.open(path, mode="r:") as archive:
             member = archive.getmember(indexed.path.as_posix())
-            if not member.isfile() or member.issym() or member.islnk() or member.size != indexed.size_bytes:
+            if (
+                not member.isfile()
+                or member.issym()
+                or member.islnk()
+                or member.size != indexed.size_bytes
+            ):
                 raise ShardError(f"Unsafe or inconsistent shard member: {indexed.path}")
             stream = archive.extractfile(member)
             if stream is None:

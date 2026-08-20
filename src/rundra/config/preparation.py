@@ -203,9 +203,7 @@ def _image(
                         message="Definition context include must be a list",
                     )
                 context = tuple(
-                    _safe_relative_path(
-                        item, source, (*context_path, "include", index)
-                    )
+                    _safe_relative_path(item, source, (*context_path, "include", index))
                     for index, item in enumerate(raw_include)
                 )
             return PreparationImageDefinition(

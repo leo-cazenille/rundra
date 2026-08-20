@@ -57,6 +57,7 @@ def test_python_multiprocessing_prepared_project_builds_logical_image() -> None:
 
     assert experiment.container is not None
     assert str(experiment.container.image) == "python-multiprocessing.sif"
-    assert project.version == 3
+    assert project.version == 4
     assert project.preparation is not None
     assert str(project.preparation.image.name) == "python-multiprocessing.sif"
+    assert project.preparation.image.context == ()

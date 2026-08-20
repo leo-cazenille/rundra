@@ -12,8 +12,8 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 | `targets` | none | `--targets-file`, `--json` | Validate and list configured targets. |
 | `doctor` | optional `EXPERIMENT` | launch path overrides, `--connect`, `--local-target-access`, `--scheduler-probe`, `--probe-timeout`, `--no-write-probe`, `--agent`, `--json` | Audit installation, sandbox paths, target access, reversible staging, and an optional bounded scheduler submission. |
 | `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--workers`, `--task-slots-per-worker`, `--verbose`, `--progress`, `--progress-interval`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
-| `wait` | `RUN_ID` or `--last` | `--timeout`, `--poll-interval`, `--notify`, `--data-dir`, `--verbose`, `--progress`, `--progress-interval`, `--json` | Reconcile until terminal or a renewable timeout; optionally emit one terminal alert. |
-| `agent-guide` | none | `--write PATH`, `--check PATH`, `--json` | Print, install, or check portable agent instructions. |
+| `wait` | `RUN_ID` or `--last` | `--timeout`, `--poll-interval`, `--notify`, `--notify-file PATH`, `--data-dir`, `--verbose`, `--progress`, `--progress-interval`, `--json` | Reconcile until terminal or a renewable timeout; optionally emit an alert or atomic terminal JSON file. |
+| `agent-guide` | none | `--write PATH`, `--check PATH`, `--topic TOPIC`, `--list-topics`, `--json` | Print, install, check, or select bounded portable agent instructions. |
 | `help` | optional `COMMAND` | none | List commands and the common workflow, or show one command's detailed arguments and options. |
 | `submit` | `EXPERIMENT` | same as `run` | Submit asynchronously when the selected scheduler supports it. |
 
@@ -25,6 +25,9 @@ seconds (10 by default), except for phase and terminal updates. Captured
 `--json --progress` emits a warning because terminal redraws may inflate agent
 transcripts. Agents should use blocking `wait --json`, or renew `wait --timeout
 300 --json` when their tool-call deadline is bounded.
+`wait --notify-file PATH` writes nothing until a terminal observation, then
+atomically replaces a mode-0600 JSON document containing the Run ID, state, and
+observation time. A path already owned by another Run and symlinks are rejected.
 For synchronous arrays the bar total is six lifecycle units plus the number of
 Tasks; scheduler updates show terminal/total, running, queued, failed, and
 allocated-node counts.
@@ -93,7 +96,7 @@ execution:
   max_concurrent_jobs: 128
 ```
 
-Prepared project-v2/v3 operations accept `--prepare-location auto|local|target`,
+Prepared project-v2/v3/v4 operations accept `--prepare-location auto|local|target`,
 `--rebuild`, `--rebuild-image`, and `--offline`. `--rebuild` bypasses only the
 compiled-application cache; `--rebuild-image` bypasses only the definition-image
 cache. `plan` additionally accepts `--source-root` to
@@ -106,6 +109,18 @@ Project schema v3 definition recipes require targets schema v8
 publishes by measured SHA-256 for remote execution. Forced `target` builds run
 as bounded scheduler work, not on an SSH controller, and complete before
 scientific submission because their SIF digest is not known in advance.
+
+Project schema v4 additionally requires `definition.context.include`, a list of
+exact safe snapshot-relative files or directories. The definition itself is
+always included. Only these inputs identify the definition-image recipe, while
+v3 retains whole-source identity for compatibility. Resource-bound changes do
+not invalidate an otherwise identical image recipe.
+
+Large Run JSON is bounded. Responses with at least 1,000 materialized Tasks use
+format version 5 and return aggregate `task_space`, `tasks`, and worker progress
+instead of complete seed, exit-code, or Task-detail arrays. Use paginated
+`rundr tasks` for individual state and `rundr inspect` only when the complete
+durable record is specifically required.
 
 Launch values resolve in this order: explicit CLI, selected project profile,
 project defaults, user defaults, then built-ins. Automatic locations are:

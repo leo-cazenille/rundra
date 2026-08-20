@@ -1065,13 +1065,18 @@ to roughly 640 result files including checksums.
 rejects unsafe paths and symlink parents, and atomically publishes only selected
 Task files. `--mode archive` is rejected for unsharded Runs. On a shared target,
 `auto --extract` selects archive materialization instead of a reference. Without
-`--extract`, archives remain compact and project analysis may consume their
-indexes and members directly.
+`--extract`, archives remain compact. Python analysis may use the public
+`rundra.artifacts.open_result_shard` reader, which verifies the whole-archive
+sidecar, validates the bounded index, and checks a selected member's size and
+SHA-256 before returning bytes.
 
 Human rendering of large plans, submissions, status responses, and fetch Task
-selections is bounded: it reports totals with head/tail previews and directs the
-caller to `--json` or the paginated `tasks` command for complete detail. Public
-JSON documents retain every schema-defined item and are not compacted.
+selections is bounded. Public lifecycle JSON for Runs with at least 1,000
+materialized Tasks is also bounded and uses envelope format version 5: it emits
+TaskSpace identity and aggregate counts rather than complete Task, seed, or
+exit-code arrays. Individual state remains available through paginated `tasks`;
+`inspect` remains the explicit complete durable-record operation. Existing
+materialized RunRecord schemas are not silently relabeled or rewritten.
 
 `rundr purge` applies retention only to one exact terminal Run derived from its
 persisted target and Run ID. Outputs are the default scope; `--workspace`
@@ -1348,6 +1353,10 @@ The installed agent-guide section remains self-contained and links to the
 canonical PyPI project overview for additional installation and workflow
 documentation. Because that page describes the latest release, installed help
 and version output remain authoritative for local behavior.
+Agents can request only the relevant `setup`, `launch`, `large-runs`,
+`lifecycle`, `results`, `preparation`, or `recovery` guidance through
+`agent-guide --topic` or MCP `get_guidance`, avoiding repeated full-guide
+transmission.
 
 The version-2 doctor result is the first-run capability boundary for humans and
 agents. Bare `rundr doctor` exercises the effective local Run store and
@@ -1508,6 +1517,15 @@ trusted project input; external base tags may be mutable, so Rundra records and
 caches the measured SIF digest but cannot claim cold-build reproducibility
 unless the definition itself pins its base identity.
 
+Project schema version 4 requires each definition recipe to declare
+`context.include`, including an explicit empty list when the definition has no
+additional build inputs. Entries are unique, safe snapshot-relative files or
+directories; the definition file is included automatically. The recipe key
+uses the deterministic content of only this context. Version 3 continues to
+use the complete source snapshot identity for compatibility. Resource limits
+authorize execution but are not image content and therefore do not alter the
+version-4 recipe identity.
+
 Targets schema version 8 may authorize definition builds with
 `preparation.definition_build`. The target owner selects allowed `local` and/or
 `target` locations, `unprivileged` or `fakeroot` mode, and hard resource
@@ -1515,8 +1533,8 @@ ceilings. Project files cannot select privilege. In `auto` mode for an SSH
 target, Rundra prefers a local content-addressed build followed by verified
 atomic publication to the target image cache. Local builds execute
 `apptainer build` as an argument array against the immutable source snapshot,
-never the developer tree. The definition recipe key includes source content,
-definition path, target, platform, builder version, mode, and resources; the
+never the developer tree. The definition recipe key includes selected context
+content, definition path, target, platform, builder version, and mode; the
 published image cache is keyed by its measured SHA-256. `--rebuild-image`
 bypasses only the recipe index. `--offline` permits only an existing verified
 definition-image cache hit.
@@ -1559,6 +1577,10 @@ redraws may be retained by an agent transcript. Agent automation should omit
 `--progress` and consume the single final JSON document. `wait --notify` emits
 one local terminal alert only after terminal reconciliation; it adds no daemon,
 webhook, credentials, or scheduler-side callback.
+`wait --notify-file PATH` is the noninteractive counterpart. It writes no
+intermediate observations and atomically publishes one mode-0600 JSON document
+only after terminal reconciliation. Existing symlinks and files identifying a
+different Run are rejected.
 
 For synchronous arrays, progress contains six lifecycle units plus one unit per
 planned Task. Terminal Task observations advance the bar and its detail reports
@@ -3598,6 +3620,14 @@ publish exit journals used by lifecycle reconciliation. Compact TaskSpace
 worker submission, requeue recovery, remote shard ingestion, and launch-time
 retrieval policy remain unconnected; worker-pool support beyond materialized
 Runs is still planning-only.
+
+Slurm worker lanes append versioned `START` and `FINISH` events before and
+after every logical Task. Reconciliation treats started Tasks as running even
+while their scheduler worker remains active, counts distinct active worker
+references, and derives throughput and ETA only after a minimum observation
+window and completed sample. Legacy two-column terminal journals remain
+readable. These observations improve truthful status without changing durable
+Task identity or retry semantics.
 
 ---
 

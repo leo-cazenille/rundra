@@ -13,6 +13,7 @@ from rundra.cli.agent_guide import (
     agent_guide_operation,
 )
 from rundra.cli.capability_doctor import DoctorValue, doctor_operation
+from rundra.cli.notification import write_wait_notification
 from rundra.cli.operations import (
     LAST_RUN_SELECTOR,
     RunValue,
@@ -41,7 +42,6 @@ from rundra.cli.progress import (
     close_progress_reporter,
     create_progress_reporter,
 )
-from rundra.cli.notification import write_wait_notification
 from rundra.cli.render import render_human, render_json
 from rundra.persistence import (
     JsonRunStore,

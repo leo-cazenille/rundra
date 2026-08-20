@@ -738,7 +738,9 @@ def _result_format_version(value: object) -> int:
     if isinstance(value, StatusValue):
         return value.format_version
     if isinstance(value, WaitValue):
-        return 5 if len(value.status.task_details) >= 1000 else value.status.format_version
+        return (
+            5 if len(value.status.task_details) >= 1000 else value.status.format_version
+        )
     if isinstance(value, CancelValue) and value.status.preparation is not None:
         return value.status.format_version
     if isinstance(value, CancelValue):
@@ -1040,7 +1042,9 @@ def _status_document(value: StatusValue) -> dict[str, Any]:
         "retrieval_state": value.retrieval_state.value,
         "native_state": value.native_state,
         "scheduler_job_ids": list(value.scheduler_job_ids),
-        "task_details": [] if compact else [
+        "task_details": []
+        if compact
+        else [
             {
                 "task_id": str(task.task_id),
                 "seed": task.seed,

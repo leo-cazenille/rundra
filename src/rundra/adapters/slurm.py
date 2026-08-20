@@ -1049,7 +1049,7 @@ def render_slurm_bundle_manifest(
                         f"        # task_id={mapping.task_id} seed={mapping.seed}",
                         (
                             f"        printf 'START\\t%s\\t%s\\t%s\\n' "
-                            f"{mapping.task_id} \"$(date +%s)\" \"$(hostname)\" "
+                            f'{mapping.task_id} "$(date +%s)" "$(hostname)" '
                             '>> "$journal"'
                         ),
                         "        set +e",
@@ -1062,7 +1062,7 @@ def render_slurm_bundle_manifest(
                         ),
                         (
                             f"        printf 'FINISH\\t%s\\t%s\\t%s\\t%s\\n' "
-                            f"{mapping.task_id} \"$task_status\" \"$(date +%s)\" "
+                            f'{mapping.task_id} "$task_status" "$(date +%s)" '
                             '"$(hostname)" >> "$journal"'
                         ),
                     )

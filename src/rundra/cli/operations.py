@@ -331,9 +331,7 @@ class StatusValue:
         if self.active_workers is not None and (
             type(self.active_workers) is not int or self.active_workers < 0
         ):
-            raise ValueError(
-                "StatusValue active_workers must be non-negative or None"
-            )
+            raise ValueError("StatusValue active_workers must be non-negative or None")
         for name in ("throughput_tasks_per_second", "eta_seconds"):
             item = getattr(self, name)
             if item is not None and (type(item) not in (int, float) or item < 0):

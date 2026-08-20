@@ -239,6 +239,7 @@ def test_large_bundled_cancel_reaches_scancel_before_task_reconciliation(
             (0, "", ""),
             (0, "42|CANCELLED|N/A|(null)\n", ""),
             (0, cancelled_workers, ""),
+            (0, "", ""),
         )
     )
 
@@ -251,7 +252,7 @@ def test_large_bundled_cancel_reaches_scancel_before_task_reconciliation(
 
     cancellation_commands = transport.commands[command_count:]
     assert cancellation_commands[0] == Command(("scancel", "--", "42"))
-    assert len(cancellation_commands) == 3
+    assert len(cancellation_commands) == 4
     assert cancelled.run.state is ExecutionState.CANCELLED
     assert {task.state for task in cancelled.run.tasks} == {ExecutionState.CANCELLED}
     assert len(cancelled.artifacts) >= 2_000
@@ -262,7 +263,7 @@ def test_large_bundled_cancel_reaches_scancel_before_task_reconciliation(
 
     assert result.ok and isinstance(result.value, CancelValue)
     assert result.value.status.state is ExecutionState.CANCELLED
-    assert len(transport.commands) == command_count + 3
+    assert len(transport.commands) == command_count + 4
 
 
 @pytest.mark.parametrize(

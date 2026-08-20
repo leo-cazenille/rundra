@@ -122,8 +122,8 @@ def agent_guide_operation(
             "agent-guide", AgentGuideValue(content + "\n", "topics")
         )
     if topic is not None:
-        content = GUIDE_TOPICS.get(topic)
-        if content is None:
+        guidance = GUIDE_TOPICS.get(topic)
+        if guidance is None:
             return OperationResult.failure(
                 "agent-guide",
                 OperationError(
@@ -131,7 +131,7 @@ def agent_guide_operation(
                 ),
             )
         return OperationResult.success(
-            "agent-guide", AgentGuideValue(content + "\n", "topic")
+            "agent-guide", AgentGuideValue(guidance + "\n", "topic")
         )
     if check is not None:
         try:

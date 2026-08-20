@@ -6,6 +6,15 @@ All notable user-visible changes are recorded here.
 
 ### Added
 
+- Project schema version 4 gives Apptainer definition builds an explicit context
+  allowlist, so unrelated source changes no longer invalidate image caches.
+- `wait --notify-file PATH` atomically publishes one private terminal JSON
+  document for external agent supervisors without polling transcript output.
+- `rundr agent-guide --topic TOPIC`, `--list-topics`, and MCP `get_guidance`
+  provide bounded workflow-specific instructions.
+- `rundra.artifacts.open_result_shard` verifies and reads indexed result members
+  directly from compact output archives.
+
 - `--progress-interval` throttles interactive redraws and `wait --notify`
   emits one credential-free terminal completion alert.
 
@@ -17,6 +26,11 @@ All notable user-visible changes are recorded here.
   `max_memory_per_worker` ceiling during pure planning.
 
 ### Changed
+
+- Large Run and status JSON responses are bounded and report aggregate TaskSpace
+  and worker progress instead of serializing thousands of Task details.
+- Slurm worker lanes journal Task start and finish events continuously; status
+  can report active workers, running Tasks, measured throughput, and ETA.
 
 - Progress output deduplicates unchanged observations, terminal transitions
   remain immediate, and captured `--json --progress` warns agent callers about
