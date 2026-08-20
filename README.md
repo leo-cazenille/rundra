@@ -15,9 +15,7 @@ The project, GitHub repository, Python package, and PyPI distribution are named
 ## Development status
 
 M0 through M6 implementation and release hardening are complete. Version
-`0.1.1` is published on PyPI. Version `0.1.2` passed TestPyPI validation but was
-withheld from production after acceptance testing found a retrieval-destination
-defect. Version `0.1.3` is the current release candidate with that defect fixed.
+`0.1.3` is published on PyPI. Source development continues as `0.1.4.dev0`.
 The checked
 Shoal path has passed separately gated CPU, GPU, controlled-failure, and
 three-element Slurm-array system tests. M6.1 audits every public CLI operation,

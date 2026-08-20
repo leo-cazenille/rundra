@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from rundra.cli.agent_guide import GUIDE, GUIDE_TOPICS, agent_guide_operation
+from rundra.cli.main import main
 
 
 def test_agent_guide_print_write_update_and_check(tmp_path: Path) -> None:
@@ -36,6 +37,20 @@ def test_agent_guide_exposes_bounded_topics() -> None:
     assert "worker-pool" in large.value.content
     assert unknown.error is not None
     assert unknown.error.code == "UNKNOWN_GUIDE_TOPIC"
+
+
+def test_agent_guide_plain_cli_renders_topic_content(capsys: object) -> None:
+    topics_exit = main(("agent-guide", "--list-topics"))
+    topics_output = capsys.readouterr().out  # type: ignore[attr-defined]
+    topic_exit = main(("agent-guide", "--topic", "large-runs"))
+    topic_output = capsys.readouterr().out  # type: ignore[attr-defined]
+
+    assert topics_exit == 0
+    assert all(name in topics_output for name in GUIDE_TOPICS)
+    assert topics_output.strip() != "None"
+    assert topic_exit == 0
+    assert "worker-pool" in topic_output
+    assert topic_output.strip() != "None"
 
 
 def test_agent_guide_check_reports_drift_and_rejects_bad_markers(

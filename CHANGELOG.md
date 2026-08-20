@@ -4,6 +4,11 @@ All notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Plain `agent-guide --list-topics` and `--topic` output now renders guidance
+  content instead of a path-oriented `None` placeholder.
+
 ## [0.1.3] - 2026-08-20
 
 ### Added

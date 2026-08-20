@@ -528,7 +528,7 @@ def render_human(result: OperationResult[Any]) -> str:
         )
         return header if not details else f"{header}\n{details}"
     if isinstance(value, AgentGuideValue):
-        if value.action == "printed":
+        if value.action in {"printed", "topic", "topics"}:
             return value.content.rstrip("\n")
         return f"Agent guide {value.action}: {value.path}"
     raise TypeError(f"No human renderer for {type(value).__name__}")
