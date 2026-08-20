@@ -6,6 +6,8 @@ from pathlib import Path
 
 from rundra.cli.main import main
 
+_ROOT = Path(__file__).parents[3]
+
 
 def test_v2_plan_describes_preparation_without_performing_it(
     tmp_path: Path, capsys: object
@@ -97,3 +99,32 @@ targets:
         "pulls_image": False,
     }
     assert not workspace.exists()
+
+
+def test_v3_plan_resolves_project_working_tree_source_root(capsys: object) -> None:
+    example = _ROOT / "examples/python-multiprocessing"
+
+    exit_code = main(
+        (
+            "plan",
+            str(example / "prepared/experiment.yaml"),
+            "--profile",
+            "local",
+            "--targets-file",
+            str(example / "targets-local.yaml"),
+            "--seed",
+            "7",
+            "--json",
+        )
+    )
+    captured = capsys.readouterr()  # type: ignore[attr-defined]
+    document = json.loads(captured.out)
+
+    assert exit_code == 0
+    preparation = document["plan"]["preparation"]
+    assert preparation["source"] == {
+        "git": None,
+        "mode": "working_tree",
+        "root": str(example),
+    }
+    assert preparation["image"]["kind"] == "definition"

@@ -6,6 +6,9 @@ defaults:
   source_root: ..
 
 profiles:
+  local:
+    target: local
+    destination: ../retrieved/local-prepared
   shoal:
     target: shoal
     destination: ../retrieved/shoal-prepared

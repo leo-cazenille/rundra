@@ -1134,7 +1134,15 @@ def resolve_plan_inputs_operation(
             seeds=seeds,
             resolution=resolved,
             preparation=project.preparation if project is not None else None,
-            source_root=source_root,
+            source_root=(
+                source_root
+                if source_root is not None
+                else values.source_root
+                if project is not None
+                and project.preparation is not None
+                and type(project.preparation.source) is PreparationSourceWorkingTree
+                else None
+            ),
             prepare_location=prepare_location,
             rebuild=rebuild,
             rebuild_image=rebuild_image,

@@ -576,6 +576,26 @@ def test_remote_definition_build_runs_in_bounded_preparation_command(
     assert warm_result.image_sha256 == cold_result.image_sha256
     assert warm_result.image_path is not None and Path(warm_result.image_path).is_file()
 
+    unprivileged = DefinitionBuildPolicy(
+        ("target",), "unprivileged", policy.max_resources
+    )
+    unprivileged_spec = create_remote_preparation_spec(
+        plan,
+        prepared_source,
+        target,
+        "56" * 32,
+        cache_root=cache,
+        definition_build=unprivileged,
+        builder_version="apptainer version 1.4.0",
+    )
+    unprivileged_command = build_remote_preparation_command(
+        unprivileged_spec, workspace
+    )
+    assert (
+        "apptainer build --disable-cache --ignore-subuid"
+        in (unprivileged_command.argv[-1])
+    )
+
 
 def test_remote_preparation_pull_uses_a_nonexistent_destination(
     tmp_path: Path,

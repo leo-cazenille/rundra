@@ -710,6 +710,8 @@ def _build_remote_definition_command(
         build_args = ["apptainer", "build", "--disable-cache"]
         if policy.mode == "fakeroot":
             build_args.append("--fakeroot")
+        else:
+            build_args.append("--ignore-subuid")
         lines.extend(
             (
                 '  work=$(mktemp -d "$index_root/.build.XXXXXX")',
@@ -1303,6 +1305,8 @@ def _resolve_definition_image(
             argv = [apptainer_executable, "build", "--disable-cache"]
             if policy.mode == "fakeroot":
                 argv.append("--fakeroot")
+            else:
+                argv.append("--ignore-subuid")
             argv.extend((str(built), str(definition)))
             completed = subprocess.run(
                 tuple(argv),
