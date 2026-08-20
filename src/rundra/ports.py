@@ -786,3 +786,10 @@ class ContainerRuntime(Protocol):
     def check(self) -> CapabilityCheck: ...
 
     def build_command(self, request: ContainerRequest) -> Command: ...
+
+
+@runtime_checkable
+class ContainerRuntimeIdentityProvider(Protocol):
+    """Optional execution-time extension for durable runtime provenance."""
+
+    def identity(self) -> CapabilityCheck: ...

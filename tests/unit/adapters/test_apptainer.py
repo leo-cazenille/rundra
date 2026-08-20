@@ -22,8 +22,9 @@ from rundra.ports import (
 
 
 class RemoteCheckTransport:
-    def __init__(self, exit_code: int) -> None:
+    def __init__(self, exit_code: int, stdout: str = "") -> None:
         self.exit_code = exit_code
+        self.stdout = stdout
         self.calls: list[Command] = []
 
     def check(self) -> CapabilityCheck:
@@ -32,7 +33,7 @@ class RemoteCheckTransport:
     def run(self, command: Command) -> CommandResult:
         self.calls.append(command)
         now = datetime(2026, 8, 15, tzinfo=UTC)
-        return CommandResult(command, self.exit_code, "", "", now, now)
+        return CommandResult(command, self.exit_code, self.stdout, "", now, now)
 
 
 def _request(
@@ -263,6 +264,25 @@ def test_apptainer_capability_check_reports_an_actionable_missing_runtime(
         ApptainerRuntime().check()
 
 
+def test_local_apptainer_identity_records_one_bounded_version_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import rundra.adapters.apptainer as apptainer
+
+    monkeypatch.setattr(apptainer.shutil, "which", lambda executable: "/bin/apptainer")
+    monkeypatch.setattr(
+        apptainer.subprocess,
+        "run",
+        lambda *args, **kwargs: apptainer.subprocess.CompletedProcess(
+            args[0], 0, "apptainer version 1.4.2\n", ""
+        ),
+    )
+
+    identity = ApptainerRuntime().identity()
+
+    assert identity == CapabilityCheck("apptainer", "apptainer version 1.4.2")
+
+
 @pytest.mark.parametrize("executable", ["", "   ", "bad\x00name"])
 def test_apptainer_runtime_rejects_invalid_executable_names(executable: str) -> None:
     with pytest.raises((TypeError, ValueError), match="executable"):
@@ -291,3 +311,20 @@ def test_remote_apptainer_check_runs_on_the_target_transport() -> None:
 def test_remote_apptainer_check_reports_missing_target_executable() -> None:
     with pytest.raises(ApptainerUnavailableError, match="not found remotely"):
         RemoteApptainerRuntime(RemoteCheckTransport(1)).check()
+
+
+def test_remote_apptainer_identity_uses_a_shell_free_version_probe() -> None:
+    transport = RemoteCheckTransport(0, "apptainer version 1.4.2\n")
+
+    identity = RemoteApptainerRuntime(transport, "apptainer-custom").identity()
+
+    assert identity == CapabilityCheck("apptainer", "apptainer version 1.4.2")
+    assert transport.calls == [Command(("apptainer-custom", "version"))]
+
+
+@pytest.mark.parametrize("stdout", ["", "one\ntwo\n", "x" * 257, "bad\x00version"])
+def test_apptainer_identity_rejects_unbounded_or_ambiguous_output(
+    stdout: str,
+) -> None:
+    with pytest.raises(ApptainerUnavailableError, match="invalid version"):
+        RemoteApptainerRuntime(RemoteCheckTransport(0, stdout)).identity()

@@ -6,6 +6,9 @@ All notable user-visible changes are recorded here.
 
 ### Added
 
+- Actual Run submission now records the selected container runtime and its
+  bounded version identifier when available, without making pure planning or
+  target diagnosis execute a version probe.
 - Compact archive fetch now transactionally ingests verified result-shard
   indexes into per-Task retrieval state without materializing all Task IDs.
 - Compact Slurm workers now recover from scheduler requeues using immutable

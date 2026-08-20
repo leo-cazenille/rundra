@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import subprocess
 from pathlib import PurePath
 
 from rundra.domain.models import Command
@@ -16,6 +17,7 @@ _RESERVED_ENVIRONMENT_NAMES = frozenset(
         "PREPEND_PATH",
     }
 )
+_MAX_VERSION_LENGTH = 256
 
 
 class ApptainerRuntimeError(RuntimeError):
@@ -55,6 +57,35 @@ class ApptainerRuntime:
                 f"Apptainer executable {self._executable!r} was not found on PATH"
             )
         return CapabilityCheck("apptainer")
+
+    def identity(self) -> CapabilityCheck:
+        """Execute one bounded version probe for an actual Run or submission."""
+        try:
+            resolved = shutil.which(self._executable)
+            if resolved is None:
+                raise ApptainerUnavailableError(
+                    f"Apptainer executable {self._executable!r} was not found on PATH"
+                )
+            completed = subprocess.run(
+                (resolved, "version"),
+                capture_output=True,
+                check=False,
+                encoding="utf-8",
+                errors="replace",
+                shell=False,
+                timeout=10.0,
+            )
+        except ApptainerUnavailableError:
+            raise
+        except (OSError, subprocess.SubprocessError, ValueError) as error:
+            raise ApptainerUnavailableError(
+                "Could not determine the local Apptainer runtime version"
+            ) from error
+        if completed.returncode != 0:
+            raise ApptainerUnavailableError(
+                "Could not determine the local Apptainer runtime version"
+            )
+        return CapabilityCheck("apptainer", _version_line(completed.stdout))
 
     def build_command(self, request: ContainerRequest) -> Command:
         """Construct an Apptainer exec argument vector without executing it."""
@@ -140,8 +171,31 @@ class RemoteApptainerRuntime:
             )
         return CapabilityCheck("apptainer")
 
+    def identity(self) -> CapabilityCheck:
+        """Read the target runtime version without exposing transport diagnostics."""
+        try:
+            result = self._transport.run(Command((self._executable, "version")))
+        except Exception as error:
+            raise ApptainerUnavailableError(
+                "Could not determine the remote Apptainer runtime version"
+            ) from error
+        if result.exit_code != 0:
+            raise ApptainerUnavailableError(
+                "Could not determine the remote Apptainer runtime version"
+            )
+        return CapabilityCheck("apptainer", _version_line(result.stdout))
+
     def build_command(self, request: ContainerRequest) -> Command:
         return self._runtime.build_command(request)
+
+
+def _version_line(stdout: str) -> str:
+    lines = tuple(line.strip() for line in stdout.splitlines() if line.strip())
+    if len(lines) != 1 or len(lines[0]) > _MAX_VERSION_LENGTH or "\x00" in lines[0]:
+        raise ApptainerUnavailableError(
+            "Apptainer runtime returned an invalid version identifier"
+        )
+    return lines[0]
 
 
 def _validate_command(command: Command) -> None:

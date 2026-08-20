@@ -64,6 +64,7 @@ from rundra.ports import (
     CompactSchedulerSubmission,
     ContainerRequest,
     ContainerRuntime,
+    ContainerRuntimeIdentityProvider,
     DependencyScheduler,
     FetchRequest,
     Scheduler,
@@ -892,6 +893,11 @@ class OrchestrationService:
         try:
             self._transport.check()
             self._runtime.check()
+            runtime_identity = (
+                self._runtime.identity()
+                if isinstance(self._runtime, ContainerRuntimeIdentityProvider)
+                else None
+            )
         except Exception as error:
             self._fail_before_completion(record, "CAPABILITY_CHECK_FAILED")
             raise OrchestrationError(
@@ -899,6 +905,22 @@ class OrchestrationService:
                 message=f"Run {run_id} capability check failed: {error}",
                 run_id=run_id,
             ) from error
+
+        if runtime_identity is not None:
+            runtime_metadata = {
+                "container_runtime": runtime_identity.name,
+            }
+            if runtime_identity.version is not None:
+                runtime_metadata["container_runtime_version"] = runtime_identity.version
+            updated = replace(
+                record,
+                scheduler_metadata={
+                    **record.scheduler_metadata,
+                    **runtime_metadata,
+                },
+            )
+            self.store.update(updated, expected=record)
+            record = updated
 
         self._report(
             ProgressPhase.STAGE,

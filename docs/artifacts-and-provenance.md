@@ -24,7 +24,9 @@ Every RunRecord stores:
 - scheduler Run/Task identities, array mapping, exits, nodes, scalar metadata,
   and timestamps when observed;
 - the artifact manifest; and
-- optional Git and container-digest fields without fabricated values.
+- optional Git and container-digest fields without fabricated values; and
+- the actual execution runtime name and its version when the runtime provides
+  one, in scalar metadata.
 
 The Run definition is created before staging and is not reinterpreted later.
 Lifecycle commands replace the complete versioned record atomically as new
@@ -89,11 +91,17 @@ source snapshot and exact configuration are the execution inputs actually used.
 
 The normalized experiment stores the declared image path/reference and GPU
 intent, and the target stores whether execution selected native or Apptainer.
-The `container_digest` field is present in RunRecord version 1 but v0.1 does not
-calculate an image digest or persist an Apptainer version, so ordinary CLI Runs
-record it as `null`. Rundra never invents either value. If exact image identity
-is required, use an immutable site-managed image reference and preserve it under
-the site's own image policy.
+Prepared projects verify the immutable SIF and store its SHA-256 in
+`container_digest`; ordinary projects retain `null` rather than hashing a
+mutable external image implicitly.
+
+Actual `run` and `submit` operations query the selected runtime after the
+availability check and before staging. RunRecord `scheduler_metadata` stores
+`container_runtime` and, for Apptainer-compatible execution,
+`container_runtime_version`. Native execution records `native` without
+inventing a host-runtime version. The version output must be one nonempty line
+of at most 256 characters. `validate`, `plan`, `doctor`, and preflight checks do
+not execute this query, preserving their pure or non-executing behavior.
 
 ## Artifact manifest
 

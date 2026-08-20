@@ -2648,9 +2648,10 @@ is `singularity`) so values do not need to be encoded into a comma-delimited
 argument. Bind paths that cannot be represented unambiguously are rejected.
 
 The initial capability check establishes only that the configured executable
-is discoverable; it does not execute a version probe. Container execution and
-runtime-version provenance are introduced only when the orchestration path
-actually runs commands.
+is discoverable; it does not execute a version probe. When orchestration
+actually launches a Run, a separate bounded identity probe records the runtime
+name and available version before staging. Planning and diagnosis never claim
+this execution-time identity.
 
 ---
 

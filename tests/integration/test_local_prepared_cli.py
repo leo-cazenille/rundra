@@ -124,6 +124,11 @@ targets:
     assert record.preparation.image_path.is_absolute()
     assert record.experiment.container is not None
     assert record.experiment.container.image == record.preparation.image_path
+    assert record.scheduler_metadata["container_runtime"] == "apptainer"
+    assert (
+        record.scheduler_metadata["container_runtime_version"]
+        == "apptainer version test"
+    )
 
 
 def _write_fake_apptainer(path: Path) -> None:
@@ -134,6 +139,9 @@ import subprocess
 import sys
 
 args = sys.argv[1:]
+if args == ["version"]:
+    print("apptainer version test")
+    raise SystemExit(0)
 if args[0] != "exec":
     raise SystemExit(64)
 mounts = {}

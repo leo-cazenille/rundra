@@ -18,6 +18,10 @@ class NativeRuntime:
         """Report the explicit no-container runtime capability."""
         return CapabilityCheck("native")
 
+    def identity(self) -> CapabilityCheck:
+        """Identify explicit host execution without inventing a host version."""
+        return CapabilityCheck("native")
+
     def build_command(self, request: ContainerRequest) -> Command:
         """Construct a host command from the same staged semantic request."""
         if type(request) is not ContainerRequest:

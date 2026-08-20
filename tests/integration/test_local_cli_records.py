@@ -117,3 +117,29 @@ def test_submit_and_invalid_run_id_are_structured_cli_failures(tmp_path: Path) -
     assert "Slurm or OpenPBS" in unavailable_error["message"]
     assert invalid.returncode == 1
     assert json.loads(invalid.stdout)["error"]["code"] == "INVALID_RUN_ID"
+
+
+def test_local_run_persists_native_runtime_provenance(tmp_path: Path) -> None:
+    data_dir = tmp_path / "records"
+    result = _run(
+        "run",
+        "examples/minimal/experiment.yaml",
+        "--config",
+        "examples/minimal/config.yaml",
+        "--seed",
+        "7",
+        "--target",
+        "local",
+        "--targets-file",
+        "examples/minimal/targets.yaml",
+        "--data-dir",
+        str(data_dir),
+        "--destination",
+        str(tmp_path / "retrieved"),
+        "--json",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    record = JsonRunStore(data_dir).list()[0]
+    assert record.scheduler_metadata["container_runtime"] == "native"
+    assert "container_runtime_version" not in record.scheduler_metadata

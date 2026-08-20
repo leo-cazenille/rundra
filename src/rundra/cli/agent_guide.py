@@ -17,6 +17,7 @@ GUIDE_TOPICS = {
     "lifecycle": "Use submit, bounded wait, status/tasks, fetch, then purge. Agents should use explicit Run IDs rather than --last and may use wait --notify-file for one atomic completion signal.",
     "results": "Prefer fetch auto. Compact archive fetch verifies and records exact Task coverage automatically; add --extract only when individual files are required. Python analysis can use rundra.artifacts.open_result_shard directly. Keep derived outputs separate.",
     "preparation": "Pin acquired images. Definition projects v4 declare an explicit context include list; Rundra hashes only that context plus the definition for image-cache identity.",
+    "provenance": "Inspect the Run record after submission. Prepared Runs record the verified image digest; actual launches record container_runtime and container_runtime_version when available. Plan and doctor intentionally do not claim execution-time runtime identity.",
     "recovery": "After interrupted submit, resume the same Run ID. If outcome remains unknown, inspect the scheduler read-only and use resolve-submission only after proving that no job exists.",
 }
 
@@ -77,6 +78,10 @@ GUIDE = f"""{START_MARKER}
 - Run scientific and analysis workloads on the configured execution target or
   an approved workstation, never on a login/controller host.
 - Keep raw retrieved results separate from derived analysis outputs.
+- Inspect provenance after submission when runtime identity matters. Prepared
+  Runs record the verified image digest; actual launches record
+  `container_runtime` and `container_runtime_version` when available. A pure
+  plan intentionally does not claim the runtime version that will execute it.
 - Prefer `rundr fetch RUN_ID` with its default auto mode. Rundra verifies shared
   visibility and avoids bulk transfer when safe; use `--mode copy` only when a
   materialized local result tree is required.
