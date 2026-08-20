@@ -131,7 +131,7 @@ from rundra.ports import (
 )
 from rundra.provenance import GitProvenanceCapture
 from rundra.results import OperationError, OperationResult
-from rundra.schema_versions import STATUS_SCHEMA, TASKS_SCHEMA
+from rundra.schema_versions import RUN_LIST_SCHEMA, STATUS_SCHEMA, TASKS_SCHEMA
 
 _DEFAULT_PREPARATION_STORAGE = PreparationStorageConfig()
 LAST_RUN_SELECTOR = "__rundra_last_run__"
@@ -392,8 +392,8 @@ class ListRunsValue:
             raise ValueError("Run list total must cover the returned page")
         if type(self.include_tasks) is not bool:
             raise TypeError("Run list include_tasks must be bool")
-        if self.format_version != 2:
-            raise ValueError("Run list format_version must be 2")
+        if self.format_version not in RUN_LIST_SCHEMA.supported:
+            raise ValueError("Run list format_version is unsupported")
         object.__setattr__(self, "runs", runs)
         object.__setattr__(self, "total", total)
 

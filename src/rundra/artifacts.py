@@ -15,6 +15,7 @@ from rundra.orchestration.shards import (
     ShardIndex,
     read_shard_index,
 )
+from rundra.schema_versions import REFERENCE_MANIFEST_SCHEMA
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,8 +155,8 @@ def _open_reference_manifest(manifest: Path) -> ResultSet:
     }
     if set(document) != expected:
         raise ResultSetError("Reference manifest fields do not match format version 1")
-    if document["format_version"] != 1:
-        raise ResultSetError("Reference manifest format_version must be 1")
+    if document["format_version"] not in REFERENCE_MANIFEST_SCHEMA.supported:
+        raise ResultSetError("Reference manifest format_version is unsupported")
     if document["kind"] != "rundra-shared-reference":
         raise ResultSetError("Reference manifest kind is invalid")
     if document["immutable"] is not True:

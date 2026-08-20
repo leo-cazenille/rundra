@@ -17,6 +17,7 @@ from rundra.config._schema import (
 from rundra.config._yaml import read_yaml_document
 from rundra.config.preparation import parse_preparation
 from rundra.domain.preparation import PreparationConfig, PreparationStorageConfig
+from rundra.schema_versions import PROJECT_CONFIG_SCHEMA, USER_CONFIG_SCHEMA
 from rundra.security import is_credential_field
 
 _PROJECT_V1_FIELDS = frozenset({"version", "default_profile", "defaults", "profiles"})
@@ -122,7 +123,7 @@ class ProjectLaunchConfig:
     def __post_init__(self) -> None:
         if type(self.version) is not int:
             raise ValueError("ProjectLaunchConfig version must be an int")
-        if self.version not in (1, 2, 3, 4, 5):
+        if self.version not in PROJECT_CONFIG_SCHEMA.supported:
             raise ValueError("ProjectLaunchConfig version must be 1, 2, 3, 4, or 5")
         if not isinstance(self.source, Path) or not self.source.is_absolute():
             raise ValueError("ProjectLaunchConfig source must be an absolute Path")
@@ -236,7 +237,7 @@ def load_project_launch(source: Path) -> ProjectLaunchConfig:
         path=("version",),
         minimum=1,
     )
-    if version not in {1, 2, 3, 4, 5}:
+    if version not in PROJECT_CONFIG_SCHEMA.supported:
         fail(
             source=normalized_source,
             path=("version",),
@@ -376,7 +377,7 @@ def load_user_launch(source: Path) -> UserLaunchConfig:
     version = expect_integer(
         document["version"], source=normalized_source, path=("version",), minimum=1
     )
-    if version not in {1, 2}:
+    if version not in USER_CONFIG_SCHEMA.supported:
         fail(
             source=normalized_source,
             path=("version",),

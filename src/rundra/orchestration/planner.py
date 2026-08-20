@@ -31,6 +31,7 @@ from rundra.orchestration.models import (
     ExecutionUnit,
     PlanningError,
 )
+from rundra.schema_versions import PLAN_SCHEMA
 
 _PLACEHOLDER_PATTERN = re.compile(r"\{[^{}]+\}")
 _REQUIRED_PLACEHOLDERS = frozenset({"{config}", "{seed}"})
@@ -129,7 +130,7 @@ def create_scalable_plan(
         raise TypeError("create_scalable_plan seeds must be a SeedRange")
     if type(policy) is not ExecutionPolicy:
         raise TypeError("create_scalable_plan policy must be an ExecutionPolicy")
-    if version not in {4, 5, 6, 7}:
+    if version not in PLAN_SCHEMA.supported or version < 4:
         raise ValueError("create_scalable_plan version must be 4, 5, 6, or 7")
     for name, value in (
         ("workers", workers),

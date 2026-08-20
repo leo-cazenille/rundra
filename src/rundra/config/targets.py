@@ -24,6 +24,7 @@ from rundra.domain.scaling import (
     ExecutionPolicy,
     WorkerPoolPolicy,
 )
+from rundra.schema_versions import TARGET_CONFIG_SCHEMA
 from rundra.security import is_credential_field, is_safe_ssh_destination
 
 _TARGET_V1_FIELDS = frozenset(
@@ -71,7 +72,7 @@ class TargetsConfig:
     execution: Mapping[str, ExecutionPolicy] = dataclass_field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.version not in {1, 2, 3, 4, 5, 6, 7, 8}:
+        if self.version not in TARGET_CONFIG_SCHEMA.supported:
             raise ValueError("TargetsConfig version must be 1 through 8")
         object.__setattr__(self, "targets", MappingProxyType(dict(self.targets)))
         object.__setattr__(
@@ -98,7 +99,7 @@ def load_targets_config(source: Path) -> TargetsConfig:
     version = expect_integer(
         document["version"], source=source, path=("version",), minimum=1
     )
-    if version not in {1, 2, 3, 4, 5, 6, 7, 8}:
+    if version not in TARGET_CONFIG_SCHEMA.supported:
         fail(
             source=source,
             path=("version",),

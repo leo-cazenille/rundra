@@ -15,6 +15,7 @@ from rundra.domain.models import (
 from rundra.domain.parameters import ParameterSet
 from rundra.domain.preparation import PreparationPlan
 from rundra.domain.scaling import ExecutionPolicy, TaskSpace
+from rundra.schema_versions import PLAN_SCHEMA
 
 ONE_UNIT_PER_TASK = "one_unit_per_task"
 SLURM_ARRAY = "slurm_array"
@@ -222,7 +223,7 @@ class ExecutionPlan:
             )
         ):
             raise ValueError("ExecutionPlan v1-v3 cannot contain scaling fields")
-        if self.version not in {1, 2, 3, 4, 5, 6, 7}:
+        if self.version not in PLAN_SCHEMA.supported:
             raise ValueError("ExecutionPlan version is unsupported")
         if type(self.experiment_name) is not str or not self.experiment_name.strip():
             raise ValueError("ExecutionPlan experiment_name must be nonblank")
