@@ -329,6 +329,66 @@ class SqliteTaskStore:
                 )
             )
 
+    def initialize_compact_submission(
+        self,
+        run_id: RunId,
+        worker_native_ids: Sequence[str],
+        *,
+        scheduler_job_ids: Sequence[str],
+    ) -> None:
+        """Initialize Tasks from one bounded ordinal-modulo-worker assignment."""
+
+        workers = tuple(worker_native_ids)
+        jobs = tuple(scheduler_job_ids)
+        for values, kind in ((workers, "worker"), (jobs, "root")):
+            if (
+                not values
+                or any(
+                    type(value) is not str or not value.strip() or "\x00" in value
+                    for value in values
+                )
+                or len(set(values)) != len(values)
+            ):
+                raise RunStoreError(
+                    f"Compact submission for Run {run_id} has invalid {kind} identities"
+                )
+        task_space = self.task_space(run_id)
+        try:
+            with self._open_existing(run_id) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                existing = connection.execute(
+                    "SELECT COUNT(*) FROM task_state"
+                ).fetchone()[0]
+                existing_jobs = connection.execute(
+                    "SELECT COUNT(*) FROM submission_job"
+                ).fetchone()[0]
+                if existing or existing_jobs:
+                    raise RunStoreError(
+                        f"Compact submission for Run {run_id} is already initialized"
+                    )
+                connection.executemany(
+                    "INSERT INTO task_state VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        (
+                            ordinal,
+                            ExecutionState.SUBMITTED.value,
+                            RetrievalState.NOT_REQUESTED.value,
+                            workers[ordinal % len(workers)],
+                            "SUBMITTED",
+                            None,
+                            0,
+                        )
+                        for ordinal in range(task_space.task_count)
+                    ),
+                )
+                connection.executemany(
+                    "INSERT INTO submission_job VALUES (?, ?)", enumerate(jobs)
+                )
+        except sqlite3.Error as error:
+            raise RunStoreError(
+                f"Could not initialize compact submission for Run {run_id}: {error}"
+            ) from error
+
     def all_states(self, run_id: RunId) -> tuple[TaskState, ...]:
         """Return every explicitly initialized compact Task state."""
 

@@ -113,3 +113,31 @@ def test_task_store_initializes_compact_submission_and_retrieval(
         "42_0",
     ]
     assert store.get(_RUN_ID, 1).retrieval_state is RetrievalState.PENDING
+
+
+def test_task_store_expands_bounded_worker_assignment_transactionally(
+    tmp_path: Path,
+) -> None:
+    store = SqliteTaskStore(tmp_path)
+    space = TaskSpace(2, SeedRange(0, 4))
+    store.create(_RUN_ID, space)
+
+    store.initialize_compact_submission(
+        _RUN_ID,
+        ("91_0", "91_1", "91_2"),
+        scheduler_job_ids=("91",),
+    )
+
+    assert store.submission_job_ids(_RUN_ID) == ("91",)
+    assert [state.scheduler_id for state in store.all_states(_RUN_ID)] == [
+        "91_0",
+        "91_1",
+        "91_2",
+        "91_0",
+        "91_1",
+        "91_2",
+        "91_0",
+        "91_1",
+        "91_2",
+        "91_0",
+    ]

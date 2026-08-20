@@ -21,6 +21,7 @@ from rundra.domain.models import (
     Target,
     TaskId,
 )
+from rundra.domain.scaling import TaskSpace
 from rundra.domain.states import ExecutionState
 
 
@@ -250,6 +251,61 @@ class SchedulerArrayRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class CompactSchedulerArrayRequest:
+    """Constant-size worker-pool request for one logical TaskSpace."""
+
+    task_space: TaskSpace
+    commands: tuple[Command, ...]
+    resources: ResourceRequest
+    worker_resources: ResourceRequest
+    manifest_path: PurePath
+    worker_count: int
+    task_slots_per_worker: int = 1
+    output_root: PurePath | None = None
+    shard_root: PurePath | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.task_space) is not TaskSpace:
+            raise TypeError("Compact scheduler request requires a TaskSpace")
+        commands = tuple(self.commands)
+        if len(commands) != self.task_space.parameter_set_count or any(
+            type(command) is not Command for command in commands
+        ):
+            raise ValueError("Compact scheduler commands must match the parameter sets")
+        if (
+            type(self.resources) is not ResourceRequest
+            or type(self.worker_resources) is not ResourceRequest
+        ):
+            raise TypeError("Compact scheduler resources must be ResourceRequests")
+        if (
+            not isinstance(self.manifest_path, PurePath)
+            or not self.manifest_path.is_absolute()
+            or "\x00" in str(self.manifest_path)
+        ):
+            raise ValueError(
+                "Compact scheduler manifest path must be absolute and safe"
+            )
+        for name in ("worker_count", "task_slots_per_worker"):
+            value = getattr(self, name)
+            if type(value) is not int or not 1 <= value <= self.task_space.task_count:
+                raise ValueError(f"Compact scheduler {name} must fit the TaskSpace")
+        if self.worker_count * self.task_slots_per_worker > self.task_space.task_count:
+            raise ValueError("Compact scheduler capacity exceeds the TaskSpace")
+        if (self.output_root is None) != (self.shard_root is None):
+            raise ValueError("Compact scheduler shard paths must be set together")
+        for name in ("output_root", "shard_root"):
+            path = getattr(self, name)
+            if path is not None and (
+                not isinstance(path, PurePath)
+                or not path.is_absolute()
+                or path == PurePath("/")
+                or "\x00" in str(path)
+            ):
+                raise ValueError(f"Compact scheduler {name} must be absolute")
+        object.__setattr__(self, "commands", commands)
+
+
+@dataclass(frozen=True, slots=True)
 class SchedulerReference:
     """Opaque scheduler identity kept separate from Run and Task IDs."""
 
@@ -298,6 +354,41 @@ class SchedulerSubmission:
     def references(self) -> tuple[SchedulerReference, ...]:
         """Return every scheduler root created for this logical submission."""
 
+        return (self.reference, *self.additional_references)
+
+
+@dataclass(frozen=True, slots=True)
+class CompactSchedulerSubmission:
+    """Bounded scheduler roots and worker identities for a TaskSpace."""
+
+    reference: SchedulerReference
+    task_space: TaskSpace
+    worker_native_ids: tuple[str, ...]
+    additional_references: tuple[SchedulerReference, ...] = ()
+
+    def __post_init__(self) -> None:
+        if type(self.reference) is not SchedulerReference:
+            raise TypeError("Compact submission reference must be a reference")
+        if type(self.task_space) is not TaskSpace:
+            raise TypeError("Compact submission requires a TaskSpace")
+        workers = tuple(self.worker_native_ids)
+        if not workers or any(
+            type(value) is not str or not value.strip() or "\x00" in value
+            for value in workers
+        ):
+            raise ValueError("Compact submission worker identities must be safe")
+        if len(set(workers)) != len(workers):
+            raise ValueError("Compact submission worker identities must be unique")
+        references = tuple(self.additional_references)
+        if any(type(item) is not SchedulerReference for item in references):
+            raise TypeError("Compact additional references must be references")
+        if self.reference in references or len(set(references)) != len(references):
+            raise ValueError("Compact additional references must be distinct")
+        object.__setattr__(self, "worker_native_ids", workers)
+        object.__setattr__(self, "additional_references", references)
+
+    @property
+    def references(self) -> tuple[SchedulerReference, ...]:
         return (self.reference, *self.additional_references)
 
 
@@ -645,6 +736,13 @@ class ArrayScheduler(Protocol):
 
 
 @runtime_checkable
+class CompactArrayScheduler(Protocol):
+    def submit_compact_array(
+        self, request: CompactSchedulerArrayRequest
+    ) -> CompactSchedulerSubmission: ...
+
+
+@runtime_checkable
 class DependencyScheduler(Protocol):
     """Scheduler extension for framework-owned successful-job dependencies."""
 
@@ -659,6 +757,15 @@ class DependencyScheduler(Protocol):
         request: SchedulerArrayRequest,
         dependency: SchedulerReference,
     ) -> SchedulerSubmission: ...
+
+
+@runtime_checkable
+class CompactDependencyScheduler(Protocol):
+    def submit_compact_array_afterok(
+        self,
+        request: CompactSchedulerArrayRequest,
+        dependency: SchedulerReference,
+    ) -> CompactSchedulerSubmission: ...
 
 
 @runtime_checkable

@@ -53,6 +53,7 @@ from rundra.adapters.slurm import (
     render_sbatch_array_script,
     render_sbatch_script,
     render_slurm_array_manifest,
+    render_slurm_compact_bundle_manifest,
     validate_slurm_resources,
 )
 from rundra.adapters.ssh import (
@@ -112,6 +113,7 @@ __all__ = [
     "render_sbatch_array_script",
     "render_sbatch_script",
     "render_slurm_array_manifest",
+    "render_slurm_compact_bundle_manifest",
     "render_qsub_array_script",
     "render_qsub_script",
     "validate_pbs_resources",

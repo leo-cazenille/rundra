@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import base64
 import gzip
+import os
 import subprocess
+import tarfile
 from collections import deque
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
@@ -19,14 +21,17 @@ from rundra.adapters import (
     render_sbatch_array_script,
     render_sbatch_script,
     render_slurm_array_manifest,
+    render_slurm_compact_bundle_manifest,
 )
 from rundra.adapters.slurm import _portable_state
 from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import Command, ResourceRequest, TaskId
+from rundra.domain.scaling import SeedRange, TaskSpace
 from rundra.domain.states import ExecutionState
 from rundra.ports import (
     CapabilityCheck,
     CommandResult,
+    CompactSchedulerArrayRequest,
     Scheduler,
     SchedulerArrayRequest,
     SchedulerGroup,
@@ -810,6 +815,146 @@ def test_slurm_scheduler_runs_concurrent_lanes_in_bounded_workers() -> None:
     assert "#SBATCH --time=00:04:00" in script
     assert "srun --nodes=1 --ntasks=2 --ntasks-per-node=2" in script
     assert script.count("srun ") == 1
+
+
+def test_compact_slurm_manifest_is_independent_of_logical_task_count() -> None:
+    commands = (
+        Command(
+            (
+                "simulate",
+                "--seed",
+                "__RUNDRA_SEED__",
+                "--out",
+                "__RUNDRA_TASK_ID__",
+            )
+        ),
+        Command(("simulate", "--mode", "long tumble", "--seed=__RUNDRA_SEED__")),
+    )
+    resources = ResourceRequest(walltime=timedelta(minutes=2))
+
+    def request(stop: int) -> CompactSchedulerArrayRequest:
+        return CompactSchedulerArrayRequest(
+            TaskSpace(2, SeedRange(0, stop)),
+            commands,
+            resources,
+            ResourceRequest(walltime=timedelta(minutes=20)),
+            _MANIFEST_PATH,
+            2,
+            2,
+        )
+
+    small = render_slurm_compact_bundle_manifest(
+        request(499), status_root=PurePosixPath("/remote/run/metadata/bundle-status")
+    )
+    large = render_slurm_compact_bundle_manifest(
+        request(499_999),
+        status_root=PurePosixPath("/remote/run/metadata/bundle-status"),
+    )
+
+    assert len(small) < 10_000
+    assert len(large) - len(small) < 20
+    assert "task_000000" not in large
+    assert 'task_id=$(printf "task_%06d" "$ordinal")' in large
+    assert '"$seed"' in large
+    assert "'long tumble'" in large
+
+
+def test_slurm_scheduler_returns_bounded_compact_worker_identities() -> None:
+    transport = ScriptedTransport(deque([]))
+    scheduler = SlurmScheduler(
+        transport, log_directory=PurePosixPath("/remote/run/logs")
+    )
+    request = CompactSchedulerArrayRequest(
+        TaskSpace(1, SeedRange(0, 999_999)),
+        (Command(("simulate", "--seed", "__RUNDRA_SEED__")),),
+        ResourceRequest(walltime=timedelta(minutes=1)),
+        ResourceRequest(walltime=timedelta(hours=2)),
+        _MANIFEST_PATH,
+        8,
+        4,
+    )
+    transport.results.extend(
+        (
+            _command_result(Command(("unused",)), 0, "MaxArraySize = 1001\n"),
+            _command_result(Command(("unused",)), 0, ""),
+            _command_result(Command(("unused",)), 0, ""),
+            _command_result(Command(("unused",)), 0, "901\n"),
+        )
+    )
+
+    submission = scheduler.submit_compact_array(request)
+
+    assert submission.references == (SchedulerReference("901"),)
+    assert submission.worker_native_ids == tuple(f"901_{index}" for index in range(8))
+    encoded = "".join(call.argv[4] for call in transport.run_calls[2:-1])
+    manifest = gzip.decompress(base64.b64decode(encoded)).decode("utf-8")
+    assert len(manifest) < 15_000
+    assert "1000000" in manifest
+    assert "task_999999" not in manifest
+
+
+def test_compact_manifest_executes_dynamic_tasks_and_seals_a_shard(
+    tmp_path: PurePosixPath,
+) -> None:
+    run_root = tmp_path / "run"
+    metadata = run_root / "metadata"
+    output = run_root / "output"
+    runtime = run_root / "runtime"
+    shards = output / ".rundra-shards"
+    for path in (metadata, output, runtime):
+        path.mkdir(parents=True, exist_ok=True)
+    result = output / "__RUNDRA_TASK_ID__" / "seed.txt"
+    request = CompactSchedulerArrayRequest(
+        TaskSpace(1, SeedRange(7, 9)),
+        (
+            Command(
+                (
+                    "python3",
+                    "-c",
+                    (
+                        "import pathlib,sys; "
+                        "pathlib.Path(sys.argv[1]).write_text(sys.argv[2])"
+                    ),
+                    str(result),
+                    "__RUNDRA_SEED__",
+                )
+            ),
+        ),
+        ResourceRequest(),
+        ResourceRequest(),
+        metadata / "tasks.sh",
+        1,
+        1,
+        output,
+        shards,
+    )
+    manifest = render_slurm_compact_bundle_manifest(
+        request, status_root=metadata / "bundle-status"
+    )
+
+    completed = subprocess.run(
+        ("/bin/sh", "-c", manifest, "rundra-compact-worker", "0"),
+        env={
+            **os.environ,
+            "SLURM_ARRAY_JOB_ID": "91",
+            "SLURM_ARRAY_TASK_ID": "0",
+            "SLURM_PROCID": "0",
+        },
+        capture_output=True,
+        check=False,
+        encoding="utf-8",
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    shard = shards / "91_0.lane-0.tar"
+    assert shard.is_file()
+    assert (shards / "91_0.lane-0.tar.sha256").is_file()
+    with tarfile.open(shard) as archive:
+        assert archive.extractfile("task_000000/seed.txt").read() == b"7"
+        assert archive.extractfile("task_000001/seed.txt").read() == b"8"
+        assert archive.extractfile("task_000002/seed.txt").read() == b"9"
+        assert archive.getmember("index.tsv").isfile()
+    assert not (output / "task_000000").exists()
 
 
 def test_render_sbatch_script_translates_portable_and_allowed_native_resources() -> (

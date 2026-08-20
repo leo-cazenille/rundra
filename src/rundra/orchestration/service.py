@@ -57,6 +57,10 @@ from rundra.persistence.task_store import SqliteTaskStore, TaskState
 from rundra.ports import (
     ArrayScheduler,
     BindMount,
+    CompactArrayScheduler,
+    CompactDependencyScheduler,
+    CompactSchedulerArrayRequest,
+    CompactSchedulerSubmission,
     ContainerRequest,
     ContainerRuntime,
     DependencyScheduler,
@@ -81,6 +85,8 @@ _CONTAINER_INPUTS = PurePosixPath("/workspace/input")
 _CONTAINER_CONFIG = _CONTAINER_INPUTS / "config.yaml"
 _CONTAINER_OUTPUTS = PurePosixPath("/workspace/output")
 _CONTAINER_RUNTIME = PurePosixPath("/workspace/runtime")
+_COMPACT_TASK_ID = "__RUNDRA_TASK_ID__"
+_COMPACT_SEED = "__RUNDRA_SEED__"
 _TERMINAL_STATES = frozenset(
     {
         ExecutionState.SUCCEEDED,
@@ -877,6 +883,11 @@ class OrchestrationService:
         updated = _with_execution_state(record, ExecutionState.STAGING)
         self.store.update(updated, expected=record)
         record = updated
+        compact_units = (
+            _compact_parameter_units(request)
+            if request.compact_plan is not None
+            else ()
+        )
         try:
             workspace = self._stager.stage(
                 StageRequest(
@@ -885,14 +896,26 @@ class OrchestrationService:
                     config=units[0].config,
                     target=request.plan.target,
                     source_root=request.source_root,
-                    task_ids=tuple(unit.task_id for unit in units),
+                    task_ids=(
+                        tuple(unit.task_id for unit in compact_units)
+                        if compact_units
+                        else tuple(unit.task_id for unit in units)
+                    ),
                     task_configs=(
-                        {unit.task_id: unit.config for unit in units}
-                        if request.plan.version == 3
-                        else {}
+                        {unit.task_id: unit.config for unit in compact_units}
+                        if compact_units
+                        else (
+                            {unit.task_id: unit.config for unit in units}
+                            if request.plan.version == 3
+                            else {}
+                        )
                     ),
                     task_manifest=(
-                        _task_manifest(units) if request.plan.version == 3 else None
+                        _compact_task_manifest(request.compact_plan, compact_units)
+                        if request.compact_plan is not None
+                        else (
+                            _task_manifest(units) if request.plan.version == 3 else None
+                        )
                     ),
                     remote_source_root=request.remote_source_root,
                 )
@@ -1054,7 +1077,13 @@ class OrchestrationService:
                         )
                     ),
                 )
-                for unit in units
+                for unit in (() if compact_units else units)
+            )
+            compact_commands = tuple(
+                self._runtime.build_command(
+                    _compact_container_request(request.experiment, unit, workspace)
+                )
+                for unit in compact_units
             )
         except Exception as error:
             self._fail_before_completion(record, "CONTAINER_COMMAND_FAILED")
@@ -1133,19 +1162,60 @@ class OrchestrationService:
                     backend=record.run.target.scheduler.kind,
                 )
         try:
-            scheduler_group = SchedulerGroup(
-                tuple(
-                    SchedulerUnit(unit.task_id, unit.command, unit.resources)
-                    for unit in scheduled_units
-                )
-            )
-            if preparation_reference is not None and not isinstance(
-                self._scheduler, DependencyScheduler
+            if (
+                preparation_reference is not None
+                and request.compact_plan is None
+                and not isinstance(self._scheduler, DependencyScheduler)
             ):
                 raise TypeError(
                     "Configured scheduler does not support preparation dependencies"
                 )
-            if request.plan.strategy in {SLURM_ARRAY, SCHEDULER_ARRAY}:
+            compact_submission: CompactSchedulerSubmission | None = None
+            if request.compact_plan is not None:
+                if not isinstance(self._scheduler, CompactArrayScheduler):
+                    raise TypeError("Configured scheduler lacks compact arrays")
+                if preparation_reference is not None and not isinstance(
+                    self._scheduler, CompactDependencyScheduler
+                ):
+                    raise TypeError(
+                        "Configured scheduler lacks compact preparation dependencies"
+                    )
+                assert request.compact_plan.task_space is not None
+                assert request.compact_plan.worker_count is not None
+                assert request.worker_resources is not None
+                compact_request = CompactSchedulerArrayRequest(
+                    request.compact_plan.task_space,
+                    compact_commands,
+                    request.experiment.resources,
+                    request.worker_resources,
+                    workspace.metadata / "scheduler-array-tasks.sh",
+                    request.compact_plan.worker_count,
+                    request.task_slots_per_worker,
+                    output_root=(workspace.outputs if request.shard_outputs else None),
+                    shard_root=(
+                        workspace.outputs / ".rundra-shards"
+                        if request.shard_outputs
+                        else None
+                    ),
+                )
+                compact_submission = (
+                    cast(
+                        CompactDependencyScheduler, self._scheduler
+                    ).submit_compact_array_afterok(
+                        compact_request, preparation_reference
+                    )
+                    if preparation_reference is not None
+                    else self._scheduler.submit_compact_array(compact_request)
+                )
+                submission_references = compact_submission.references
+                task_native_ids = None
+            elif request.plan.strategy in {SLURM_ARRAY, SCHEDULER_ARRAY}:
+                scheduler_group = SchedulerGroup(
+                    tuple(
+                        SchedulerUnit(unit.task_id, unit.command, unit.resources)
+                        for unit in scheduled_units
+                    )
+                )
                 if not isinstance(self._scheduler, ArrayScheduler):
                     raise TypeError(
                         "Configured scheduler does not support mapped arrays"
@@ -1179,7 +1249,15 @@ class OrchestrationService:
                     if preparation_reference is not None
                     else self._scheduler.submit_array(array_request)
                 )
+                submission_references = submission.references
+                task_native_ids = submission.task_native_ids
             else:
+                scheduler_group = SchedulerGroup(
+                    tuple(
+                        SchedulerUnit(unit.task_id, unit.command, unit.resources)
+                        for unit in scheduled_units
+                    )
+                )
                 submission = (
                     cast(DependencyScheduler, self._scheduler).submit_afterok(
                         scheduler_group,
@@ -1188,20 +1266,25 @@ class OrchestrationService:
                     if preparation_reference is not None
                     else self._scheduler.submit(scheduler_group)
                 )
-            if set(submission.task_native_ids) != {unit.task_id for unit in units}:
+                submission_references = submission.references
+                task_native_ids = submission.task_native_ids
+            if task_native_ids is not None and set(task_native_ids) != {
+                unit.task_id for unit in units
+            }:
                 raise ValueError(
                     "Scheduler submission did not map every planned Task exactly"
                 )
             if pending_receipt is not None:
                 assert submission_receipts is not None
                 scheduler_job_ids = tuple(
-                    reference.native_id for reference in submission.references
+                    reference.native_id for reference in submission_references
                 )
                 if request.compact_plan is not None:
                     assert self._task_store is not None
-                    self._task_store.initialize_submission(
+                    assert compact_submission is not None
+                    self._task_store.initialize_compact_submission(
                         run_id,
-                        submission.task_native_ids,
+                        compact_submission.worker_native_ids,
                         scheduler_job_ids=scheduler_job_ids,
                     )
                     submission_receipts.complete_compact(
@@ -1282,8 +1365,9 @@ class OrchestrationService:
                 run_id=run_id,
             ) from error
 
-        bundled = len(set(submission.task_native_ids.values())) < len(
-            submission.task_native_ids
+        bundled = request.compact_plan is not None or (
+            task_native_ids is not None
+            and len(set(task_native_ids.values())) < len(task_native_ids)
         )
         if request.compact_plan is not None:
             try:
@@ -1306,10 +1390,10 @@ class OrchestrationService:
         updated = replace(
             _with_execution_state(record, ExecutionState.SUBMITTED),
             scheduler_job_ids=tuple(
-                reference.native_id for reference in submission.references
+                reference.native_id for reference in submission_references
             ),
             task_scheduler_ids=(
-                {} if record.format_version == 4 else submission.task_native_ids
+                {} if record.format_version == 4 else task_native_ids or {}
             ),
             submitted_at=submission_started_at,
             scheduler_metadata={
@@ -1346,7 +1430,7 @@ class OrchestrationService:
             ProgressPhase.SUBMIT,
             4,
             "scheduler_jobs="
-            f"{','.join(reference.native_id for reference in submission.references)} "
+            f"{','.join(reference.native_id for reference in submission_references)} "
             f"tasks={len(units)}",
             run_id,
             len(units),
@@ -1367,9 +1451,8 @@ class OrchestrationService:
             record = lifecycle.wait(record)
             command_result = None
             if len(units) == 1:
-                task_reference = SchedulerReference(
-                    submission.task_native_ids[units[0].task_id]
-                )
+                assert task_native_ids is not None
+                task_reference = SchedulerReference(task_native_ids[units[0].task_id])
                 observation = _single_observation(
                     self._scheduler.query((task_reference,)), task_reference
                 )
@@ -2279,6 +2362,104 @@ def _container_request(
             BindMount(outputs, _CONTAINER_OUTPUTS, read_only=False),
             BindMount(runtime, _CONTAINER_RUNTIME, read_only=False),
         ),
+    )
+
+
+def _compact_container_request(
+    experiment: ExperimentSpec,
+    unit: ExecutionUnit,
+    workspace: StagedWorkspace,
+) -> ContainerRequest:
+    container = experiment.container
+    command = Command(
+        tuple(
+            argument.replace(
+                "{config}", str(_CONTAINER_INPUTS / f"{unit.task_id}.yaml")
+            ).replace("{seed}", _COMPACT_SEED)
+            for argument in experiment.command.argv
+        ),
+        environment=unit.command.environment,
+        working_directory=_container_working_directory(unit.command.working_directory),
+    )
+    image = None
+    gpu = False
+    if container is not None:
+        image = (
+            container.image
+            if container.image.is_absolute()
+            else workspace.source / container.image
+        )
+        gpu = container.gpu
+    return ContainerRequest(
+        command=command,
+        image=image,
+        gpu=gpu,
+        binds=(
+            BindMount(workspace.source, _CONTAINER_SOURCE, read_only=True),
+            BindMount(workspace.inputs, _CONTAINER_INPUTS, read_only=True),
+            BindMount(
+                workspace.outputs / _COMPACT_TASK_ID,
+                _CONTAINER_OUTPUTS,
+                read_only=False,
+            ),
+            BindMount(
+                workspace.runtime / _COMPACT_TASK_ID,
+                _CONTAINER_RUNTIME,
+                read_only=False,
+            ),
+        ),
+    )
+
+
+def _compact_parameter_units(request: RunExecutionRequest) -> tuple[ExecutionUnit, ...]:
+    assert request.compact_plan is not None
+    assert request.compact_plan.task_space is not None
+    seed_count = request.compact_plan.task_space.seeds.count
+    return tuple(
+        request.plan.units[ordinal * seed_count]
+        for ordinal in range(request.compact_plan.task_space.parameter_set_count)
+    )
+
+
+def _compact_task_manifest(
+    plan: ExecutionPlan,
+    units: tuple[ExecutionUnit, ...],
+) -> str:
+    assert plan.task_space is not None
+    return json.dumps(
+        {
+            "schema_version": 2,
+            "task_space": {
+                "parameter_set_count": plan.task_space.parameter_set_count,
+                "seeds": {
+                    "start": plan.task_space.seeds.start,
+                    "stop": plan.task_space.seeds.stop,
+                    "step": plan.task_space.seeds.step,
+                },
+                "task_count": plan.task_space.task_count,
+            },
+            "parameter_sets": [
+                {
+                    "ordinal": ordinal,
+                    "config": f"input/{unit.task_id}.yaml",
+                    "config_sha256": hashlib.sha256(
+                        unit.config.content.encode("utf-8")
+                    ).hexdigest(),
+                    "parameter_set": (
+                        None
+                        if unit.parameter_set is None
+                        else {
+                            "id": unit.parameter_set.id,
+                            "choices": dict(unit.parameter_set.choices),
+                        }
+                    ),
+                }
+                for ordinal, unit in enumerate(units)
+            ],
+        },
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
     )
 
 

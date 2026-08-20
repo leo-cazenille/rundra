@@ -15,6 +15,8 @@ from rundra.domain.models import Command, NativeValue, ResourceRequest
 from rundra.domain.states import ExecutionState
 from rundra.ports import (
     CommandResult,
+    CompactSchedulerArrayRequest,
+    CompactSchedulerSubmission,
     SchedulerArrayRequest,
     SchedulerGroup,
     SchedulerObservation,
@@ -385,6 +387,111 @@ class SlurmScheduler:
                 "SlurmScheduler.submit_array_afterok requires a SchedulerArrayRequest"
             )
         return self._submit_array_chunks(request, dependency=_dependency(dependency))
+
+    def submit_compact_array(
+        self, request: CompactSchedulerArrayRequest
+    ) -> CompactSchedulerSubmission:
+        """Submit one constant-size ordinal-driven worker array."""
+        if type(request) is not CompactSchedulerArrayRequest:
+            raise TypeError("Slurm compact submission requires a compact request")
+        return self._submit_compact_array(request, dependency=None)
+
+    def submit_compact_array_afterok(
+        self,
+        request: CompactSchedulerArrayRequest,
+        dependency: SchedulerReference,
+    ) -> CompactSchedulerSubmission:
+        """Submit one compact worker array after a preparation dependency."""
+        if type(request) is not CompactSchedulerArrayRequest:
+            raise TypeError("Slurm compact submission requires a compact request")
+        return self._submit_compact_array(request, dependency=_dependency(dependency))
+
+    def _submit_compact_array(
+        self,
+        request: CompactSchedulerArrayRequest,
+        *,
+        dependency: str | None,
+    ) -> CompactSchedulerSubmission:
+        if self._log_directory is None:
+            raise SlurmSubmissionError(
+                "Slurm compact submission requires a configured log directory",
+                outcome=SchedulerSubmissionOutcome.REJECTED,
+                phase="request_validation",
+            )
+        if request.worker_count > self.array_limit():
+            raise SlurmSubmissionError(
+                "Compact worker count exceeds Slurm MaxArraySize",
+                outcome=SchedulerSubmissionOutcome.REJECTED,
+                phase="request_validation",
+            )
+        manifest_path = request.manifest_path.with_name(
+            f"{request.manifest_path.stem}.compact-workers{request.manifest_path.suffix}"
+        )
+        status_root = request.manifest_path.parent / "bundle-status"
+        manifest = render_slurm_compact_bundle_manifest(
+            request, status_root=status_root
+        )
+        stdout_path, stderr_path = self._log_paths("%A_%a")
+        if stdout_path is None or stderr_path is None:  # pragma: no cover
+            raise AssertionError("configured Slurm logs must produce paths")
+        directives = _sbatch_directives(
+            job_name="rundra-worker",
+            resources=request.worker_resources,
+            stdout_path=_array_log_path(stdout_path, name="stdout"),
+            stderr_path=_array_log_path(stderr_path, name="stderr"),
+            array_stop=request.worker_count - 1,
+        )
+        quoted_manifest = shlex.quote(str(manifest_path))
+        quoted_srun = shlex.quote(self._srun)
+        quoted_status_root = shlex.quote(str(status_root))
+        merge_lines = tuple(
+            line
+            for lane in range(request.task_slots_per_worker)
+            for line in (
+                (
+                    f'lane="$status_root/${{SLURM_ARRAY_JOB_ID}}_'
+                    f'${{SLURM_ARRAY_TASK_ID}}.lane-{lane}.tsv"'
+                ),
+                '[ -f "$lane" ] || exit 74',
+                'cat -- "$lane" >> "$journal_tmp"',
+            )
+        )
+        script = "\n".join(
+            (
+                "#!/bin/sh",
+                *directives,
+                "",
+                "set -eu",
+                f"status_root={quoted_status_root}",
+                'mkdir -p -- "$status_root"',
+                'journal="$status_root/${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}.tsv"',
+                'journal_tmp="${journal}.$$"',
+                'if [ -e "$journal" ]; then exit 73; fi',
+                ': > "$journal_tmp"',
+                "trap 'rm -f \"$journal_tmp\"' EXIT HUP INT TERM",
+                (
+                    f"{quoted_srun} --nodes=1 "
+                    f"--ntasks={request.task_slots_per_worker} "
+                    f"--ntasks-per-node={request.task_slots_per_worker} "
+                    f"--cpus-per-task={request.resources.cpus_per_task} "
+                    f"--kill-on-bad-exit=1 /bin/sh {quoted_manifest} "
+                    '"$SLURM_ARRAY_TASK_ID"'
+                ),
+                *merge_lines,
+                'chmod 400 "$journal_tmp"',
+                'mv -- "$journal_tmp" "$journal"',
+                "trap - EXIT HUP INT TERM",
+                "",
+            )
+        )
+        job_id = self._submit_chunked_array_payload(
+            manifest_path, manifest, script, dependency=dependency
+        )
+        return CompactSchedulerSubmission(
+            SchedulerReference(job_id),
+            request.task_space,
+            tuple(f"{job_id}_{index}" for index in range(request.worker_count)),
+        )
 
     def _submit_array_chunks(
         self,
@@ -1165,6 +1272,201 @@ def _render_lane_shard(
         "        rm -rf -- "
         + " ".join(f'"$output_root/{task_id}"' for task_id in task_ids),
         '        rm -rf -- "$index_dir"',
+    )
+
+
+def render_slurm_compact_bundle_manifest(
+    request: CompactSchedulerArrayRequest,
+    *,
+    status_root: PurePath,
+) -> str:
+    """Render worker logic whose size is independent of logical Task count."""
+
+    if type(request) is not CompactSchedulerArrayRequest:
+        raise TypeError("compact manifest requires a CompactSchedulerArrayRequest")
+    status = _directive_path(status_root, name="bundle status")
+    task_space = request.task_space
+    timeout = _task_timeout_seconds(request.resources.walltime)
+    command_cases = tuple(
+        line
+        for index, command in enumerate(request.commands)
+        for line in (
+            f"          {index})",
+            f"            {_render_compact_command(command, timeout=timeout)}",
+            "            ;;",
+        )
+    )
+    run_root = request.manifest_path.parent.parent
+    output_root = run_root / "output"
+    runtime_root = run_root / "runtime"
+    lane_cases: list[str] = []
+    for lane in range(request.task_slots_per_worker):
+        lane_cases.extend(
+            (
+                f"    {lane})",
+                f"      ordinal=$((worker + {lane * request.worker_count}))",
+                f"      stride={request.worker_count * request.task_slots_per_worker}",
+                f"      status_root={shlex.quote(status)}",
+                f"      output_root={shlex.quote(str(output_root))}",
+                f"      runtime_root={shlex.quote(str(runtime_root))}",
+                '      mkdir -p -- "$status_root"',
+                (
+                    '      journal="$status_root/${SLURM_ARRAY_JOB_ID}_'
+                    '${SLURM_ARRAY_TASK_ID}.lane-${SLURM_PROCID}.tsv"'
+                ),
+                '      journal_tmp="${journal}.$$"',
+                '      if [ -e "$journal" ]; then exit 73; fi',
+                "      printf 'RUNDRA_TASK_EVENTS\\t1\\n' > \"$journal\"",
+                '      : > "$journal_tmp"',
+                f'      while [ "$ordinal" -lt {task_space.task_count} ]; do',
+                f"        parameter_set=$((ordinal / {task_space.seeds.count}))",
+                f"        seed_index=$((ordinal % {task_space.seeds.count}))",
+                (
+                    f"        seed=$(({task_space.seeds.start} + "
+                    f"seed_index * {task_space.seeds.step}))"
+                ),
+                '        task_id=$(printf "task_%06d" "$ordinal")',
+                '        mkdir -p -- "$output_root/$task_id" "$runtime_root/$task_id"',
+                (
+                    "        printf 'START\\t%s\\t%s\\t%s\\n' \"$task_id\" "
+                    '"$(date +%s)" "$(hostname)" >> "$journal"'
+                ),
+                "        set +e",
+                '        case "$parameter_set" in',
+                *command_cases,
+                "          *) exit 64 ;;",
+                "        esac",
+                "        task_status=$?",
+                "        set -e",
+                (
+                    '        printf \'%s\\t%s\\n\' "$task_id" "$task_status" '
+                    '>> "$journal_tmp"'
+                ),
+                (
+                    "        printf 'FINISH\\t%s\\t%s\\t%s\\t%s\\n' "
+                    '"$task_id" "$task_status" "$(date +%s)" "$(hostname)" '
+                    '>> "$journal"'
+                ),
+                "        ordinal=$((ordinal + stride))",
+                "      done",
+                *(
+                    _render_compact_lane_shard(request.output_root, request.shard_root)
+                    if request.output_root is not None
+                    and request.shard_root is not None
+                    else ()
+                ),
+                '      rm -f -- "$journal_tmp"',
+                '      chmod 400 "$journal"',
+                "      ;;",
+            )
+        )
+    return "\n".join(
+        (
+            "#!/bin/sh",
+            "set -eu",
+            'if [ "$#" -ne 1 ]; then exit 64; fi',
+            "worker=$1",
+            'case "$worker" in *[!0-9]*|"") exit 64 ;; esac',
+            f'if [ "$worker" -ge {request.worker_count} ]; then exit 64; fi',
+            'case "${SLURM_PROCID:-}" in',
+            *lane_cases,
+            "  *) exit 64 ;;",
+            "esac",
+            "",
+        )
+    )
+
+
+def _render_compact_command(command: Command, *, timeout: int | None) -> str:
+    words = ["env", "--"]
+    words.extend(
+        _compact_shell_word(f"{name}={value}")
+        for name, value in sorted(command.environment.items())
+    )
+    words.extend(_compact_shell_word(argument) for argument in command.argv)
+    rendered = " ".join(words)
+    if command.working_directory is not None:
+        rendered = (
+            f"cd -- {_compact_shell_word(str(command.working_directory))} && {rendered}"
+        )
+    if timeout is not None:
+        rendered = f"timeout --signal=TERM --kill-after=30s {timeout}s {rendered}"
+    return rendered
+
+
+def _compact_shell_word(value: str) -> str:
+    if "\x00" in value:
+        raise SlurmScriptError("Compact command values must not contain NUL")
+    parts = re.split(r"(__RUNDRA_(?:TASK_ID|SEED)__)", value)
+    rendered: list[str] = []
+    for part in parts:
+        if part == "__RUNDRA_TASK_ID__":
+            rendered.append('"$task_id"')
+        elif part == "__RUNDRA_SEED__":
+            rendered.append('"$seed"')
+        elif part:
+            rendered.append(shlex.quote(part))
+    return "".join(rendered) or "''"
+
+
+def _render_compact_lane_shard(
+    output_root: PurePath, shard_root: PurePath
+) -> tuple[str, ...]:
+    return (
+        f"      output_root={shlex.quote(str(output_root))}",
+        f"      shard_root={shlex.quote(str(shard_root))}",
+        '      mkdir -p -- "$shard_root"',
+        (
+            '      shard="$shard_root/${SLURM_ARRAY_JOB_ID}_'
+            '${SLURM_ARRAY_TASK_ID}.lane-${SLURM_PROCID}.tar"'
+        ),
+        '      shard_tmp="${shard}.$$"',
+        '      checksum="${shard}.sha256"',
+        '      checksum_tmp="${checksum}.$$"',
+        '      index_dir=$(mktemp -d "$shard_root/.index.XXXXXX")',
+        '      index="$index_dir/index.tsv"',
+        '      task_list="$index_dir/tasks.txt"',
+        (
+            "      printf 'RUNDRA_SHARD\\t2\\t%s\\t%s\\n' "
+            '"$SLURM_ARRAY_TASK_ID" "$SLURM_PROCID" > "$index"'
+        ),
+        "      tab=$(printf '\\t')",
+        '      while IFS="$tab" read -r task_id task_status; do',
+        '        case "$task_id" in task_*) ;; *) exit 76 ;; esac',
+        "        suffix=${task_id#task_}",
+        '        case "$suffix" in ""|*[!0-9]*) exit 76 ;; esac',
+        '        printf "%s\\n" "$task_id" >> "$task_list"',
+        ('        printf \'TASK\\t%s\\t%s\\n\' "$task_id" "$task_status" >> "$index"'),
+        '        task_dir="$output_root/$task_id"',
+        '        [ -d "$task_dir" ] || exit 76',
+        '        [ -z "$(find "$task_dir" -type l -print -quit)" ] || exit 76',
+        (
+            "        find \"$task_dir\" -type f -printf '%P\\t%s\\n' "
+            '| LC_ALL=C sort | while IFS="$tab" read -r member size; do'
+        ),
+        '          [ -n "$member" ] || exit 76',
+        '          digest=$(sha256sum -- "$task_dir/$member")',
+        (
+            "          printf 'MEMBER\\t%s/%s\\t%s\\t%s\\n' "
+            '"$task_id" "$member" "$size" "${digest%% *}" >> "$index"'
+        ),
+        "        done",
+        '      done < "$journal_tmp"',
+        (
+            "      tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner "
+            '-cf "$shard_tmp" -C "$output_root" -T "$task_list" '
+            '-C "$index_dir" index.tsv'
+        ),
+        '      shard_digest=$(sha256sum -- "$shard_tmp")',
+        (
+            "      printf '%s  %s\\n' \"${shard_digest%% *}\" "
+            '"${shard##*/}" > "$checksum_tmp"'
+        ),
+        '      chmod 400 "$shard_tmp" "$checksum_tmp"',
+        '      mv -- "$shard_tmp" "$shard"',
+        '      mv -- "$checksum_tmp" "$checksum"',
+        '      while IFS= read -r task_id; do rm -rf -- "$output_root/$task_id"; done < "$task_list"',
+        '      rm -rf -- "$index_dir"',
     )
 
 

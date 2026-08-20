@@ -6,6 +6,9 @@ All notable user-visible changes are recorded here.
 
 ### Added
 
+- Compact worker-pool Runs use constant-size scheduler requests, bounded worker
+  submissions, ordinal-driven Slurm manifests, and one staged config per
+  parameter set instead of per-Task command and configuration expansion.
 - Large compact submissions use bounded version-3 receipts and can resume an
   interrupted post-acceptance RunRecord compaction from their Task-state sidecar.
 - Slurm worker-pool submissions with at least 1,000 logical Tasks now persist a

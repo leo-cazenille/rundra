@@ -3623,14 +3623,19 @@ state, exit code, attempt, and retrieval state live in the SQLite sidecar.
 Lifecycle reconciliation, cancellation, pages, and retrieval update the sidecar
 without adding unbounded maps back to the JSON record.
 
-The scheduler request is still built from the materialized execution plan before
-compaction. Compact worker-pool submissions use a version-3 constant-size
+Compact worker-pool submissions use a backend-neutral constant-size scheduler
+request and an ordinal-driven Slurm manifest whose size depends on parameter-set
+count and worker lanes, not logical Task count. They stage one immutable config
+per parameter set and return bounded worker identities; the SQLite sidecar
+expands the deterministic ordinal-to-worker assignment transactionally.
+Compact worker-pool submissions also use a version-3 constant-size
 receipt containing their TaskSpace, execution and retrieval policies, root
 scheduler IDs, and SQLite sidecar filename. The sidecar transaction persists
 all Task scheduler identities and root IDs before receipt acceptance. `resume`
 can therefore finish an interrupted receipt transition or RunRecord compaction
-without duplicate submission. Constant-memory scheduler manifest generation,
-requeue recovery, and remote shard ingestion remain future work.
+without duplicate submission. Initial CLI sweep planning and pre-submission
+RunRecord construction still materialize logical Tasks. Constant-memory launch
+planning, requeue recovery, and remote shard ingestion remain future work.
 
 Slurm worker lanes append versioned `START` and `FINISH` events before and
 after every logical Task. Reconciliation treats started Tasks as running even
