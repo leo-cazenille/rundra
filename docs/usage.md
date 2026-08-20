@@ -186,6 +186,57 @@ queue, QOS, project, constraint, and placement requests belong in the
 experiment's explicit `resources.native.slurm` or `resources.native.pbs`
 mapping and remain subject to site policy.
 
+## Build an Apptainer image from a definition
+
+Keep the experiment portable by naming a logical SIF:
+
+```yaml
+container:
+  image: python.sif
+```
+
+An adjacent project configuration version 3 can build that image from the
+same immutable working-tree snapshot used for staging:
+
+```yaml
+version: 3
+preparation:
+  source:
+    working_tree: {}
+  image:
+    name: python.sif
+    definition:
+      path: python.def
+      resources:
+        cpus_per_task: 2
+        memory: 2GiB
+        walltime: "00:15:00"
+```
+
+The target owner must opt in with targets schema version 8:
+
+```yaml
+preparation:
+  definition_build:
+    allowed_locations: [local, target]
+    mode: fakeroot
+    max_resources:
+      cpus_per_task: 4
+      memory: 8GiB
+      walltime: "01:00:00"
+```
+
+`auto` builds locally and transfers the measured content-addressed SIF for a
+remote target. `--prepare-location target` submits a bounded scheduler build
+and waits for its verified digest before scientific submission. The privilege
+mode always comes from target policy. `--offline` allows only verified cache
+hits; `--rebuild-image` bypasses only the definition recipe index. Arbitrary
+definition files are trusted executable build input. Pin external base images
+inside the definition when cold-build reproducibility is required.
+
+See `examples/python-multiprocessing/prepared/` for a complete working-tree
+example and `rundr plan ... --json` for its network-free preparation plan.
+
 ## Exit status
 
 | Exit | Meaning |
@@ -205,7 +256,7 @@ matching prose.
 
 | Error or symptom | Check |
 |---|---|
-| `CONFIG_NOT_FOUND`, `INVALID_YAML`, `UNKNOWN_FIELD`, `UNSUPPORTED_VERSION` | Validate the exact experiment, target, project, or user file; all public YAML documents require version 1. |
+| `CONFIG_NOT_FOUND`, `INVALID_YAML`, `UNKNOWN_FIELD`, `UNSUPPORTED_VERSION` | Validate the exact experiment, target, project, or user file and its supported schema version. |
 | `LAUNCH_VALUE_REQUIRED`, `PROFILE_NOT_FOUND`, `TARGET_NOT_FOUND` | Inspect adjacent `rundra.yaml`, selected profile, `~/.config/rundra/config.yaml`, target name, and target-file path. |
 | `CONTAINER_REQUIRED`, `CONTAINER_CONFLICT`, `GPU_CONFIGURATION_MISMATCH` | Remote execution requires Apptainer; native local execution forbids a container/GPU request; scheduler GPU resources and `container.gpu` must agree. |
 | `CAPABILITY_CHECK_FAILED` | Check local `ssh`, `rsync`, or `apptainer`; remotely check rsync, selected scheduler clients, Apptainer, image readability, and normal SSH authentication/host verification. |

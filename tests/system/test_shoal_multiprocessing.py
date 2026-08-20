@@ -45,14 +45,14 @@ def _invoke(arguments: tuple[str, ...], *, timeout: float = 900) -> dict[str, ob
     return document
 
 
-def _prepare_source(root: Path, image: Path) -> Path:
+def _prepare_source(root: Path) -> Path:
     source = root / "source"
     shutil.copytree(_EXAMPLE, source)
-    experiment_source = source / "experiment-shoal.yaml"
-    document = yaml.safe_load(experiment_source.read_text(encoding="utf-8"))
-    document["container"]["image"] = str(image)
-    experiment_source.write_text(
-        yaml.safe_dump(document, sort_keys=False), encoding="utf-8"
+    definition = source / "python.def"
+    definition.write_text(
+        definition.read_text(encoding="utf-8")
+        + f"\n%labels\n    org.rundra.system-key {root.name}\n",
+        encoding="utf-8",
     )
     return source
 
@@ -60,7 +60,18 @@ def _prepare_source(root: Path, image: Path) -> Path:
 def _prepare_target(source: Path, destination: Path, target_name: str) -> Path:
     document = yaml.safe_load(source.read_text(encoding="utf-8"))
     assert document["version"] >= 6
-    execution = document["targets"][target_name]["execution"]
+    document["version"] = 8
+    target = document["targets"][target_name]
+    target.setdefault("preparation", {})["definition_build"] = {
+        "allowed_locations": ["target"],
+        "mode": "fakeroot",
+        "max_resources": {
+            "cpus_per_task": 4,
+            "memory": "4GiB",
+            "walltime": "00:30:00",
+        },
+    }
+    execution = target["execution"]
     workers = execution["worker_pool"]
     assert workers["max_workers"] >= 2
     assert workers["max_task_slots_per_worker"] >= 10
@@ -75,10 +86,9 @@ def test_shoal_runs_bounded_python_processes_on_two_full_nodes(
     shoal_target: Target,
     shoal_targets_source: Path,
     shoal_target_name: str,
-    shoal_cpu_image: Path,
 ) -> None:
     del shoal_target
-    source = _prepare_source(tmp_path, shoal_cpu_image)
+    source = _prepare_source(tmp_path)
     targets = _prepare_target(
         shoal_targets_source,
         tmp_path / "targets.yaml",
@@ -101,9 +111,12 @@ def test_shoal_runs_bounded_python_processes_on_two_full_nodes(
         "2",
         "--task-slots-per-worker",
         "10",
+        "--prepare-location",
+        "target",
     )
 
-    planned = _invoke(("plan", str(source / "experiment-shoal.yaml"), *common))
+    experiment = source / "prepared/experiment.yaml"
+    planned = _invoke(("plan", str(experiment), *common))
     plan = planned["plan"]
     assert isinstance(plan, dict)
     assert plan["strategy"] == "worker-pool"
@@ -122,7 +135,7 @@ def test_shoal_runs_bounded_python_processes_on_two_full_nodes(
     submitted = _invoke(
         (
             "submit",
-            str(source / "experiment-shoal.yaml"),
+            str(experiment),
             *common,
             "--confirm-tasks",
             str(_TASK_COUNT),
@@ -178,3 +191,29 @@ def test_shoal_runs_bounded_python_processes_on_two_full_nodes(
     record = JsonRunStore(records).load(run_id)
     assert set(record.allocated_nodes) == observed_hosts
     assert len(record.allocated_nodes) == 2
+    assert record.preparation is not None
+    assert record.preparation.image_action == "build_definition_image"
+
+    warm = _invoke(
+        (
+            "submit",
+            str(experiment),
+            *common,
+            "--confirm-tasks",
+            str(_TASK_COUNT),
+            "--data-dir",
+            str(records),
+        )
+    )
+    warm_run = warm["run"]
+    assert isinstance(warm_run, dict)
+    warm_run_id = RunId(str(warm_run["run_id"]))
+    warm_record = JsonRunStore(records).load(warm_run_id)
+    assert warm_record.preparation is not None
+    assert warm_record.preparation.image_action == "reuse_definition_image_cache"
+    warm_wait = _invoke(
+        ("wait", str(warm_run_id), "--timeout", "900", "--data-dir", str(records))
+    )
+    warm_status = warm_wait["wait"]
+    assert isinstance(warm_status, dict)
+    assert warm_status["terminal"] is True

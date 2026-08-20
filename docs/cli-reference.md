@@ -96,6 +96,12 @@ describe mutable-working-tree mode; it snapshots nothing and does not probe
 caches. On `run` and `submit`, an explicit `--source-root` selects that mode,
 while omission uses the recipe's pinned Git commit.
 
+Project schema v3 definition recipes require targets schema v8
+`preparation.definition_build` policy. `auto` builds on the client and
+publishes by measured SHA-256 for remote execution. Forced `target` builds run
+as bounded scheduler work, not on an SSH controller, and complete before
+scientific submission because their SIF digest is not known in advance.
+
 Launch values resolve in this order: explicit CLI, selected project profile,
 project defaults, user defaults, then built-ins. Automatic locations are:
 
