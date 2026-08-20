@@ -1551,6 +1551,15 @@ machine-readable result document. Scheduler polling emits feedback only when
 the preparation or scientific execution state changes. Neither option changes
 the persisted RunRecord or the execution plan.
 
+TQDM rendering deduplicates identical observations and coalesces changed
+observations to a configurable `--progress-interval`, defaulting to ten
+seconds. Phase transitions and terminal completion render immediately. A
+captured `--json --progress` combination warns on stderr because carriage-return
+redraws may be retained by an agent transcript. Agent automation should omit
+`--progress` and consume the single final JSON document. `wait --notify` emits
+one local terminal alert only after terminal reconciliation; it adds no daemon,
+webhook, credentials, or scheduler-side callback.
+
 For synchronous arrays, progress contains six lifecycle units plus one unit per
 planned Task. Terminal Task observations advance the bar and its detail reports
 terminal/total, running, queued, failed, and distinct allocated-node counts.

@@ -5,13 +5,14 @@ import sys
 from collections.abc import Sequence
 from importlib.metadata import version as distribution_version
 from pathlib import Path
-from typing import Any, Never, cast
+from typing import IO, Any, Never, cast
 
 from rundra.cli.agent_guide import AgentGuideValue, agent_guide_operation
 from rundra.cli.capability_doctor import DoctorValue, doctor_operation
 from rundra.cli.operations import (
     LAST_RUN_SELECTOR,
     RunValue,
+    WaitValue,
     cancel_operation,
     fetch_operation,
     inspect_operation,
@@ -214,6 +215,11 @@ def build_parser() -> argparse.ArgumentParser:
     _add_run_selector(wait)
     wait.add_argument("--timeout", type=float)
     wait.add_argument("--poll-interval", type=float, default=2.0)
+    wait.add_argument(
+        "--notify",
+        action="store_true",
+        help="emit one terminal alert when the Run completes",
+    )
     _add_feedback_arguments(wait)
     _add_store_option(wait)
     _add_json_option(wait)
@@ -484,6 +490,34 @@ def _add_feedback_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="show a TQDM lifecycle progress bar on stderr",
     )
+    parser.add_argument(
+        "--progress-interval",
+        type=_positive_float,
+        default=10.0,
+        metavar="SECONDS",
+        help="minimum interval between progress redraws (default: 10)",
+    )
+
+
+def _positive_float(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be a number") from error
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be positive")
+    return parsed
+
+
+def _emit_wait_notification(value: WaitValue, stream: IO[str]) -> None:
+    if not value.terminal:
+        return
+    print(
+        f"\a[rundr] notification: run={value.status.run_id} "
+        f"state={value.status.state.value}",
+        file=stream,
+        flush=True,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -533,11 +567,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     try:
+        if (
+            getattr(arguments, "json", False)
+            and getattr(arguments, "progress", False)
+            and not sys.stderr.isatty()
+        ):
+            print(
+                "Warning: --json --progress on captured stderr may create a large "
+                "transcript; agents should omit --progress.",
+                file=sys.stderr,
+                flush=True,
+            )
         progress = create_progress_reporter(
             verbose=getattr(arguments, "verbose", False),
             progress=getattr(arguments, "progress", False),
             stream=sys.stderr,
             announce_run=arguments.command == "submit",
+            progress_interval=getattr(arguments, "progress_interval", 10.0),
         )
     except ProgressUnavailableError as error:
         unavailable: OperationResult[Any] = OperationResult.failure(
@@ -823,6 +869,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         raise AssertionError(f"Unhandled CLI command: {arguments.command}")
     close_progress_reporter(progress)
+    if (
+        arguments.command == "wait"
+        and arguments.notify
+        and result.ok
+        and isinstance(result.value, WaitValue)
+    ):
+        _emit_wait_notification(result.value, sys.stderr)
     output = render_json(result) if arguments.json else render_human(result)
     stream = sys.stdout if arguments.json or result.ok else sys.stderr
     print(output, file=stream)

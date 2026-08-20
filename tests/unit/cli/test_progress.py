@@ -114,3 +114,62 @@ def test_complete_event_defines_terminal_extent_for_submit() -> None:
 
     assert bars[0].n == 6
     assert bars[0].total == 6
+
+
+def test_progress_deduplicates_and_throttles_changed_wait_events() -> None:
+    stream = StringIO()
+    bars: list[FakeBar] = []
+    now = [0.0]
+
+    def factory(**options: object) -> FakeBar:
+        bar = FakeBar(**options)
+        bars.append(bar)
+        return bar
+
+    reporter = CLIProgressReporter(
+        verbose=False,
+        progress=True,
+        stream=stream,
+        tqdm_factory=factory,
+        progress_interval=10,
+        clock=lambda: now[0],
+    )
+    first = ProgressEvent(ProgressPhase.WAIT, 5, 106, "tasks=0/100")
+    changed = ProgressEvent(ProgressPhase.WAIT, 15, 106, "tasks=10/100")
+    reporter(first)
+    reporter(first)
+    now[0] = 2
+    reporter(changed)
+
+    assert bars[0].postfixes == ["tasks=0/100"]
+
+    now[0] = 10
+    reporter(changed)
+    reporter(changed)
+
+    assert bars[0].postfixes == ["tasks=0/100", "tasks=10/100"]
+
+
+def test_progress_forces_terminal_event_before_interval() -> None:
+    stream = StringIO()
+    bars: list[FakeBar] = []
+    now = [0.0]
+
+    def factory(**options: object) -> FakeBar:
+        bar = FakeBar(**options)
+        bars.append(bar)
+        return bar
+
+    reporter = CLIProgressReporter(
+        verbose=False,
+        progress=True,
+        stream=stream,
+        tqdm_factory=factory,
+        progress_interval=10,
+        clock=lambda: now[0],
+    )
+    reporter(ProgressEvent(ProgressPhase.WAIT, 5, 7, "run=RUNNING"))
+    now[0] = 1
+    reporter(ProgressEvent(ProgressPhase.WAIT, 7, 7, "run=SUCCEEDED"))
+
+    assert bars[0].postfixes == ["run=RUNNING", "run=SUCCEEDED"]

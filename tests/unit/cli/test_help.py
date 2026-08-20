@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from rundra.cli.main import build_parser, main
+from rundra.cli.main import CLIUsageError, build_parser, main
 from rundra.cli.operations import LAST_RUN_SELECTOR
 
 
@@ -42,6 +42,19 @@ def test_lifecycle_command_accepts_explicit_run_id() -> None:
     arguments = build_parser().parse_args(("wait", run_id))
 
     assert arguments.run_id == run_id
+
+
+def test_wait_accepts_agent_efficient_feedback_options() -> None:
+    run_id = "run_0123456789abcdef0123456789abcdef"
+    arguments = build_parser().parse_args(
+        ("wait", run_id, "--notify", "--progress-interval", "30")
+    )
+
+    assert arguments.notify is True
+    assert arguments.progress_interval == 30
+
+    with pytest.raises(CLIUsageError):
+        build_parser().parse_args(("wait", run_id, "--progress-interval", "0"))
 
 
 def test_resume_accepts_last_run_selector() -> None:

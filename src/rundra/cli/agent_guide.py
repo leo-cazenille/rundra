@@ -40,6 +40,11 @@ GUIDE = f"""{START_MARKER}
   `rundr fetch RUN_ID` for long Runs. Use `--destination PATH` only to override
   the configuration-based default. Use `rundr run` only when keeping the client
   attached is appropriate.
+- For agents, use `rundr wait RUN_ID --json` without `--progress`: blocking wait
+  emits only the final JSON document. When a tool-call deadline is shorter than
+  the Run, renew bounded calls such as `--timeout 300 --json`. Reserve
+  `--progress` for interactive humans because captured TQDM redraws can consume
+  transcript tokens. `--notify` adds one terminal alert but no polling output.
 - Preserve the Run ID and the exact `--data-dir` used at submission. Lifecycle
   commands must use the same Run store. `--last` is convenient interactively,
   but agents should retain explicit Run IDs to avoid selecting concurrent work.

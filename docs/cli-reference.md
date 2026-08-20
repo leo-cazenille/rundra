@@ -11,8 +11,8 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 | `plan` | `EXPERIMENT` | `--config`, `--seed`/`--seeds`/`--random-seed`, `--target`, `--targets-file`, `--project-file`, `--profile`, preparation options, `--execution-strategy`, `--retrieval`, `--workers`, `--task-slots-per-worker`, `--json` | Resolve and inspect execution without target contact or state changes. |
 | `targets` | none | `--targets-file`, `--json` | Validate and list configured targets. |
 | `doctor` | optional `EXPERIMENT` | launch path overrides, `--connect`, `--local-target-access`, `--scheduler-probe`, `--probe-timeout`, `--no-write-probe`, `--agent`, `--json` | Audit installation, sandbox paths, target access, reversible staging, and an optional bounded scheduler submission. |
-| `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--workers`, `--task-slots-per-worker`, `--verbose`, `--progress`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
-| `wait` | `RUN_ID` or `--last` | `--timeout`, `--poll-interval`, `--data-dir`, `--verbose`, `--progress`, `--json` | Reconcile until terminal or a renewable timeout. |
+| `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--workers`, `--task-slots-per-worker`, `--verbose`, `--progress`, `--progress-interval`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
+| `wait` | `RUN_ID` or `--last` | `--timeout`, `--poll-interval`, `--notify`, `--data-dir`, `--verbose`, `--progress`, `--progress-interval`, `--json` | Reconcile until terminal or a renewable timeout; optionally emit one terminal alert. |
 | `agent-guide` | none | `--write PATH`, `--check PATH`, `--json` | Print, install, or check portable agent instructions. |
 | `help` | optional `COMMAND` | none | List commands and the common workflow, or show one command's detailed arguments and options. |
 | `submit` | `EXPERIMENT` | same as `run` | Submit asynchronously when the selected scheduler supports it. |
@@ -20,6 +20,11 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 `--verbose` prints lifecycle details and `--progress` displays a TQDM phase
 bar. They may be combined. Both write only to stderr, preserving the final
 human or JSON result on stdout.
+Progress redraws are deduplicated and throttled to `--progress-interval`
+seconds (10 by default), except for phase and terminal updates. Captured
+`--json --progress` emits a warning because terminal redraws may inflate agent
+transcripts. Agents should use blocking `wait --json`, or renew `wait --timeout
+300 --json` when their tool-call deadline is bounded.
 For synchronous arrays the bar total is six lifecycle units plus the number of
 Tasks; scheduler updates show terminal/total, running, queued, failed, and
 allocated-node counts.

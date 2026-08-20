@@ -6,6 +6,9 @@ All notable user-visible changes are recorded here.
 
 ### Added
 
+- `--progress-interval` throttles interactive redraws and `wait --notify`
+  emits one credential-free terminal completion alert.
+
 - Submission receipts record explicit accepted, rejected, uncertain, and
   operator-resolved outcomes. `rundr resolve-submission` and the equivalent MCP
   tool can close an uncertain Run only after exact operator confirmation that
@@ -14,6 +17,11 @@ All notable user-visible changes are recorded here.
   `max_memory_per_worker` ceiling during pure planning.
 
 ### Changed
+
+- Progress output deduplicates unchanged observations, terminal transitions
+  remain immediate, and captured `--json --progress` warns agent callers about
+  transcript growth. The agent guide recommends silent blocking or renewable
+  JSON waits.
 
 - Portable lifecycle help, target errors, setup guidance, and agent instructions
   now describe both Slurm and OpenPBS without renaming backend-specific strategy
