@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import cast
 
-from rundra.domain.models import RunId
+from rundra.domain.models import RunId, TaskId
 from rundra.domain.scaling import SeedRange, TaskCoordinate, TaskSpace
 from rundra.domain.states import (
     ExecutionState,
@@ -242,6 +242,136 @@ class SqliteTaskStore:
             raise RunStoreError(
                 f"Could not update Task state for Run {run_id}: {error}"
             ) from error
+
+    def initialize_submission(
+        self, run_id: RunId, scheduler_ids: Mapping[TaskId, str]
+    ) -> None:
+        """Persist the accepted scheduler identity for every compact Task."""
+
+        if not isinstance(scheduler_ids, Mapping):
+            raise TypeError("Compact submission identities must be a mapping")
+        task_space = self.task_space(run_id)
+        if len(scheduler_ids) != task_space.task_count:
+            raise RunStoreError(
+                f"Compact submission for Run {run_id} does not map every Task"
+            )
+        rows: list[tuple[object, ...]] = []
+        for ordinal in range(task_space.task_count):
+            coordinate = task_space.coordinate(ordinal)
+            native_id = scheduler_ids.get(coordinate.task_id)
+            if (
+                type(native_id) is not str
+                or not native_id.strip()
+                or "\x00" in native_id
+            ):
+                raise RunStoreError(
+                    f"Compact submission for Run {run_id} has an invalid Task identity"
+                )
+            rows.append(
+                (
+                    ordinal,
+                    ExecutionState.SUBMITTED.value,
+                    RetrievalState.NOT_REQUESTED.value,
+                    native_id,
+                    "SUBMITTED",
+                    None,
+                    0,
+                )
+            )
+        try:
+            with self._open_existing(run_id) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                existing = connection.execute(
+                    "SELECT COUNT(*) FROM task_state"
+                ).fetchone()[0]
+                if existing:
+                    raise RunStoreError(
+                        f"Compact submission for Run {run_id} is already initialized"
+                    )
+                connection.executemany(
+                    "INSERT INTO task_state VALUES (?, ?, ?, ?, ?, ?, ?)", rows
+                )
+        except sqlite3.Error as error:
+            raise RunStoreError(
+                f"Could not initialize compact submission for Run {run_id}: {error}"
+            ) from error
+
+    def all_states(self, run_id: RunId) -> tuple[TaskState, ...]:
+        """Return every explicitly initialized compact Task state."""
+
+        task_space = self.task_space(run_id)
+        with self._open_existing(run_id) as connection:
+            rows = tuple(
+                connection.execute(
+                    "SELECT ordinal, execution_state, retrieval_state, scheduler_id, "
+                    "native_state, exit_code, attempt FROM task_state ORDER BY ordinal"
+                )
+            )
+        if len(rows) != task_space.task_count:
+            raise RunStoreError(
+                f"Compact Task state for Run {run_id} is not fully initialized"
+            )
+        return tuple(
+            self._state(task_space.coordinate(cast(int, row[0])), row[1:])
+            for row in rows
+        )
+
+    def set_all_retrieval(self, run_id: RunId, target: RetrievalState) -> None:
+        """Transition retrieval state for every initialized compact Task."""
+
+        if type(target) is not RetrievalState:
+            raise TypeError("Compact retrieval target must be a RetrievalState")
+        try:
+            with self._open_existing(run_id) as connection:
+                current_values = tuple(
+                    RetrievalState(row[0])
+                    for row in connection.execute(
+                        "SELECT DISTINCT retrieval_state FROM task_state"
+                    )
+                )
+                if not current_values:
+                    raise RunStoreError(
+                        f"Compact Task state for Run {run_id} is not initialized"
+                    )
+                for current in current_values:
+                    validate_retrieval_transition(current, target)
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute(
+                    "UPDATE task_state SET retrieval_state = ?", (target.value,)
+                )
+        except (sqlite3.Error, ValueError) as error:
+            raise RunStoreError(
+                f"Could not update compact retrieval for Run {run_id}: {error}"
+            ) from error
+
+    def set_retrieval(
+        self,
+        run_id: RunId,
+        task_ids: Sequence[TaskId],
+        target: RetrievalState,
+    ) -> None:
+        """Transition retrieval state for selected compact Tasks."""
+
+        if not isinstance(task_ids, Sequence) or isinstance(task_ids, (str, bytes)):
+            raise TypeError("Compact retrieval Task IDs must be a sequence")
+        selected = tuple(task_ids)
+        if not selected or len(set(selected)) != len(selected):
+            raise ValueError("Compact retrieval Task IDs must be nonempty and unique")
+        if type(target) is not RetrievalState:
+            raise TypeError("Compact retrieval target must be a RetrievalState")
+        states = self.all_states(run_id)
+        by_id = {state.coordinate.task_id: state for state in states}
+        try:
+            updates = tuple(
+                replace(state, retrieval_state=target)
+                for task_id in selected
+                if (state := by_id[task_id])
+            )
+        except KeyError as error:
+            raise ValueError(
+                f"Unknown compact retrieval Task: {error.args[0]}"
+            ) from error
+        self.update_batch(run_id, updates)
 
     def counts(self, run_id: RunId) -> TaskStateCounts:
         task_space = self.task_space(run_id)

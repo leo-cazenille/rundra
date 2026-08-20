@@ -131,6 +131,7 @@ from rundra.results import OperationError, OperationResult
 
 _DEFAULT_PREPARATION_STORAGE = PreparationStorageConfig()
 LAST_RUN_SELECTOR = "__rundra_last_run__"
+_COMPACT_EXECUTION_THRESHOLD = 1000
 
 
 def _report_progress(
@@ -1520,6 +1521,7 @@ def run_operation(
     confirm_tasks: int | None = None,
     workers: int | None = None,
     task_slots_per_worker: int | None = None,
+    task_store: SqliteTaskStore | None = None,
 ) -> OperationResult[RunValue]:
     try:
         _report_progress(
@@ -1716,6 +1718,7 @@ def run_operation(
             framework_version=version("rundra"),
             provenance=GitProvenanceCapture(),
             progress=progress,
+            task_store=task_store,
         )
         result = service.execute_one(
             RunExecutionRequest(
@@ -1754,6 +1757,14 @@ def run_operation(
                     target_name in targets_config.execution
                     and len(plan.units)
                     >= targets_config.execution[target_name].output_shard_tasks
+                ),
+                compact_plan=(
+                    scaling_plan
+                    if task_store is not None
+                    and scaling_plan is not None
+                    and scaling_plan.strategy == "worker-pool"
+                    and task_total >= _COMPACT_EXECUTION_THRESHOLD
+                    else None
                 ),
             )
         )
@@ -1825,6 +1836,7 @@ def submit_operation(
     workers: int | None = None,
     task_slots_per_worker: int | None = None,
     submission_receipts: SubmissionReceiptStore | None = None,
+    task_store: SqliteTaskStore | None = None,
 ) -> OperationResult[RunValue]:
     try:
         _report_progress(
@@ -2009,6 +2021,7 @@ def submit_operation(
             provenance=GitProvenanceCapture(),
             progress=progress,
             submission_receipts=submission_receipts,
+            task_store=task_store,
         )
         result = service.submit_one(
             RunExecutionRequest(
@@ -2047,6 +2060,14 @@ def submit_operation(
                     target_name in targets_config.execution
                     and len(plan.units)
                     >= targets_config.execution[target_name].output_shard_tasks
+                ),
+                compact_plan=(
+                    scaling_plan
+                    if task_store is not None
+                    and scaling_plan is not None
+                    and scaling_plan.strategy == "worker-pool"
+                    and task_total >= _COMPACT_EXECUTION_THRESHOLD
+                    else None
                 ),
             )
         )
@@ -2198,22 +2219,21 @@ def status_operation(
     if error is not None:
         return OperationResult.failure("status", error)
     assert record is not None
-    if (
-        record.format_version < 4
-        and record.run.target.scheduler.kind in {"pbs", "slurm"}
-        and record.run.state
-        not in {
-            ExecutionState.SUCCEEDED,
-            ExecutionState.FAILED,
-            ExecutionState.CANCELLED,
-        }
-    ):
+    if record.run.target.scheduler.kind in {
+        "pbs",
+        "slurm",
+    } and record.run.state not in {
+        ExecutionState.SUCCEEDED,
+        ExecutionState.FAILED,
+        ExecutionState.CANCELLED,
+    }:
         try:
             active_scheduler = scheduler or _record_scheduler(record)
             record = SchedulerLifecycleService(
                 store=store,
                 scheduler=active_scheduler,
                 transport=transport or _record_ssh_transport(record),
+                task_store=task_store,
             ).refresh(record)
         except RunStoreError as store_error:
             return OperationResult.failure(
@@ -2345,6 +2365,7 @@ def cancel_operation(
     store: RunStore,
     *,
     scheduler: Scheduler | None = None,
+    task_store: SqliteTaskStore | None = None,
 ) -> OperationResult[CancelValue]:
     record, error = _load_record(run_id, store)
     if error is not None:
@@ -2365,6 +2386,7 @@ def cancel_operation(
             store=store,
             scheduler=active_scheduler,
             transport=_record_ssh_transport(record),
+            task_store=task_store,
         ).cancel(record)
     except OrchestrationError as orchestration_error:
         return OperationResult.failure(
@@ -2882,6 +2904,7 @@ def fetch_operation(
     mode: str = "auto",
     extract: bool = False,
     progress: ProgressObserver | None = None,
+    task_store: SqliteTaskStore | None = None,
 ) -> OperationResult[FetchValue]:
     record, error = _load_record(run_id, store)
     if error is not None:
@@ -2898,6 +2921,7 @@ def fetch_operation(
             mode=mode,
             extract=extract,
             progress=progress,
+            task_store=task_store,
         )
 
 
@@ -2927,6 +2951,7 @@ def _fetch_operation_locked(
     mode: str = "auto",
     extract: bool = False,
     progress: ProgressObserver | None = None,
+    task_store: SqliteTaskStore | None = None,
 ) -> OperationResult[FetchValue]:
     record, error = _load_record(run_id, store)
     if error is not None:
@@ -2972,7 +2997,21 @@ def _fetch_operation_locked(
     selected = _selected_task_ids(record, tasks)
     if isinstance(selected, OperationError):
         return OperationResult.failure("fetch", selected)
-    retrieval_states = _task_retrieval_states(record)
+    if record.format_version == 4 and task_store is None:
+        return OperationResult.failure(
+            "fetch",
+            OperationError(
+                "TASK_STATE_UNAVAILABLE",
+                f"Run {record.run.id} requires its compact Task state",
+                {"run_id": str(record.run.id)},
+            ),
+        )
+    try:
+        retrieval_states = _task_retrieval_states(record, task_store)
+    except RunStoreError as store_error:
+        return OperationResult.failure(
+            "fetch", _run_store_operation_error(store_error, record.run.id)
+        )
     transitioning = tuple(
         task_id
         for task_id in selected
@@ -2987,6 +3026,11 @@ def _fetch_operation_locked(
         task_total=len(selected),
     )
     if transitioning:
+        if record.format_version == 4:
+            assert task_store is not None
+            task_store.set_retrieval(
+                record.run.id, transitioning, RetrievalState.PENDING
+            )
         for task_id in transitioning:
             retrieval_states[task_id] = RetrievalState.PENDING
         pending = replace(
@@ -2997,7 +3041,9 @@ def _fetch_operation_locked(
                     tuple(retrieval_states.values())
                 ),
             ),
-            task_retrieval_states=retrieval_states,
+            task_retrieval_states=(
+                {} if record.format_version == 4 else retrieval_states
+            ),
         )
         try:
             store.update(pending, expected=record)
@@ -3019,6 +3065,11 @@ def _fetch_operation_locked(
         )
     except (OSError, RuntimeError, ValueError) as error:
         if transitioning:
+            if record.format_version == 4:
+                assert task_store is not None
+                task_store.set_retrieval(
+                    record.run.id, transitioning, RetrievalState.FAILED
+                )
             for task_id in transitioning:
                 retrieval_states[task_id] = RetrievalState.FAILED
             try:
@@ -3030,7 +3081,9 @@ def _fetch_operation_locked(
                             tuple(retrieval_states.values())
                         ),
                     ),
-                    task_retrieval_states=retrieval_states,
+                    task_retrieval_states=(
+                        {} if record.format_version == 4 else retrieval_states
+                    ),
                 )
                 store.update(failed, expected=record)
             except RunStoreError:
@@ -3052,6 +3105,11 @@ def _fetch_operation_locked(
             )
     except ValueError as error:
         if transitioning:
+            if record.format_version == 4:
+                assert task_store is not None
+                task_store.set_retrieval(
+                    record.run.id, transitioning, RetrievalState.FAILED
+                )
             for task_id in transitioning:
                 retrieval_states[task_id] = RetrievalState.FAILED
             try:
@@ -3063,7 +3121,9 @@ def _fetch_operation_locked(
                             tuple(retrieval_states.values())
                         ),
                     ),
-                    task_retrieval_states=retrieval_states,
+                    task_retrieval_states=(
+                        {} if record.format_version == 4 else retrieval_states
+                    ),
                 )
                 store.update(failed, expected=record)
             except RunStoreError:
@@ -3078,12 +3138,15 @@ def _fetch_operation_locked(
         )
     for task_id in selected:
         retrieval_states[task_id] = RetrievalState.SUCCEEDED
+    if record.format_version == 4:
+        assert task_store is not None
+        task_store.set_retrieval(record.run.id, selected, RetrievalState.SUCCEEDED)
     retrieval_state = aggregate_retrieval_state(tuple(retrieval_states.values()))
     merged = _merge_artifacts(record.artifacts, artifacts)
     succeeded = replace(
         record,
         run=replace(record.run, retrieval_state=retrieval_state),
-        task_retrieval_states=retrieval_states,
+        task_retrieval_states=({} if record.format_version == 4 else retrieval_states),
         artifacts=merged,
     )
     try:
@@ -3255,7 +3318,12 @@ def _selected_task_id(record: RunRecord, value: str | None) -> TaskId | Operatio
         return OperationError(
             "TASK_REQUIRED", "Select a Task when a Run contains multiple Tasks"
         )
-    if selected not in {task.id for task in record.run.tasks}:
+    compact_member = (
+        record.format_version == 4
+        and record.task_space is not None
+        and int(selected.value.removeprefix("task_")) < record.task_space.task_count
+    )
+    if not compact_member and selected not in {task.id for task in record.run.tasks}:
         return OperationError(
             "TASK_NOT_FOUND",
             f"Task {selected} does not belong to Run {record.run.id}",
@@ -3268,6 +3336,11 @@ def _selected_task_ids(
     record: RunRecord, values: Sequence[str] | None
 ) -> tuple[TaskId, ...] | OperationError:
     if values is None:
+        if record.format_version == 4 and record.task_space is not None:
+            return tuple(
+                record.task_space.coordinate(ordinal).task_id
+                for ordinal in range(record.task_space.task_count)
+            )
         return tuple(task.id for task in record.run.tasks)
     if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
         return OperationError("INVALID_TASK_ID", "Task selectors must be a sequence")
@@ -3288,7 +3361,16 @@ def _selected_task_ids(
     return tuple(selected)
 
 
-def _task_retrieval_states(record: RunRecord) -> dict[TaskId, RetrievalState]:
+def _task_retrieval_states(
+    record: RunRecord, task_store: SqliteTaskStore | None = None
+) -> dict[TaskId, RetrievalState]:
+    if record.format_version == 4:
+        if task_store is None:
+            return {}
+        return {
+            state.coordinate.task_id: state.retrieval_state
+            for state in task_store.all_states(record.run.id)
+        }
     if record.task_retrieval_states:
         return dict(record.task_retrieval_states)
     return {task.id: record.run.retrieval_state for task in record.run.tasks}

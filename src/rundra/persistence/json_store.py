@@ -100,6 +100,34 @@ class JsonRunStore:
                 temporary.unlink(missing_ok=True)
             self._sync_root()
 
+    def compact(self, record: RunRecord, *, expected: RunRecord) -> None:
+        """Atomically replace one materialized definition with verified v4 state."""
+
+        self._require_record(record)
+        self._require_record(expected)
+        if expected.run.id != record.run.id:
+            raise ValueError("Expected and compacted Run IDs must match")
+        with self._write_lock(record.run.id):
+            previous = self.load(record.run.id)
+            if previous == record:
+                return
+            if previous != expected:
+                raise RunStoreConflictError(
+                    f"Run {record.run.id} changed since it was loaded"
+                )
+            _validate_compaction(previous, record)
+            temporary = self._write_temporary(record)
+            destination = self._record_path(record.run.id)
+            try:
+                os.replace(temporary, destination)
+            except OSError as error:
+                raise RunStoreError(
+                    f"Could not compact Run {record.run.id}: {error}"
+                ) from error
+            finally:
+                temporary.unlink(missing_ok=True)
+            self._sync_root()
+
     def list(self) -> tuple[RunRecord, ...]:
         """Return all records in deterministic Run-ID order."""
         if not self._root.exists():
@@ -310,6 +338,67 @@ def _immutable_definition(record: RunRecord) -> tuple[object, ...]:
         record.retrieval_policy,
         record.task_state_store,
     )
+
+
+def _validate_compaction(previous: RunRecord, current: RunRecord) -> None:
+    if previous.format_version not in {1, 2, 3} or current.format_version != 4:
+        raise RunStoreError("Run compaction must convert v1-v3 to v4")
+    if current.task_space is None or current.task_space.task_count != len(
+        previous.run.tasks
+    ):
+        raise RunStoreError("Run compaction TaskSpace does not match its Tasks")
+    if any(
+        current.task_space.coordinate(ordinal).task_id != task.id
+        or current.task_space.coordinate(ordinal).seed != task.seed
+        for ordinal, task in enumerate(previous.run.tasks)
+    ):
+        raise RunStoreError("Run compaction changes Task identity or seed order")
+    previous_identity = (
+        previous.framework_version,
+        previous.run.id,
+        previous.run.experiment_name,
+        previous.run.target,
+        previous.run.created_at,
+        previous.experiment,
+        previous.source_root,
+        previous.experiment_source,
+        previous.initiator,
+        previous.git_commit,
+        previous.git_branch,
+        previous.git_dirty,
+        previous.git_diff,
+        previous.container_digest,
+        previous.preparation,
+    )
+    current_identity = (
+        current.framework_version,
+        current.run.id,
+        current.run.experiment_name,
+        current.run.target,
+        current.run.created_at,
+        current.experiment,
+        current.source_root,
+        current.experiment_source,
+        current.initiator,
+        current.git_commit,
+        current.git_branch,
+        current.git_dirty,
+        current.git_diff,
+        current.container_digest,
+        current.preparation,
+    )
+    if previous_identity != current_identity:
+        raise RunStoreError("Run compaction changes immutable provenance")
+    if (
+        current.run.state != previous.run.state
+        or current.run.retrieval_state != previous.run.retrieval_state
+        or current.task_array_mapping
+        or current.task_scheduler_ids
+        or current.task_native_states
+        or current.task_retrieval_states
+        or current.task_exit_codes
+    ):
+        raise RunStoreError("Run compaction contains incompatible lifecycle state")
 
 
 def _unique_object(pairs: Sequence[tuple[str, object]]) -> dict[str, object]:

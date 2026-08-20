@@ -750,6 +750,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 confirm_tasks=arguments.confirm_tasks,
                 workers=run_inputs.workers,
                 task_slots_per_worker=run_inputs.task_slots_per_worker,
+                task_store=SqliteTaskStore(run_inputs.data_dir),
             )
     elif arguments.command == "submit":
         resolved = resolve_run_inputs_operation(
@@ -797,6 +798,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 workers=submit_inputs.workers,
                 task_slots_per_worker=submit_inputs.task_slots_per_worker,
                 submission_receipts=SubmissionReceiptStore(submit_inputs.data_dir),
+                task_store=SqliteTaskStore(submit_inputs.data_dir),
             )
     elif arguments.command == "resume":
         result = resume_operation(
@@ -859,6 +861,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             mode=arguments.mode,
             extract=arguments.extract,
             progress=progress,
+            task_store=SqliteTaskStore(arguments.data_dir),
         )
     elif arguments.command == "inspect":
         result = inspect_operation(
@@ -867,7 +870,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             receipts=PurgeReceiptStore(arguments.data_dir),
         )
     elif arguments.command == "cancel":
-        result = cancel_operation(arguments.run_id, JsonRunStore(arguments.data_dir))
+        result = cancel_operation(
+            arguments.run_id,
+            JsonRunStore(arguments.data_dir),
+            task_store=SqliteTaskStore(arguments.data_dir),
+        )
     elif arguments.command == "purge":
         result = purge_operation(
             arguments.run_id,

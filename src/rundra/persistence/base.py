@@ -25,3 +25,10 @@ class RunStore(Protocol):
     def list(self) -> tuple[RunRecord, ...]: ...
 
     def operation_lock(self, run_id: RunId) -> AbstractContextManager[None]: ...
+
+
+@runtime_checkable
+class CompactRunStore(Protocol):
+    """Optional persistence capability for one-way materialized compaction."""
+
+    def compact(self, record: RunRecord, *, expected: RunRecord) -> None: ...

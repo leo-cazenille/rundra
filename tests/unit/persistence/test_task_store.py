@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from rundra.domain.models import RunId
+from rundra.domain.models import RunId, TaskId
 from rundra.domain.scaling import SeedRange, TaskSpace
 from rundra.domain.states import ExecutionState, RetrievalState
 from rundra.persistence import SqliteTaskStore, TaskState
@@ -88,3 +88,28 @@ def test_task_store_rejects_invalid_transitions_and_unbounded_pages(
         store.update_batch(_RUN_ID, (TaskState(coordinate, ExecutionState.RUNNING),))
     with pytest.raises(ValueError, match="between 1 and 1000"):
         store.page(_RUN_ID, limit=1001)
+
+
+def test_task_store_initializes_compact_submission_and_retrieval(
+    tmp_path: Path,
+) -> None:
+    store = SqliteTaskStore(tmp_path)
+    space = TaskSpace(1, SeedRange(0, 2))
+    store.create(_RUN_ID, space)
+
+    store.initialize_submission(
+        _RUN_ID,
+        {
+            TaskId.from_ordinal(0): "42_0",
+            TaskId.from_ordinal(1): "42_1",
+            TaskId.from_ordinal(2): "42_0",
+        },
+    )
+    store.set_retrieval(_RUN_ID, (TaskId.from_ordinal(1),), RetrievalState.PENDING)
+
+    assert [state.scheduler_id for state in store.all_states(_RUN_ID)] == [
+        "42_0",
+        "42_1",
+        "42_0",
+    ]
+    assert store.get(_RUN_ID, 1).retrieval_state is RetrievalState.PENDING

@@ -4,7 +4,7 @@ import pytest
 
 from rundra.cli import operations
 from rundra.orchestration.service import RunExecutionRequest
-from rundra.persistence import JsonRunStore
+from rundra.persistence import JsonRunStore, SqliteTaskStore
 
 
 def test_submit_propagates_scalable_worker_allocation(
@@ -88,16 +88,21 @@ targets:
             tmp_path,
             tmp_path / "retrieved",
             JsonRunStore(tmp_path / "runs"),
-            seeds="0:99",
+            seeds="0:999",
             workers=8,
             task_slots_per_worker=40,
+            confirm_tasks=1000,
+            task_store=SqliteTaskStore(tmp_path / "runs"),
         )
 
     request = captured[0]
-    assert request.max_workers == 3
+    assert request.max_workers == 8
     assert request.task_slots_per_worker == 40
     assert request.requested_workers == 8
     assert request.requested_task_slots_per_worker == 40
     assert request.worker_resources is not None
     assert request.worker_resources.tasks == 40
     assert request.worker_resources.memory_bytes == 40 * 1024**3
+    assert request.compact_plan is not None
+    assert request.compact_plan.task_space is not None
+    assert request.compact_plan.task_space.task_count == 1_000

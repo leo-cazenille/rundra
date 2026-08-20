@@ -27,6 +27,7 @@ from rundra.domain.preparation import (
     PreparationRecord,
 )
 from rundra.domain.records import RunRecord
+from rundra.domain.scaling import CompactRun
 from rundra.domain.states import (
     ExecutionState,
     RetrievalState,
@@ -46,12 +47,13 @@ from rundra.orchestration.preparation import (
     read_remote_preparation_result,
 )
 from rundra.orchestration.progress import ProgressEvent, ProgressObserver, ProgressPhase
-from rundra.persistence.base import RunStore
+from rundra.persistence.base import CompactRunStore, RunStore
 from rundra.persistence.errors import RunStoreError
 from rundra.persistence.submission_store import (
     SubmissionReceiptOutcome,
     SubmissionReceiptStore,
 )
+from rundra.persistence.task_store import SqliteTaskStore, TaskState
 from rundra.ports import (
     ArrayScheduler,
     BindMount,
@@ -150,6 +152,7 @@ class SchedulerLifecycleService:
         sleeper: Callable[[float], None] = sleep,
         monotonic_clock: Callable[[], float] = monotonic,
         progress: ProgressObserver | None = None,
+        task_store: SqliteTaskStore | None = None,
     ) -> None:
         if not isinstance(store, RunStore):
             raise TypeError("SchedulerLifecycleService store must implement RunStore")
@@ -174,6 +177,7 @@ class SchedulerLifecycleService:
         self._monotonic = monotonic_clock
         self._progress = progress
         self._transport = transport
+        self._task_store = task_store
 
     def refresh(self, record: RunRecord) -> RunRecord:
         """Query and durably apply every Task scheduler observation."""
@@ -181,6 +185,22 @@ class SchedulerLifecycleService:
         current = self._refresh_preparation(record)
         if current.run.state in _TERMINAL_STATES:
             return current
+        if current.format_version == 4:
+            if self._task_store is None:
+                raise OrchestrationError(
+                    code="TASK_STATE_UNAVAILABLE",
+                    message=f"Run {current.run.id} requires its compact Task state",
+                    run_id=current.run.id,
+                )
+            updated = _compact_observed_record(
+                current,
+                self._scheduler,
+                self._transport,
+                self._task_store,
+                self._clock(),
+            )
+            self._store.update(updated, expected=current)
+            return updated
         task_references = _record_task_references(current)
         references = tuple(reference for _, reference in task_references)
         unique_references = tuple(dict.fromkeys(references))
@@ -438,6 +458,7 @@ class RunExecutionRequest:
     worker_resources: ResourceRequest | None = None
     requested_workers: int | None = None
     requested_task_slots_per_worker: int | None = None
+    compact_plan: ExecutionPlan | None = None
 
     def __post_init__(self) -> None:
         if type(self.plan) is not ExecutionPlan:
@@ -501,6 +522,17 @@ class RunExecutionRequest:
             value = getattr(self, name)
             if value is not None and (type(value) is not int or value < 1):
                 raise ValueError(f"{name} must be positive or None")
+        if self.compact_plan is not None:
+            if type(self.compact_plan) is not ExecutionPlan:
+                raise TypeError("compact_plan must be an ExecutionPlan or None")
+            if (
+                self.compact_plan.task_space is None
+                or self.compact_plan.task_space.task_count != len(self.plan.units)
+                or self.compact_plan.strategy != "worker-pool"
+            ):
+                raise ValueError(
+                    "compact_plan must describe every materialized worker-pool Task"
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -534,6 +566,7 @@ class OrchestrationService:
         provenance: ProvenanceProvider | None = None,
         progress: ProgressObserver | None = None,
         submission_receipts: SubmissionReceiptStore | None = None,
+        task_store: SqliteTaskStore | None = None,
     ) -> None:
         for name, value, protocol in (
             ("store", store, RunStore),
@@ -576,6 +609,7 @@ class OrchestrationService:
         self._provenance = provenance
         self._progress = progress
         self._submission_receipts = submission_receipts
+        self._task_store = task_store
 
     def execute_one(self, request: RunExecutionRequest) -> RunExecutionResult:
         """Execute and fetch one planned Task while durably recording each phase."""
@@ -1143,12 +1177,42 @@ class OrchestrationService:
         bundled = len(set(submission.task_native_ids.values())) < len(
             submission.task_native_ids
         )
+        if request.compact_plan is not None:
+            if self._task_store is None:
+                raise OrchestrationError(
+                    code="TASK_STATE_UNAVAILABLE",
+                    message=f"Run {run_id} requires a compact Task state store",
+                    run_id=run_id,
+                )
+            try:
+                assert request.compact_plan.task_space is not None
+                self._task_store.create(run_id, request.compact_plan.task_space)
+                self._task_store.initialize_submission(
+                    run_id, submission.task_native_ids
+                )
+                compact = _compact_record(
+                    record, request.compact_plan, self._task_store
+                )
+                if not isinstance(self.store, CompactRunStore):
+                    raise RunStoreError(
+                        "Configured Run store does not support compact persistence"
+                    )
+                self.store.compact(compact, expected=record)
+                record = compact
+            except RunStoreError as error:
+                raise OrchestrationError(
+                    code="TASK_STATE_PERSISTENCE_FAILED",
+                    message=f"Run {run_id} compact Task state failed: {error}",
+                    run_id=run_id,
+                ) from error
         updated = replace(
             _with_execution_state(record, ExecutionState.SUBMITTED),
             scheduler_job_ids=tuple(
                 reference.native_id for reference in submission.references
             ),
-            task_scheduler_ids=submission.task_native_ids,
+            task_scheduler_ids=(
+                {} if record.format_version == 4 else submission.task_native_ids
+            ),
             submitted_at=submission_started_at,
             scheduler_metadata={
                 **record.scheduler_metadata,
@@ -1200,6 +1264,7 @@ class OrchestrationService:
                 transport=self._transport,
                 clock=self._clock,
                 progress=self._progress,
+                task_store=self._task_store,
             )
             record = lifecycle.wait(record)
             command_result = None
@@ -1254,10 +1319,17 @@ class OrchestrationService:
             updated = replace(
                 record,
                 run=replace(record.run, retrieval_state=RetrievalState.PENDING),
-                task_retrieval_states={
-                    task.id: RetrievalState.PENDING for task in record.run.tasks
-                },
+                task_retrieval_states=(
+                    {}
+                    if record.format_version == 4
+                    else {task.id: RetrievalState.PENDING for task in record.run.tasks}
+                ),
             )
+            if record.format_version == 4:
+                assert self._task_store is not None
+                self._task_store.set_all_retrieval(
+                    record.run.id, RetrievalState.PENDING
+                )
             self.store.update(updated, expected=record)
             record = updated
             self._report(
@@ -1285,10 +1357,19 @@ class OrchestrationService:
                 failed = replace(
                     record,
                     run=replace(record.run, retrieval_state=RetrievalState.FAILED),
-                    task_retrieval_states={
-                        task.id: RetrievalState.FAILED for task in record.run.tasks
-                    },
+                    task_retrieval_states=(
+                        {}
+                        if record.format_version == 4
+                        else {
+                            task.id: RetrievalState.FAILED for task in record.run.tasks
+                        }
+                    ),
                 )
+                if record.format_version == 4:
+                    assert self._task_store is not None
+                    self._task_store.set_all_retrieval(
+                        record.run.id, RetrievalState.FAILED
+                    )
                 self.store.update(failed, expected=record)
                 raise OrchestrationError(
                     code="RESULT_RETRIEVAL_FAILED",
@@ -1299,11 +1380,20 @@ class OrchestrationService:
             updated = replace(
                 record,
                 run=replace(record.run, retrieval_state=RetrievalState.SUCCEEDED),
-                task_retrieval_states={
-                    task.id: RetrievalState.SUCCEEDED for task in record.run.tasks
-                },
+                task_retrieval_states=(
+                    {}
+                    if record.format_version == 4
+                    else {
+                        task.id: RetrievalState.SUCCEEDED for task in record.run.tasks
+                    }
+                ),
                 artifacts=(*record.artifacts, *fetched_artifacts),
             )
+            if record.format_version == 4:
+                assert self._task_store is not None
+                self._task_store.set_all_retrieval(
+                    record.run.id, RetrievalState.SUCCEEDED
+                )
             self.store.update(updated, expected=record)
             self._report(
                 ProgressPhase.RETRIEVE,
@@ -1459,21 +1549,270 @@ class OrchestrationService:
         pending = replace(
             record,
             run=replace(record.run, retrieval_state=RetrievalState.PENDING),
-            task_retrieval_states={
-                task.id: RetrievalState.PENDING for task in record.run.tasks
-            },
+            task_retrieval_states=(
+                {}
+                if record.format_version == 4
+                else {task.id: RetrievalState.PENDING for task in record.run.tasks}
+            ),
         )
+        if record.format_version == 4:
+            assert self._task_store is not None
+            self._task_store.set_all_retrieval(record.run.id, RetrievalState.PENDING)
         self.store.update(pending, expected=record)
         self.store.update(
             replace(
                 pending,
                 run=replace(pending.run, retrieval_state=RetrievalState.FAILED),
-                task_retrieval_states={
-                    task.id: RetrievalState.FAILED for task in pending.run.tasks
-                },
+                task_retrieval_states=(
+                    {}
+                    if record.format_version == 4
+                    else {task.id: RetrievalState.FAILED for task in pending.run.tasks}
+                ),
             ),
             expected=pending,
         )
+        if record.format_version == 4:
+            assert self._task_store is not None
+            self._task_store.set_all_retrieval(record.run.id, RetrievalState.FAILED)
+
+
+def _compact_record(
+    record: RunRecord,
+    plan: ExecutionPlan,
+    task_store: SqliteTaskStore,
+) -> RunRecord:
+    assert plan.task_space is not None
+    run = CompactRun(
+        id=record.run.id,
+        experiment_name=record.run.experiment_name,
+        target=record.run.target,
+        tasks=(),
+        created_at=record.run.created_at,
+        state=record.run.state,
+        retrieval_state=record.run.retrieval_state,
+    )
+    return replace(
+        record,
+        format_version=4,
+        run=run,
+        task_array_mapping=(),
+        task_scheduler_ids={},
+        task_native_states={},
+        task_retrieval_states={},
+        task_exit_codes={},
+        task_space=plan.task_space,
+        execution_strategy=plan.strategy,
+        retrieval_policy=plan.retrieval_policy,
+        task_state_store=PurePath(task_store.path(record.run.id).name),
+    )
+
+
+def _compact_observed_record(
+    record: RunRecord,
+    scheduler: Scheduler,
+    transport: Transport | None,
+    task_store: SqliteTaskStore,
+    observed_at: datetime,
+) -> RunRecord:
+    if record.task_space is None or record.task_state_store is None:
+        raise ValueError("Compact Run is missing TaskSpace persistence metadata")
+    if record.task_state_store.name != task_store.path(record.run.id).name:
+        raise ValueError("Compact Run references another Task state sidecar")
+    states = task_store.all_states(record.run.id)
+    reference_ids = tuple(
+        dict.fromkeys(
+            state.scheduler_id for state in states if state.scheduler_id is not None
+        )
+    )
+    if not reference_ids:
+        raise ValueError("Compact Run has no scheduler Task identities")
+    references = tuple(SchedulerReference(value) for value in reference_ids)
+    scheduler_observations = scheduler.query(references)
+    _validate_observations(scheduler_observations, references)
+    by_native = {
+        observation.reference.native_id: observation
+        for observation in scheduler_observations
+    }
+    started, finished = _compact_bundle_events(record, reference_ids, transport)
+    updated_states: list[TaskState] = []
+    for state in states:
+        if state.execution_state in _TERMINAL_STATES:
+            updated_states.append(state)
+            continue
+        assert state.scheduler_id is not None
+        observation = by_native[state.scheduler_id]
+        task_id = state.coordinate.task_id
+        if task_id in finished:
+            code, _, _ = finished[task_id]
+            execution = ExecutionState.SUCCEEDED if code == 0 else ExecutionState.FAILED
+            native_state = (
+                "BUNDLED_TASK_SUCCEEDED" if code == 0 else "BUNDLED_TASK_FAILED"
+            )
+            updated_states.append(
+                replace(
+                    state,
+                    execution_state=execution,
+                    native_state=native_state,
+                    exit_code=code,
+                )
+            )
+        elif task_id in started:
+            updated_states.append(
+                replace(
+                    state,
+                    execution_state=ExecutionState.RUNNING,
+                    native_state="BUNDLED_TASK_RUNNING",
+                )
+            )
+        elif observation.state in {
+            ExecutionState.SUBMITTED,
+            ExecutionState.QUEUED,
+            ExecutionState.RUNNING,
+        }:
+            updated_states.append(
+                replace(
+                    state,
+                    execution_state=ExecutionState.QUEUED,
+                    native_state=observation.native_state,
+                )
+            )
+        elif observation.state is ExecutionState.CANCELLED:
+            updated_states.append(
+                replace(
+                    state,
+                    execution_state=ExecutionState.CANCELLED,
+                    native_state=observation.native_state,
+                )
+            )
+        else:
+            updated_states.append(
+                replace(
+                    state,
+                    execution_state=ExecutionState.FAILED,
+                    native_state="BUNDLE_JOURNAL_MISSING",
+                    exit_code=125,
+                )
+            )
+    task_store.update_batch(record.run.id, tuple(updated_states))
+    execution_state = aggregate_execution_state(
+        tuple(state.execution_state for state in updated_states)
+    )
+    scheduler_metadata = dict(record.scheduler_metadata)
+    scheduler_metadata["running_tasks"] = sum(
+        state.execution_state is ExecutionState.RUNNING for state in updated_states
+    )
+    scheduler_metadata["active_workers"] = sum(
+        observation.state is ExecutionState.RUNNING
+        for observation in scheduler_observations
+    )
+    if len(finished) >= 10 and started:
+        first_started = min(value[0] for value in started.values())
+        last_finished = max(value[1] for value in finished.values())
+        elapsed = last_finished - first_started
+        if elapsed >= 30:
+            throughput = len(finished) / elapsed
+            scheduler_metadata["throughput_tasks_per_second"] = throughput
+            scheduler_metadata["eta_seconds"] = (
+                len(updated_states) - len(finished)
+            ) / throughput
+    nodes = tuple(
+        str(node)
+        for observation in scheduler_observations
+        if (node := observation.metadata.get("allocated_nodes")) is not None
+    )
+    started_values = tuple(
+        observation.started_at
+        for observation in scheduler_observations
+        if observation.started_at is not None
+    )
+    native_states = tuple(
+        dict.fromkeys(
+            observation.native_state for observation in scheduler_observations
+        )
+    )
+    terminal = execution_state in _TERMINAL_STATES
+    return replace(
+        record,
+        run=replace(record.run, state=execution_state),
+        allocated_nodes=tuple(dict.fromkeys((*record.allocated_nodes, *nodes))),
+        started_at=record.started_at
+        or (min(started_values) if started_values else None),
+        completed_at=(record.completed_at or observed_at if terminal else None),
+        native_state=(native_states[0] if len(native_states) == 1 else "MIXED"),
+        scheduler_metadata=scheduler_metadata,
+    )
+
+
+def _compact_bundle_events(
+    record: RunRecord,
+    reference_ids: tuple[str, ...],
+    transport: Transport | None,
+) -> tuple[dict[TaskId, tuple[int, str]], dict[TaskId, tuple[int, int, str]]]:
+    status_value = record.scheduler_metadata.get("bundle_status_root")
+    if type(status_value) is not str or not status_value.startswith("/"):
+        raise ValueError("Compact worker-pool Run has no bundle status root")
+    if transport is None:
+        raise ValueError("Compact worker-pool reconciliation requires transport")
+    result = transport.run(
+        Command(
+            (
+                "/bin/sh",
+                "-c",
+                (
+                    'status=$1; shift; for native do aggregate="$status/$native.tsv"; '
+                    'if [ -f "$aggregate" ]; then cat -- "$aggregate"; continue; fi; '
+                    'for path in "$status/$native".lane-*.tsv '
+                    '"$status/$native".lane-*.tsv.*; do '
+                    '[ -f "$path" ] && cat -- "$path"; done; done'
+                ),
+                "rundra-compact-bundle-status",
+                status_value,
+                *reference_ids,
+            )
+        )
+    )
+    if result.exit_code != 0:
+        raise ValueError("Could not read compact bundled Task journals")
+    assert record.task_space is not None
+    started: dict[TaskId, tuple[int, str]] = {}
+    finished: dict[TaskId, tuple[int, int, str]] = {}
+    for line in result.stdout.splitlines():
+        fields = line.split("\t")
+        if fields == ["RUNDRA_TASK_EVENTS", "1"]:
+            continue
+        if len(fields) == 4 and fields[0] == "START":
+            task_id = TaskId(fields[1])
+            ordinal = int(task_id.value.removeprefix("task_"))
+            if ordinal >= record.task_space.task_count or task_id in started:
+                raise ValueError("Compact Task START event is invalid")
+            started[task_id] = (int(fields[2]), fields[3])
+            continue
+        if len(fields) == 5 and fields[0] == "FINISH":
+            task_id = TaskId(fields[1])
+            ordinal = int(task_id.value.removeprefix("task_"))
+            code = int(fields[2])
+            if (
+                ordinal >= record.task_space.task_count
+                or task_id in finished
+                or not 0 <= code <= 255
+            ):
+                raise ValueError("Compact Task FINISH event is invalid")
+            finished[task_id] = (code, int(fields[3]), fields[4])
+            continue
+        if len(fields) == 2:
+            task_id = TaskId(fields[0])
+            ordinal = int(task_id.value.removeprefix("task_"))
+            code = int(fields[1])
+            if (
+                ordinal >= record.task_space.task_count
+                or task_id in finished
+                or not 0 <= code <= 255
+            ):
+                raise ValueError("Compact legacy Task event is invalid")
+            finished[task_id] = (code, 0, "unknown")
+            continue
+        raise ValueError("Compact bundled Task journal is malformed")
+    return started, finished
 
 
 def _with_execution_state(record: RunRecord, state: ExecutionState) -> RunRecord:

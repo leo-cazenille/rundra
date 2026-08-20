@@ -22,15 +22,17 @@ from rundra.domain.models import (
     Target,
 )
 from rundra.domain.records import RunRecord
+from rundra.domain.scaling import ExecutionPolicy, SeedRange, WorkerPoolPolicy
 from rundra.domain.states import ExecutionState, RetrievalState
-from rundra.orchestration.planner import create_plan
+from rundra.domain.sweeps import ExpandedConfig
+from rundra.orchestration.planner import create_plan, create_scalable_plan
 from rundra.orchestration.service import (
     OrchestrationError,
     OrchestrationService,
     RunExecutionRequest,
     SchedulerLifecycleService,
 )
-from rundra.persistence import JsonRunStore
+from rundra.persistence import JsonRunStore, SqliteTaskStore
 from rundra.ports import (
     CapabilityCheck,
     CommandResult,
@@ -122,7 +124,10 @@ def _request(tmp_path: Path, *, seeds: tuple[int, ...] = (17,)) -> RunExecutionR
 
 
 def _service(
-    tmp_path: Path, outcomes: deque[tuple[int, str, str] | Exception]
+    tmp_path: Path,
+    outcomes: deque[tuple[int, str, str] | Exception],
+    *,
+    task_store: SqliteTaskStore | None = None,
 ) -> tuple[OrchestrationService, ScriptedTransport, JsonRunStore]:
     transport = ScriptedTransport(outcomes)
     store = JsonRunStore(tmp_path / "records")
@@ -140,8 +145,41 @@ def _service(
         run_id_factory=lambda: _RUN_ID,
         clock=lambda: _NOW,
         framework_version="0.1.0.dev0",
+        task_store=task_store,
     )
     return service, transport, store
+
+
+def _compact_plan(request: RunExecutionRequest):
+    policy = ExecutionPolicy(
+        hard_task_limit=2_000,
+        confirmation_threshold=2_000,
+        max_active_tasks=2,
+        max_array_size=1_001,
+        output_shard_tasks=1_000,
+        automatic_retrieval_threshold=20_000,
+        worker_pool=WorkerPoolPolicy(
+            activation_threshold=100,
+            max_workers=2,
+            tasks_per_lease=100,
+            infrastructure_retry_limit=2,
+            requeue_limit=2,
+            task_slots_per_worker=1,
+            default_workers=2,
+            max_task_slots_per_worker=1,
+        ),
+        max_concurrent_jobs=2,
+    )
+    return create_scalable_plan(
+        request.experiment,
+        (ExpandedConfig(request.plan.units[0].config),),
+        request.plan.target,
+        seeds=SeedRange(0, 999),
+        policy=policy,
+        strategy="worker-pool",
+        version=7,
+        workers=2,
+    )
 
 
 def _terminal_rows(state: str, exit_code: int) -> tuple[tuple[int, str, str], ...]:
@@ -264,6 +302,62 @@ def test_large_bundled_cancel_reaches_scancel_before_task_reconciliation(
     assert result.ok and isinstance(result.value, CancelValue)
     assert result.value.status.state is ExecutionState.CANCELLED
     assert len(transport.commands) == command_count + 4
+
+
+def test_large_worker_pool_persists_and_reconciles_compact_task_state(
+    tmp_path: Path,
+) -> None:
+    task_store = SqliteTaskStore(tmp_path / "records")
+    service, transport, store = _service(
+        tmp_path,
+        deque(
+            [
+                (0, "MaxArraySize = 1001\n", ""),
+                (0, "", ""),
+                (0, "", ""),
+                (0, "42\n", ""),
+            ]
+        ),
+        task_store=task_store,
+    )
+    request = _request(tmp_path, seeds=tuple(range(1_000)))
+    compact_plan = _compact_plan(request)
+    request = replace(
+        request,
+        max_concurrent_jobs=2,
+        max_workers=2,
+        compact_plan=compact_plan,
+        worker_resources=compact_plan.worker_resources,
+    )
+
+    submitted = service.submit_one(request).record
+
+    assert submitted.format_version == 4
+    assert submitted.run.tasks == ()
+    assert submitted.task_space is not None
+    assert submitted.task_space.task_count == 1_000
+    assert task_store.counts(_RUN_ID).execution[ExecutionState.SUBMITTED] == 1_000
+    assert (tmp_path / "records" / f"{_RUN_ID}.json").stat().st_size < 100_000
+
+    accounting = (
+        "42_0|COMPLETED|0:0|2026-08-15T10:00:00|"
+        "2026-08-15T10:01:00|node01|\n"
+        "42_1|COMPLETED|0:0|2026-08-15T10:00:00|"
+        "2026-08-15T10:01:00|node02|\n"
+    )
+    journals = "\n".join(f"task_{ordinal:06d}\t0" for ordinal in range(1_000))
+    transport.outcomes.extend(((0, "", ""), (0, accounting, ""), (0, journals, "")))
+
+    refreshed = SchedulerLifecycleService(
+        store=store,
+        scheduler=service._scheduler,
+        transport=transport,
+        clock=lambda: _NOW,
+        task_store=task_store,
+    ).refresh(submitted)
+
+    assert refreshed.run.state is ExecutionState.SUCCEEDED
+    assert task_store.counts(_RUN_ID).execution[ExecutionState.SUCCEEDED] == 1_000
 
 
 @pytest.mark.parametrize(
