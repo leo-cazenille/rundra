@@ -1022,6 +1022,7 @@ def render_slurm_bundle_manifest(
                     ),
                     '        journal_tmp="${journal}.$$"',
                     '        if [ -e "$journal" ]; then exit 73; fi',
+                    "        printf 'RUNDRA_TASK_EVENTS\\t1\\n' > \"$journal\"",
                     '        : > "$journal_tmp"',
                 )
             )
@@ -1046,6 +1047,11 @@ def render_slurm_bundle_manifest(
                 branches.extend(
                     (
                         f"        # task_id={mapping.task_id} seed={mapping.seed}",
+                        (
+                            f"        printf 'START\\t%s\\t%s\\t%s\\n' "
+                            f"{mapping.task_id} \"$(date +%s)\" \"$(hostname)\" "
+                            '>> "$journal"'
+                        ),
                         "        set +e",
                         f"        {rendered}",
                         "        task_status=$?",
@@ -1053,6 +1059,11 @@ def render_slurm_bundle_manifest(
                         (
                             f"        printf '%s\\t%s\\n' {mapping.task_id} "
                             '"$task_status" >> "$journal_tmp"'
+                        ),
+                        (
+                            f"        printf 'FINISH\\t%s\\t%s\\t%s\\t%s\\n' "
+                            f"{mapping.task_id} \"$task_status\" \"$(date +%s)\" "
+                            '"$(hostname)" >> "$journal"'
                         ),
                     )
                 )
@@ -1066,8 +1077,8 @@ def render_slurm_bundle_manifest(
                 )
             branches.extend(
                 (
-                    '        chmod 400 "$journal_tmp"',
-                    '        mv -- "$journal_tmp" "$journal"',
+                    '        rm -f -- "$journal_tmp"',
+                    '        chmod 400 "$journal"',
                     "        ;;",
                 )
             )

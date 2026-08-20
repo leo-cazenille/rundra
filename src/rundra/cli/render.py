@@ -726,9 +726,11 @@ def _result_format_version(value: object) -> int:
     if isinstance(value, PlanValue):
         return value.plan.version
     if isinstance(value, RunValue):
-        return value.record.format_version
+        return 5 if len(value.record.run.tasks) >= 1000 else value.record.format_version
     if isinstance(value, InspectValue):
         return 5 if value.retention is not None else value.record.format_version
+    if isinstance(value, StatusValue) and len(value.task_details) >= 1000:
+        return 5
     if isinstance(value, StatusValue) and value.preparation is not None:
         return value.format_version
     if isinstance(value, SubmissionRecoveryValue):
@@ -736,7 +738,7 @@ def _result_format_version(value: object) -> int:
     if isinstance(value, StatusValue):
         return value.format_version
     if isinstance(value, WaitValue):
-        return value.status.format_version
+        return 5 if len(value.status.task_details) >= 1000 else value.status.format_version
     if isinstance(value, CancelValue) and value.status.preparation is not None:
         return value.status.format_version
     if isinstance(value, CancelValue):
@@ -976,6 +978,37 @@ def _duration_seconds(value: timedelta | None) -> int | None:
 
 def _run_value_document(value: RunValue) -> dict[str, Any]:
     record = value.record
+    if len(record.run.tasks) >= 1000:
+        seeds = tuple(dict.fromkeys(task.seed for task in record.run.tasks))
+        parameters = tuple(
+            dict.fromkeys(
+                None if task.parameter_set is None else task.parameter_set.id
+                for task in record.run.tasks
+            )
+        )
+        contiguous = all(
+            right == left + 1 for left, right in zip(seeds, seeds[1:], strict=False)
+        )
+        return {
+            "run_id": str(record.run.id),
+            "experiment": record.run.experiment_name,
+            "target": record.run.target.name,
+            "state": record.run.state.value,
+            "retrieval_state": record.run.retrieval_state.value,
+            "task_space": {
+                "task_count": len(record.run.tasks),
+                "parameter_set_count": len(parameters),
+                "seeds": (
+                    {"start": seeds[0], "stop": seeds[-1], "step": 1}
+                    if contiguous
+                    else {"count": len(seeds)}
+                ),
+            },
+            "tasks": {"total": len(record.run.tasks), "details_included": False},
+            "scheduler_job_ids": list(record.scheduler_job_ids),
+            "scheduler": record.run.target.scheduler.kind,
+            "artifacts": [_artifact_document(item) for item in record.artifacts],
+        }
     return {
         "run_id": str(record.run.id),
         "experiment": record.run.experiment_name,
@@ -998,6 +1031,7 @@ def _run_value_document(value: RunValue) -> dict[str, Any]:
 
 
 def _status_document(value: StatusValue) -> dict[str, Any]:
+    compact = len(value.task_details) >= 1000
     document: dict[str, Any] = {
         "run_id": str(value.run_id),
         "experiment": value.experiment,
@@ -1006,7 +1040,7 @@ def _status_document(value: StatusValue) -> dict[str, Any]:
         "retrieval_state": value.retrieval_state.value,
         "native_state": value.native_state,
         "scheduler_job_ids": list(value.scheduler_job_ids),
-        "task_details": [
+        "task_details": [] if compact else [
             {
                 "task_id": str(task.task_id),
                 "seed": task.seed,
@@ -1036,6 +1070,20 @@ def _status_document(value: StatusValue) -> dict[str, Any]:
             },
         },
     }
+    if compact:
+        document["task_details_included"] = False
+    if value.worker_count is not None:
+        slots = value.task_slots_per_worker or 1
+        document["workers"] = {
+            "requested": value.worker_count,
+            "active": value.active_workers,
+            "task_slots_per_worker": slots,
+            "concurrent_capacity": value.worker_count * slots,
+        }
+        document["progress"] = {
+            "throughput_tasks_per_second": value.throughput_tasks_per_second,
+            "eta_seconds": value.eta_seconds,
+        }
     if value.preparation is not None:
         document["preparation"] = {
             "scheduler_id": value.preparation.scheduler_id,

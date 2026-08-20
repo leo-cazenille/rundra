@@ -104,6 +104,7 @@ class PreparationImageDefinition:
     name: PurePath
     path: PurePath
     resources: ResourceRequest
+    context: tuple[PurePath, ...] | None = None
 
     def __post_init__(self) -> None:
         _require_safe_relative(self.name, field_name="Preparation image name")
@@ -114,6 +115,15 @@ class PreparationImageDefinition:
             raise TypeError("Definition build resources must be a ResourceRequest")
         if self.resources.memory_bytes is None or self.resources.walltime is None:
             raise ValueError("Definition build memory and walltime must be bounded")
+        if self.context is not None:
+            context = tuple(self.context)
+            if any(not isinstance(item, PurePath) for item in context):
+                raise TypeError("Definition context must contain paths")
+            for item in context:
+                _require_safe_relative(item, field_name="Definition context path")
+            if len(set(context)) != len(context):
+                raise ValueError("Definition context paths must be unique")
+            object.__setattr__(self, "context", context)
 
 
 @dataclass(frozen=True, slots=True)
@@ -350,15 +360,6 @@ def definition_image_recipe_key(
             "mode": mode,
             "name": str(image.name),
             "platform": platform_fingerprint,
-            "resources": {
-                "cpus_per_task": image.resources.cpus_per_task,
-                "memory_bytes": image.resources.memory_bytes,
-                "walltime_seconds": (
-                    None
-                    if image.resources.walltime is None
-                    else int(image.resources.walltime.total_seconds())
-                ),
-            },
             "source_digest": source_digest,
             "target": target_name,
         }

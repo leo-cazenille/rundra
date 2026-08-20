@@ -235,3 +235,37 @@ preparation:
 
     assert caught.value.code == "INVALID_VALUE"
     assert caught.value.path == ("preparation", "image", "definition", "path")
+
+
+def test_project_v4_requires_and_loads_explicit_definition_context(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "rundra.yaml"
+    document = """\
+version: 4
+preparation:
+  source: {working_tree: {}}
+  image:
+    name: python.sif
+    definition:
+      path: python.def
+      context: {include: [requirements.txt, package]}
+      resources: {cpus_per_task: 1, memory: 1GiB, walltime: "00:05:00"}
+"""
+    source.write_text(document, encoding="utf-8")
+
+    project = load_project_launch(source)
+
+    assert project.version == 4
+    assert project.preparation is not None
+    image = project.preparation.image
+    assert type(image) is PreparationImageDefinition
+    assert tuple(path.as_posix() for path in image.context or ()) == (
+        "requirements.txt",
+        "package",
+    )
+
+    source.write_text(document.replace("      context: {include: [requirements.txt, package]}\n", ""), encoding="utf-8")
+    with pytest.raises(ConfigError) as caught:
+        load_project_launch(source)
+    assert caught.value.path == ("preparation", "image", "definition", "context")

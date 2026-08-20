@@ -283,6 +283,9 @@ class StatusValue:
     format_version: int = 1
     worker_count: int | None = None
     task_slots_per_worker: int | None = None
+    active_workers: int | None = None
+    throughput_tasks_per_second: float | None = None
+    eta_seconds: float | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -325,6 +328,16 @@ class StatusValue:
             item = getattr(self, name)
             if item is not None and (type(item) is not int or item < 1):
                 raise ValueError(f"StatusValue {name} must be positive or None")
+        if self.active_workers is not None and (
+            type(self.active_workers) is not int or self.active_workers < 0
+        ):
+            raise ValueError(
+                "StatusValue active_workers must be non-negative or None"
+            )
+        for name in ("throughput_tasks_per_second", "eta_seconds"):
+            item = getattr(self, name)
+            if item is not None and (type(item) not in (int, float) or item < 0):
+                raise ValueError(f"StatusValue {name} must be non-negative or None")
 
 
 @dataclass(frozen=True, slots=True)
@@ -3206,6 +3219,22 @@ def _status_value(
             int(record.scheduler_metadata["task_slots_per_worker"])
             if type(record.scheduler_metadata.get("task_slots_per_worker")) is int
             and int(record.scheduler_metadata["task_slots_per_worker"]) > 0
+            else None
+        ),
+        active_workers=(
+            int(record.scheduler_metadata["active_workers"])
+            if type(record.scheduler_metadata.get("active_workers")) is int
+            else None
+        ),
+        throughput_tasks_per_second=(
+            float(record.scheduler_metadata["throughput_tasks_per_second"])
+            if type(record.scheduler_metadata.get("throughput_tasks_per_second"))
+            in (int, float)
+            else None
+        ),
+        eta_seconds=(
+            float(record.scheduler_metadata["eta_seconds"])
+            if type(record.scheduler_metadata.get("eta_seconds")) in (int, float)
             else None
         ),
     )

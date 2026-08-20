@@ -339,7 +339,11 @@ def create_remote_preparation_spec(
         if builder_version is None:
             raise PreparationError("Target definition build requires a builder version")
         image_recipe_key = definition_image_recipe_key(
-            source_digest=source.digest,
+            source_digest=(
+                source.digest
+                if image.context is None
+                else _definition_context_digest(source.root, image)
+            ),
             image=image,
             target_name=target.name,
             mode=definition_build.mode,
@@ -1258,7 +1262,11 @@ def _resolve_definition_image(
     builder_version = _builder_version(apptainer_executable)
     fingerprint = _platform_fingerprint()
     key = definition_image_recipe_key(
-        source_digest=source_digest,
+        source_digest=(
+            source_digest
+            if recipe.context is None
+            else _definition_context_digest(snapshot, recipe)
+        ),
         image=recipe,
         target_name=target.name,
         mode=policy.mode,
@@ -1354,6 +1362,42 @@ def _resolve_definition_image(
         "build_definition_image",
         (stdout_path, stderr_path),
     )
+
+
+def _definition_context_digest(
+    snapshot: Path, recipe: PreparationImageDefinition
+) -> str:
+    if recipe.context is None:
+        raise PreparationError("Definition context digest requires project version 4")
+    selected_paths: list[PurePath] = [recipe.path, *recipe.context]
+    expanded: list[PurePath] = []
+    for relative in selected_paths:
+        candidate = snapshot / relative
+        if candidate.is_symlink() or not candidate.exists():
+            raise PreparationError(f"Definition context path is missing: {relative}")
+        if candidate.is_file():
+            expanded.append(relative)
+        elif candidate.is_dir():
+            expanded.extend(
+                path.relative_to(snapshot)
+                for path in sorted(candidate.rglob("*"))
+                if path.is_file()
+            )
+        else:
+            raise PreparationError(
+                f"Definition context path is unsupported: {relative}"
+            )
+    selected = tuple(dict.fromkeys(expanded))
+    digest = hashlib.sha256()
+    for relative in sorted(selected, key=str):
+        path = snapshot / relative
+        encoded = str(relative).encode("utf-8")
+        content = path.read_bytes()
+        digest.update(len(encoded).to_bytes(8, "big"))
+        digest.update(encoded)
+        digest.update(len(content).to_bytes(8, "big"))
+        digest.update(content)
+    return digest.hexdigest()
 
 
 def _validate_definition_resources(

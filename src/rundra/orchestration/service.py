@@ -1652,10 +1652,20 @@ def _apply_bundle_journals(
         dict.fromkeys(
             record.task_scheduler_ids[task_id]
             for task_id, observation in task_observations
-            if observation.state in {ExecutionState.SUCCEEDED, ExecutionState.FAILED}
+            if observation.state
+            in {
+                ExecutionState.SUBMITTED,
+                ExecutionState.QUEUED,
+                ExecutionState.RUNNING,
+                ExecutionState.SUCCEEDED,
+                ExecutionState.FAILED,
+                ExecutionState.CANCELLED,
+            }
         )
     )
     journal_codes: dict[TaskId, int] = {}
+    journal_started: dict[TaskId, tuple[int, str]] = {}
+    journal_finished: dict[TaskId, tuple[int, int, str]] = {}
     if terminal_references:
         result = transport.run(
             Command(
@@ -1680,6 +1690,22 @@ def _apply_bundle_journals(
         known = {task.id for task in record.run.tasks}
         for line in result.stdout.splitlines():
             fields = line.split("\t")
+            if fields == ["RUNDRA_TASK_EVENTS", "1"]:
+                continue
+            if len(fields) == 4 and fields[0] == "START":
+                task_id = TaskId(fields[1])
+                if task_id not in known or task_id in journal_started:
+                    raise ValueError("Bundled Task START event is invalid")
+                journal_started[task_id] = (int(fields[2]), fields[3])
+                continue
+            if len(fields) == 5 and fields[0] == "FINISH":
+                task_id = TaskId(fields[1])
+                if task_id not in known or task_id in journal_finished:
+                    raise ValueError("Bundled Task FINISH event is invalid")
+                code = int(fields[2])
+                journal_finished[task_id] = (code, int(fields[3]), fields[4])
+                journal_codes[task_id] = code
+                continue
             if len(fields) != 2:
                 raise ValueError("Bundled Task status journal is malformed")
             task_id = TaskId(fields[0])
@@ -1706,13 +1732,44 @@ def _apply_bundle_journals(
                 "BUNDLED_TASK_SUCCEEDED" if code == 0 else "BUNDLED_TASK_FAILED"
             )
             continue
-        if observation.state is not ExecutionState.SUCCEEDED:
-            tasks.append(task)
+        if task.id in journal_started:
+            tasks.append(replace(task, state=ExecutionState.RUNNING))
+            native_states[task.id] = "BUNDLED_TASK_RUNNING"
+            continue
+        if observation.state in {
+            ExecutionState.SUBMITTED,
+            ExecutionState.QUEUED,
+            ExecutionState.RUNNING,
+        }:
+            tasks.append(replace(task, state=ExecutionState.QUEUED))
+            continue
+        if observation.state is ExecutionState.CANCELLED:
+            tasks.append(replace(task, state=ExecutionState.CANCELLED))
             continue
         tasks.append(replace(task, state=ExecutionState.FAILED))
         exit_codes[task.id] = 125
         native_states[task.id] = "BUNDLE_JOURNAL_MISSING"
     task_tuple = tuple(tasks)
+    scheduler_metadata = dict(record.scheduler_metadata)
+    scheduler_metadata["running_tasks"] = sum(
+        task.state is ExecutionState.RUNNING for task in task_tuple
+    )
+    scheduler_metadata["active_workers"] = len(
+        {
+            observation.reference.native_id
+            for _, observation in task_observations
+            if observation.state is ExecutionState.RUNNING
+        }
+    )
+    if len(journal_finished) >= 10 and journal_started:
+        first_started = min(value[0] for value in journal_started.values())
+        last_finished = max(value[1] for value in journal_finished.values())
+        elapsed = last_finished - first_started
+        if elapsed >= 30:
+            throughput = len(journal_finished) / elapsed
+            remaining = len(task_tuple) - len(journal_finished)
+            scheduler_metadata["throughput_tasks_per_second"] = throughput
+            scheduler_metadata["eta_seconds"] = remaining / throughput
     return replace(
         record,
         run=replace(
@@ -1722,6 +1779,7 @@ def _apply_bundle_journals(
         ),
         task_exit_codes=exit_codes,
         task_native_states=native_states,
+        scheduler_metadata=scheduler_metadata,
     )
 
 

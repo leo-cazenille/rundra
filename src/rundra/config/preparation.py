@@ -172,11 +172,42 @@ def _image(
             )
             check_fields(
                 definition,
-                allowed=frozenset({"path", "resources"}),
-                required=frozenset({"path", "resources"}),
+                allowed=frozenset({"path", "resources", "context"}),
+                required=(
+                    frozenset({"path", "resources", "context"})
+                    if version >= 4
+                    else frozenset({"path", "resources"})
+                ),
                 source=source,
                 path=definition_path,
             )
+            context = None
+            if "context" in definition:
+                context_path = (*definition_path, "context")
+                context_section = expect_mapping(
+                    definition["context"], source=source, path=context_path
+                )
+                check_fields(
+                    context_section,
+                    allowed=frozenset({"include"}),
+                    required=frozenset({"include"}),
+                    source=source,
+                    path=context_path,
+                )
+                raw_include = context_section["include"]
+                if type(raw_include) is not list:
+                    fail(
+                        source=source,
+                        path=(*context_path, "include"),
+                        code="INVALID_TYPE",
+                        message="Definition context include must be a list",
+                    )
+                context = tuple(
+                    _safe_relative_path(
+                        item, source, (*context_path, "include", index)
+                    )
+                    for index, item in enumerate(raw_include)
+                )
             return PreparationImageDefinition(
                 name=name,
                 path=_safe_relative_path(
@@ -187,6 +218,7 @@ def _image(
                     source,
                     (*definition_path, "resources"),
                 ),
+                context=context,
             )
         prebuilt_path = (*path, "prebuilt")
         prebuilt = expect_mapping(
