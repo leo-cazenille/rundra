@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
+from dataclasses import replace
+from pathlib import Path, PurePath
 
 from rundra.cli.operations import status_operation, tasks_operation
 from rundra.cli.render import render_human, result_document
@@ -71,3 +72,26 @@ def test_tasks_operation_pages_materialized_records(tmp_path: Path) -> None:
     assert item["seed"] == 17
     assert item["state"] == task.state.value
     assert item["retrieval_state"] == record.run.retrieval_state.value
+
+
+def test_tasks_operation_pages_materialized_v5_records(tmp_path: Path) -> None:
+    from tests.unit.persistence.test_json_store import _record
+
+    record = replace(
+        _record(),
+        format_version=5,
+        retrieval_destination=PurePath("/tmp/retrieved/example"),
+    )
+    JsonRunStore(tmp_path).create(record)
+
+    result = tasks_operation(
+        str(record.run.id),
+        JsonRunStore(tmp_path),
+        SqliteTaskStore(tmp_path),
+        limit=1,
+    )
+
+    assert result.ok
+    document = result_document(result)
+    assert document["format_version"] == 5
+    assert document["tasks"]["returned"] == 1

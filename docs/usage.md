@@ -159,6 +159,12 @@ RUN_ID=$(python3 -c \
 `submit` persists scheduler identities before it returns. A later process can
 reconcile the Run; no daemon or original shell is required:
 
+For a target-built definition image, Rundra submits the bounded preparation job
+and the scientific job with a framework-owned `afterok` dependency. It does not
+keep the client attached while the image builds. During the short interval before
+scientific identities are durable, `status` reports the separate preparation
+state and `logs --preparation` remains available.
+
 ```bash
 uv run rundr status "$RUN_ID" \
   --data-dir "$REMOTE_ROOT/records" --json | python3 -m json.tool

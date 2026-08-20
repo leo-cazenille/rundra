@@ -121,6 +121,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--project-file", type=Path)
     plan.add_argument("--profile")
     plan.add_argument("--source-root", type=Path)
+    plan.add_argument("--fetch-mode", choices=("auto", "copy", "reference", "archive"))
     _add_worker_scale_arguments(plan)
     plan.add_argument(
         "--execution-strategy",
@@ -167,6 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--destination", type=Path)
     run.add_argument("--project-file", type=Path)
     run.add_argument("--profile")
+    run.add_argument("--fetch-mode", choices=("auto", "copy", "reference", "archive"))
     run.add_argument("--confirm-tasks", type=int)
     _add_worker_scale_arguments(run)
     _add_preparation_arguments(run)
@@ -182,6 +184,9 @@ def build_parser() -> argparse.ArgumentParser:
     submit.add_argument("--destination", type=Path)
     submit.add_argument("--project-file", type=Path)
     submit.add_argument("--profile")
+    submit.add_argument(
+        "--fetch-mode", choices=("auto", "copy", "reference", "archive")
+    )
     submit.add_argument("--confirm-tasks", type=int)
     _add_worker_scale_arguments(submit)
     _add_preparation_arguments(submit)
@@ -280,7 +285,6 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument(
         "--mode",
         choices=("auto", "copy", "reference", "archive"),
-        default="auto",
         help="retrieval strategy; auto references shared targets and copies others",
     )
     fetch.add_argument(
@@ -629,6 +633,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             offline=arguments.offline,
             workers=arguments.workers,
             task_slots_per_worker=arguments.task_slots_per_worker,
+            fetch_mode=arguments.fetch_mode,
         )
         if not resolved_plan.ok:
             result = resolved_plan
@@ -726,6 +731,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             offline=arguments.offline,
             workers=arguments.workers,
             task_slots_per_worker=arguments.task_slots_per_worker,
+            fetch_mode=arguments.fetch_mode,
         )
         if not resolved.ok:
             result = resolved
@@ -773,6 +779,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             offline=arguments.offline,
             workers=arguments.workers,
             task_slots_per_worker=arguments.task_slots_per_worker,
+            fetch_mode=arguments.fetch_mode,
         )
         if not resolved.ok:
             result = resolved

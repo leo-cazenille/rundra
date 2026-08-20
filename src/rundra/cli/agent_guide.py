@@ -15,10 +15,10 @@ GUIDE_TOPICS = {
     "launch": "Validate and plan before submit. Use explicit seeds, review task count/resources/concurrency, retain the returned Run ID and data directory, and submit only once.",
     "large-runs": "Use worker-pool execution within target policy. Runs with at least 1,000 Tasks automatically use compact durable Task state; inspect individuals with paginated tasks JSON, use bounded wait calls without progress, retain archive retrieval, and pass an exact confirm-tasks value after plan review.",
     "lifecycle": "Use submit, bounded wait, status/tasks, fetch, then purge. Agents should use explicit Run IDs rather than --last and may use wait --notify-file for one atomic completion signal.",
-    "results": "Prefer fetch auto. Compact archive fetch verifies and records exact Task coverage automatically; add --extract only when individual files are required. Python analysis can use rundra.artifacts.open_result_shard directly. Keep derived outputs separate.",
-    "preparation": "Pin acquired images. Definition projects v4 declare an explicit context include list; Rundra hashes only that context plus the definition for image-cache identity.",
+    "results": "Prefer fetch auto. Set project-v5 fetch_mode: copy when downstream analysis requires ordinary files instead of a shared reference manifest. Compact archive fetch verifies exact Task coverage; add --extract only when individual files are required. Keep derived outputs separate.",
+    "preparation": "Pin acquired images. Definition projects v4+ declare an explicit context include list; Rundra hashes only that context plus the definition for image-cache identity. Scientific jobs use Rundra-owned afterok dependencies and must not be resubmitted while preparation runs.",
     "provenance": "Inspect the Run record after submission. Prepared Runs record the verified image digest; actual launches record container_runtime and container_runtime_version when available. Plan and doctor intentionally do not claim execution-time runtime identity.",
-    "recovery": "After interrupted submit, resume the same Run ID. If outcome remains unknown, inspect the scheduler read-only and use resolve-submission only after proving that no job exists.",
+    "recovery": "Definition preparation and scientific work use a durable afterok dependency, so submit does not wait for the image build. After any interrupted submit, resume the same Run ID; never submit a duplicate. Resolve manually only after proving no scheduler job exists.",
 }
 
 GUIDE = f"""{START_MARKER}
@@ -85,7 +85,9 @@ GUIDE = f"""{START_MARKER}
   plan intentionally does not claim the runtime version that will execute it.
 - Prefer `rundr fetch RUN_ID` with its default auto mode. Rundra verifies shared
   visibility and avoids bulk transfer when safe; use `--mode copy` only when a
-  materialized local result tree is required.
+  materialized local result tree is required. Projects whose analysis always
+  needs ordinary files can set `fetch_mode: copy` in version-5 defaults or a
+  profile.
 - Use `rundr cancel` for active work. Preview deletion with `rundr purge
   RUN_ID --dry-run`; purge only with exact Run-ID confirmation.
 - Never place SSH keys, tokens, passwords, or other credentials in experiment,

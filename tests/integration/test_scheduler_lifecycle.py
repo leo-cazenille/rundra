@@ -463,6 +463,25 @@ def test_queued_preparation_persists_as_submitted(tmp_path) -> None:
     assert refreshed.preparation.builder_state == "PENDING"
 
 
+def test_status_accepts_preparation_without_scientific_identities(tmp_path) -> None:
+    record = replace(_prepared_record(), scheduler_job_ids=(), task_scheduler_ids={})
+    store = JsonRunStore(tmp_path / "records")
+    store.create(record)
+    scheduler = PreparedLifecycleScheduler(
+        SchedulerObservation(
+            SchedulerReference("900"), ExecutionState.RUNNING, "RUNNING"
+        ),
+        _observation(ExecutionState.RUNNING, "RUNNING"),
+    )
+
+    status = status_operation(str(record.run.id), store, scheduler=scheduler)
+
+    assert status.ok
+    assert status.value is not None
+    assert status.value.preparation is not None
+    assert status.value.preparation.state == ExecutionState.RUNNING.value
+
+
 def test_status_finalizes_completed_async_preparation_provenance(tmp_path) -> None:
     submitted = _prepared_record()
     preparation = submitted.preparation

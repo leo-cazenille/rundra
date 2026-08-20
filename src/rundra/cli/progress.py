@@ -80,7 +80,10 @@ class CLIProgressReporter:
         if type(event) is not ProgressEvent:
             raise TypeError("CLIProgressReporter requires a ProgressEvent")
         if self._announce_run and not self._announced_run and event.run_id is not None:
-            print(f"Run registered: {event.run_id}", file=self._stream, flush=True)
+            # This announcement can also be emitted while adopting an existing
+            # interrupted submission, so do not claim that registration happened
+            # in the current process.
+            print(f"Run ID: {event.run_id}", file=self._stream, flush=True)
             self._announced_run = True
         signature = _event_signature(event)
         bar = self._ensure_bar(event) if self._progress else None

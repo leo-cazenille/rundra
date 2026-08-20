@@ -20,6 +20,9 @@
   `rundr fetch RUN_ID` for long Runs. Use `--destination PATH` only to override
   the configuration-based default. Use `rundr run` only when keeping the client
   attached is appropriate.
+- Definition-image preparation is submitted with a framework-owned dependency;
+  do not keep a separate scheduler watch or resubmit while preparation runs.
+  Recover an interrupted client with `rundr resume RUN_ID` or bounded `wait`.
 - Preserve the Run ID and the exact `--data-dir` used at submission. Lifecycle
   commands must use the same Run store. `--last` is convenient interactively,
   but agents should retain explicit Run IDs to avoid selecting concurrent work.
@@ -27,6 +30,8 @@
 - Run scientific and analysis workloads on the configured execution target or
   an approved workstation, never on a login/controller host.
 - Keep raw retrieved results separate from derived analysis outputs.
+- Use project-v5 `fetch_mode: copy` when analysis requires a materialized file
+  tree; otherwise retain the shared-storage-efficient `auto` default.
 - Use `rundr cancel` for active work. Preview deletion with `rundr purge
   RUN_ID --dry-run`; purge only with exact Run-ID confirmation.
 - Never place SSH keys, tokens, passwords, or other credentials in experiment,

@@ -445,6 +445,7 @@ class TasksValue:
             2,
             3,
             4,
+            5,
         }:
             raise ValueError("TasksValue format_version must be supported")
 
@@ -623,6 +624,7 @@ class ResolvedRunInputs:
                 "data_dir",
                 "workers",
                 "task_slots_per_worker",
+                "fetch_mode",
             ),
         )
         if self.seed is not None:
@@ -761,6 +763,7 @@ class ResolvedPlanInputs:
                 "targets_file",
                 "workers",
                 "task_slots_per_worker",
+                "fetch_mode",
             ),
         )
 
@@ -1043,6 +1046,7 @@ def resolve_plan_inputs_operation(
     offline: bool = False,
     workers: int | None = None,
     task_slots_per_worker: int | None = None,
+    fetch_mode: str | None = None,
 ) -> OperationResult[ResolvedPlanInputs]:
     """Resolve plan inputs without submitting, staging, or mutating a workspace."""
     if type(random_seed) is not bool:
@@ -1086,6 +1090,7 @@ def resolve_plan_inputs_operation(
                 targets_file=targets_file,
                 workers=workers,
                 task_slots_per_worker=task_slots_per_worker,
+                fetch_mode=fetch_mode,
             ),
             project=project,
             user=user,
@@ -1221,6 +1226,7 @@ def resolve_run_inputs_operation(
     offline: bool = False,
     workers: int | None = None,
     task_slots_per_worker: int | None = None,
+    fetch_mode: str | None = None,
 ) -> OperationResult[ResolvedRunInputs]:
     """Resolve run or submit inputs without planning or executing work."""
     if type(random_seed) is not bool:
@@ -1239,6 +1245,7 @@ def resolve_run_inputs_operation(
             data_dir=data_dir,
             workers=workers,
             task_slots_per_worker=task_slots_per_worker,
+            fetch_mode=fetch_mode,
         )
         discovered_project = discover_project_launch(
             experiment_source, project_file=project_file
@@ -1774,6 +1781,11 @@ def run_operation(
                 experiment=effective_experiment,
                 source_root=effective_source_root,
                 fetch_destination=destination,
+                fetch_mode=(
+                    str(launch.values.get("fetch_mode", "auto"))
+                    if launch is not None
+                    else "auto"
+                ),
                 experiment_source=experiment_source,
                 preparation=preparation_record,
                 remote_preparation=remote_preparation,
@@ -2085,6 +2097,11 @@ def submit_operation(
                 experiment=effective_experiment,
                 source_root=effective_source_root,
                 fetch_destination=destination,
+                fetch_mode=(
+                    str(launch.values.get("fetch_mode", "auto"))
+                    if launch is not None
+                    else "auto"
+                ),
                 experiment_source=experiment_source,
                 preparation=preparation_record,
                 remote_preparation=remote_preparation,
@@ -2830,14 +2847,20 @@ def logs_operation(
     if error is not None:
         return OperationResult.failure("logs", error)
     assert record is not None
-    if record.run.target.scheduler.kind in {
-        "pbs",
-        "slurm",
-    } and record.run.state not in {
-        ExecutionState.SUCCEEDED,
-        ExecutionState.FAILED,
-        ExecutionState.CANCELLED,
-    }:
+    if (
+        not preparation
+        and record.run.target.scheduler.kind
+        in {
+            "pbs",
+            "slurm",
+        }
+        and record.run.state
+        not in {
+            ExecutionState.SUCCEEDED,
+            ExecutionState.FAILED,
+            ExecutionState.CANCELLED,
+        }
+    ):
         try:
             active_scheduler = scheduler or _record_scheduler(record)
             record = SchedulerLifecycleService(
@@ -2951,7 +2974,7 @@ def fetch_operation(
     *,
     tasks: Sequence[str] | None = None,
     stager: Stager | None = None,
-    mode: str = "auto",
+    mode: str | None = None,
     extract: bool = False,
     progress: ProgressObserver | None = None,
     task_store: SqliteTaskStore | None = None,
@@ -2960,6 +2983,10 @@ def fetch_operation(
     if error is not None:
         return OperationResult.failure("fetch", error)
     assert record is not None
+    effective_mode = mode
+    if effective_mode is None:
+        stored_mode = record.scheduler_metadata.get("fetch_mode", "auto")
+        effective_mode = stored_mode if type(stored_mode) is str else "auto"
     effective_destination = (
         destination.resolve()
         if destination is not None
@@ -2972,7 +2999,7 @@ def fetch_operation(
             effective_destination,
             tasks=tasks,
             stager=stager,
-            mode=mode,
+            mode=effective_mode,
             extract=extract,
             progress=progress,
             task_store=task_store,
@@ -3883,7 +3910,11 @@ def _launch_resolution_value(
     sources: dict[str, str] = {}
     for field in fields:
         value = getattr(resolved.values, field)
-        if value is None and field in {"workers", "task_slots_per_worker"}:
+        if value is None and field in {
+            "workers",
+            "task_slots_per_worker",
+            "fetch_mode",
+        }:
             continue
         if value is None or field not in resolved.sources:
             raise ValueError(f"Resolved launch field is unavailable: {field}")

@@ -23,6 +23,7 @@ _PROJECT_V1_FIELDS = frozenset({"version", "default_profile", "defaults", "profi
 _PROJECT_V2_FIELDS = _PROJECT_V1_FIELDS | {"preparation"}
 _PROJECT_V3_FIELDS = _PROJECT_V2_FIELDS
 _PROJECT_V4_FIELDS = _PROJECT_V3_FIELDS
+_PROJECT_V5_FIELDS = _PROJECT_V4_FIELDS
 _LAUNCH_VALUE_FIELDS = frozenset(
     {
         "config",
@@ -32,6 +33,7 @@ _LAUNCH_VALUE_FIELDS = frozenset(
         "destination",
         "workers",
         "task_slots_per_worker",
+        "fetch_mode",
     }
 )
 _USER_V1_FIELDS = frozenset({"version", "defaults"})
@@ -57,6 +59,7 @@ _VALUE_NAMES = (
     "data_dir",
     "workers",
     "task_slots_per_worker",
+    "fetch_mode",
 )
 
 
@@ -73,6 +76,7 @@ class LaunchValues:
     data_dir: Path | None = None
     workers: int | None = None
     task_slots_per_worker: int | None = None
+    fetch_mode: str | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -95,6 +99,13 @@ class LaunchValues:
             value = getattr(self, name)
             if value is not None and (type(value) is not int or value < 1):
                 raise ValueError(f"LaunchValues {name} must be positive or None")
+        if self.fetch_mode is not None and self.fetch_mode not in {
+            "auto",
+            "copy",
+            "reference",
+            "archive",
+        }:
+            raise ValueError("LaunchValues fetch_mode is unsupported")
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,8 +122,8 @@ class ProjectLaunchConfig:
     def __post_init__(self) -> None:
         if type(self.version) is not int:
             raise ValueError("ProjectLaunchConfig version must be an int")
-        if self.version not in (1, 2, 3, 4):
-            raise ValueError("ProjectLaunchConfig version must be 1, 2, 3, or 4")
+        if self.version not in (1, 2, 3, 4, 5):
+            raise ValueError("ProjectLaunchConfig version must be 1, 2, 3, 4, or 5")
         if not isinstance(self.source, Path) or not self.source.is_absolute():
             raise ValueError("ProjectLaunchConfig source must be an absolute Path")
         if type(self.defaults) is not LaunchValues:
@@ -136,7 +147,7 @@ class ProjectLaunchConfig:
         if self.version == 1 and self.preparation is not None:
             raise ValueError("ProjectLaunchConfig v1 cannot define preparation")
         if (
-            self.version in {2, 3, 4}
+            self.version in {2, 3, 4, 5}
             and type(self.preparation) is not PreparationConfig
         ):
             raise ValueError("ProjectLaunchConfig v2+ requires preparation")
@@ -225,13 +236,13 @@ def load_project_launch(source: Path) -> ProjectLaunchConfig:
         path=("version",),
         minimum=1,
     )
-    if version not in {1, 2, 3, 4}:
+    if version not in {1, 2, 3, 4, 5}:
         fail(
             source=normalized_source,
             path=("version",),
             code="UNSUPPORTED_VERSION",
             message=(
-                "Unsupported project config version; supported versions are 1, 2, 3, and 4"
+                "Unsupported project config version; supported versions are 1, 2, 3, 4, and 5"
             ),
         )
     check_fields(
@@ -244,6 +255,8 @@ def load_project_launch(source: Path) -> ProjectLaunchConfig:
             else _PROJECT_V3_FIELDS
             if version == 3
             else _PROJECT_V4_FIELDS
+            if version == 4
+            else _PROJECT_V5_FIELDS
         ),
         required=(
             frozenset({"version"})
@@ -274,6 +287,22 @@ def load_project_launch(source: Path) -> ProjectLaunchConfig:
             profiles[name] = _launch_values(
                 raw_profile, normalized_source, ("profiles", name)
             )
+    if version_number < 5:
+        if defaults.fetch_mode is not None:
+            fail(
+                source=normalized_source,
+                path=("defaults", "fetch_mode"),
+                code="UNKNOWN_FIELD",
+                message="fetch_mode requires project configuration version 5",
+            )
+        for name, values in profiles.items():
+            if values.fetch_mode is not None:
+                fail(
+                    source=normalized_source,
+                    path=("profiles", name, "fetch_mode"),
+                    code="UNKNOWN_FIELD",
+                    message="fetch_mode requires project configuration version 5",
+                )
     if version_number == 1 and defaults == LaunchValues() and not profiles:
         fail(
             source=normalized_source,
@@ -302,7 +331,7 @@ def load_project_launch(source: Path) -> ProjectLaunchConfig:
             source=normalized_source,
             version=version,
         )
-        if version_number in {2, 3, 4}
+        if version_number in {2, 3, 4, 5}
         else None
     )
     return ProjectLaunchConfig(
@@ -534,7 +563,29 @@ def _launch_values(
         task_slots_per_worker=_optional_positive_integer(
             section, "task_slots_per_worker", source, path
         ),
+        fetch_mode=_optional_fetch_mode(section, source, path),
     )
+
+
+def _optional_fetch_mode(
+    section: Mapping[str, object], source: Path, path: ConfigPath
+) -> str | None:
+    if "fetch_mode" not in section:
+        return None
+    mode = expect_string(
+        section["fetch_mode"],
+        source=source,
+        path=(*path, "fetch_mode"),
+        nonblank=True,
+    )
+    if mode not in {"auto", "copy", "reference", "archive"}:
+        fail(
+            source=source,
+            path=(*path, "fetch_mode"),
+            code="INVALID_VALUE",
+            message="fetch_mode must be auto, copy, reference, or archive",
+        )
+    return mode
 
 
 def _optional_positive_integer(

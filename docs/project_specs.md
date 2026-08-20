@@ -1031,6 +1031,11 @@ and destinations inside the Run workspace, and atomically replaces each copied
 destination file. Repeating the same fetch is therefore safe and updates an
 existing retrieved file without partially overwriting it.
 
+Project configuration version 5 may set `fetch_mode` to `auto`, `copy`,
+`reference`, or `archive` in `defaults` or a profile. `plan`, `run`, and
+`submit` accept `--fetch-mode` as an override. The resolved value is persisted
+with the Run; an explicit `fetch --mode` overrides it.
+
 `rundr fetch` accepts `--mode auto|copy|reference|archive`. Local targets
 resolve `auto` to `copy`. Version-5 shared targets resolve `auto` to
 `reference`. Rsync targets first perform a private controller-to-client token
@@ -1686,6 +1691,12 @@ available, and exit code when known.
 Version-2 status additionally reports the preparation job's separate scheduler
 identity, portable and native states, and builder location. A failed
 preparation marks the Run failed before scientific work can execute.
+
+For definition-image builds, the prepared image has a deterministic recipe-key
+publication path. Rundra may therefore submit scientific work immediately with a
+framework-owned `afterok` dependency, while retaining the measured SIF SHA-256 as
+the final container identity. Lifecycle queries must treat a durable preparation
+identity without scientific Task identities as a valid preparation-only phase.
 
 ---
 

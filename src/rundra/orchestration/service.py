@@ -44,7 +44,6 @@ from rundra.orchestration.planner import create_plan, create_sweep_plan
 from rundra.orchestration.preparation import (
     RemotePreparationSpec,
     build_remote_preparation_command,
-    read_remote_preparation_result,
 )
 from rundra.orchestration.progress import ProgressEvent, ProgressObserver, ProgressPhase
 from rundra.orchestration.shards import read_verified_shard_index
@@ -192,6 +191,11 @@ class SchedulerLifecycleService:
         _require_record(record)
         current = self._refresh_preparation(record)
         if current.run.state in _TERMINAL_STATES:
+            return current
+        # A preparation scheduler identity is durable before scientific jobs are
+        # submitted.  During that interval there are deliberately no per-Task
+        # scheduler identities to query.
+        if not current.scheduler_job_ids and not current.task_scheduler_ids:
             return current
         if current.is_compact:
             if self._task_store is None:
@@ -454,6 +458,7 @@ class RunExecutionRequest:
     experiment: ExperimentSpec
     source_root: PurePath
     fetch_destination: PurePath
+    fetch_mode: str = "auto"
     experiment_source: PurePath | None = None
     initiator: str | None = None
     preparation: PreparationRecord | None = None
@@ -477,6 +482,8 @@ class RunExecutionRequest:
         for name in ("source_root", "fetch_destination"):
             if not isinstance(getattr(self, name), PurePath):
                 raise TypeError(f"RunExecutionRequest {name} must be a PurePath")
+        if self.fetch_mode not in {"auto", "copy", "reference", "archive"}:
+            raise ValueError("RunExecutionRequest fetch_mode is unsupported")
         if self.experiment_source is not None and not isinstance(
             self.experiment_source, PurePath
         ):
@@ -1049,70 +1056,10 @@ class OrchestrationService:
                 run_id,
                 len(units),
             )
-            if type(image_recipe) is PreparationImageDefinition:
-                while True:
-                    observation = _single_observation(
-                        self._scheduler.query((preparation_reference,)),
-                        preparation_reference,
-                    )
-                    assert record.preparation is not None
-                    updated = replace(
-                        record,
-                        preparation=replace(
-                            record.preparation,
-                            builder_status=_preparation_status(observation.state),
-                            builder_state=observation.native_state,
-                        ),
-                    )
-                    self.store.update(updated, expected=record)
-                    record = updated
-                    if observation.state in _TERMINAL_STATES:
-                        break
-                    sleep(1.0)
-                if observation.state is not ExecutionState.SUCCEEDED:
-                    self._fail_before_completion(record, "PREPARATION_FAILED")
-                    raise OrchestrationError(
-                        code="PREPARATION_FAILED",
-                        message=(
-                            f"Run {run_id} target definition image build "
-                            f"finished as {observation.state.value}"
-                        ),
-                        run_id=run_id,
-                    )
-                preparation_result = read_remote_preparation_result(
-                    self._transport, workspace
-                )
-                if (
-                    preparation_result is None
-                    or preparation_result.image_sha256 is None
-                    or preparation_result.image_path is None
-                ):
-                    self._fail_before_completion(record, "PREPARATION_MANIFEST_MISSING")
-                    raise OrchestrationError(
-                        code="PREPARATION_MANIFEST_MISSING",
-                        message=(
-                            f"Run {run_id} target definition build produced no "
-                            "verified image manifest"
-                        ),
-                        run_id=run_id,
-                    )
-                assert record.preparation is not None
-                updated = replace(
-                    record,
-                    container_digest=preparation_result.image_sha256,
-                    preparation=replace(
-                        record.preparation,
-                        image_sha256=preparation_result.image_sha256,
-                        image_path=preparation_result.image_path,
-                        image_action=preparation_result.image_action,
-                        build_cache_key=preparation_result.build_key,
-                        build_action=preparation_result.build_action,
-                        build_outputs=preparation_result.outputs,
-                        builder_status=ExecutionState.SUCCEEDED.value,
-                    ),
-                )
-                self.store.update(updated, expected=record)
-                record = updated
+            # Definition images are published atomically at the deterministic
+            # recipe-key path already recorded in the effective experiment.
+            # The dependent scientific submission below can therefore be made
+            # immediately; afterok prevents access to an incomplete image.
 
         try:
             scheduled_units = tuple(
@@ -1587,7 +1534,7 @@ class OrchestrationService:
                             else _fetch_patterns(request.experiment.outputs, units)
                         ),
                         destination=retrieval_destination,
-                        mode="auto",
+                        mode=request.fetch_mode,
                     )
                 )
                 fetched_artifacts = _fetched_task_artifacts(fetched.artifacts, units)
@@ -1774,6 +1721,7 @@ class OrchestrationService:
                 experiment=request.experiment,
                 source_root=request.source_root,
                 retrieval_destination=_retrieval_destination(request.fetch_destination),
+                scheduler_metadata={"fetch_mode": request.fetch_mode},
                 experiment_source=request.experiment_source,
                 initiator=request.initiator,
                 git_commit=provenance.commit,
@@ -1817,6 +1765,7 @@ class OrchestrationService:
             experiment=request.experiment,
             source_root=request.source_root,
             retrieval_destination=_retrieval_destination(request.fetch_destination),
+            scheduler_metadata={"fetch_mode": request.fetch_mode},
             experiment_source=request.experiment_source,
             initiator=request.initiator,
             git_commit=provenance.commit,

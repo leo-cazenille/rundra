@@ -53,7 +53,7 @@ the generated Codex profile includes the missing paths.
 | `tasks` | `RUN_ID` or `--last` | `--offset`, `--limit`, `--data-dir`, `--json` | Return one bounded page from materialized Run tasks or a compact version-4 TaskSpace sidecar. |
 | `list` | none | `--offset`, `--limit`, `--include-tasks`, `--data-dir`, `--json` | Page through compact persisted Run summaries; include per-Task details only when explicitly requested. |
 | `logs` | `RUN_ID` or `--last` | `--task`, `--data-dir`, `--json` | Read one Task's framework-managed stdout/stderr. |
-| `fetch` | `RUN_ID` or `--last` | optional `--destination`; repeatable `--task`; `--mode`; `--verbose`, `--progress`, `--data-dir`, `--json` | Idempotently retrieve all or selected Task artifacts. Auto mode uses a verified shared reference when the Run workspace is jointly visible, otherwise it copies normally. |
+| `fetch` | `RUN_ID` or `--last` | optional `--destination`; repeatable `--task`; `--mode`; `--verbose`, `--progress`, `--data-dir`, `--json` | Idempotently retrieve all or selected Task artifacts. An omitted mode uses the persisted launch default; auto references jointly visible shared workspaces and copies others. |
 
 New Runs persist the absolute destination resolved by `run` or `submit`.
 `fetch` reuses that path when `--destination` is omitted; an explicit fetch
