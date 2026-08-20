@@ -1534,7 +1534,9 @@ Targets schema version 8 may authorize definition builds with
 ceilings. Project files cannot select privilege. In `auto` mode for an SSH
 target, Rundra prefers a local content-addressed build when target policy
 authorizes `local`; otherwise it selects a scheduled target build when policy
-authorizes `target`. Local builds execute
+authorizes `target`. Pure plan output reports both the user-facing
+`requested_location` and policy-derived `selected_location` without probing
+caches or contacting the target. Local builds execute
 `apptainer build` as an argument array against the immutable source snapshot,
 never the developer tree. The definition recipe key includes selected context
 content, definition path, target, platform, builder version, and mode; the

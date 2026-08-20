@@ -344,7 +344,8 @@ def render_human(result: OperationResult[Any]) -> str:
             rendered += (
                 "\nPreparation: "
                 f"{preparation.source_mode}, image {image_identity}, "
-                f"location={preparation.requested_location}, "
+                f"requested_location={preparation.requested_location}, "
+                f"selected_location={preparation.selected_location}, "
                 f"offline={preparation.offline}, rebuild={preparation.rebuild}, "
                 f"rebuild_image={preparation.rebuild_image}"
             )
@@ -707,6 +708,7 @@ def _preparation_document(plan: PreparationPlan) -> dict[str, Any]:
         ),
         "strategy": {
             "requested_location": plan.requested_location,
+            "selected_location": plan.selected_location,
             "offline": plan.offline,
             "rebuild": plan.rebuild,
             "rebuild_image": plan.rebuild_image,

@@ -900,6 +900,20 @@ def plan_operation(
         target = targets[target_name]
         if preparation is not None:
             _validate_preparation_compatibility(experiment, preparation.recipe)
+            target_storage = targets_config.preparation.get(
+                target_name, PreparationStorageConfig()
+            )
+            selected_location = (
+                "local"
+                if target.transport.kind == "local" and target.scheduler.kind == "local"
+                else select_remote_preparation_location(
+                    preparation, target_storage.definition_build
+                )
+            )
+            preparation = replace(
+                preparation,
+                selected_location=selected_location,
+            )
         unsupported = _unsupported_execution_target(target, experiment)
         if unsupported is not None:
             return OperationResult.failure("plan", unsupported)

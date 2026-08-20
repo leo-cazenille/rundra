@@ -237,7 +237,9 @@ submission. The privilege mode always comes from target policy. `--offline`
 allows only verified cache hits; `--rebuild-image` bypasses only the definition
 recipe index. Arbitrary definition files are trusted executable build input.
 Pin external base images inside the definition when cold-build reproducibility
-is required.
+is required. Before submission, inspect
+`plan.preparation.strategy.selected_location` in `plan --json`; it is derived
+from target policy without contacting the target.
 
 See `examples/python-multiprocessing/prepared/` for a complete working-tree
 example and `rundr plan ... --json` for its network-free preparation plan.

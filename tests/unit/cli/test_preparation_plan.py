@@ -91,6 +91,8 @@ targets:
     assert preparation["strategy"]["offline"] is True
     assert preparation["strategy"]["rebuild"] is True
     assert preparation["strategy"]["cache_hits_known"] is False
+    assert preparation["strategy"]["requested_location"] == "auto"
+    assert preparation["strategy"]["selected_location"] == "local"
     assert "fetch_git_commit" not in preparation["strategy"]["possible_actions"]
     assert preparation["safety"] == {
         "builds": False,
@@ -128,3 +130,75 @@ def test_v3_plan_resolves_project_working_tree_source_root(capsys: object) -> No
         "root": str(example),
     }
     assert preparation["image"]["kind"] == "definition"
+    assert preparation["strategy"]["selected_location"] == "local"
+
+
+def test_definition_plan_reports_target_only_auto_selection(
+    tmp_path: Path, capsys: object
+) -> None:
+    example = _ROOT / "examples/python-multiprocessing"
+    targets = tmp_path / "targets.yaml"
+    targets.write_text(
+        """\
+version: 8
+targets:
+  cluster:
+    transport: {type: ssh, host: fake-cluster}
+    scheduler: {type: slurm}
+    staging: {type: rsync}
+    container: {type: apptainer}
+    workspace: /remote/rundra
+    preparation:
+      definition_build:
+        allowed_locations: [target]
+        mode: unprivileged
+        max_resources:
+          cpus_per_task: 4
+          memory: 4GiB
+          walltime: "00:30:00"
+    execution:
+      hard_task_limit: 1000
+      confirmation_threshold: 100
+      max_active_tasks: 40
+      max_concurrent_jobs: 8
+      max_array_size: 100
+      output_shard_tasks: 100
+      automatic_retrieval_threshold: 100
+      max_memory_per_worker: 4GiB
+      worker_pool:
+        activation_threshold: 100
+        max_workers: 2
+        default_workers: 1
+        tasks_per_lease: 10
+        default_task_slots_per_worker: 1
+        max_task_slots_per_worker: 4
+        infrastructure_retry_limit: 1
+        requeue_limit: 2
+""",
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        (
+            "plan",
+            str(example / "prepared/experiment.yaml"),
+            "--target",
+            "cluster",
+            "--targets-file",
+            str(targets),
+            "--seed",
+            "7",
+            "--workers",
+            "1",
+            "--task-slots-per-worker",
+            "1",
+            "--json",
+        )
+    )
+    captured = capsys.readouterr()  # type: ignore[attr-defined]
+    document = json.loads(captured.out)
+
+    assert exit_code == 0, document
+    strategy = document["plan"]["preparation"]["strategy"]
+    assert strategy["requested_location"] == "auto"
+    assert strategy["selected_location"] == "target"

@@ -9,6 +9,8 @@ All notable user-visible changes are recorded here.
 - RunRecord version 5 persists the resolved retrieval destination and an
   explicit materialized/compact Run kind independently of preparation and
   parameter-sweep capabilities.
+- Prepared plan JSON reports the policy-derived `selected_location` alongside
+  the original preparation location request.
 
 ### Fixed
 

@@ -118,6 +118,10 @@ def test_shoal_runs_bounded_python_processes_on_two_full_nodes(
     plan = planned["plan"]
     assert isinstance(plan, dict)
     assert plan["strategy"] == "worker-pool"
+    preparation_plan = plan["preparation"]
+    assert isinstance(preparation_plan, dict)
+    assert preparation_plan["strategy"]["requested_location"] == "auto"
+    assert preparation_plan["strategy"]["selected_location"] == "target"
     scheduling = plan["scheduling"]
     assert isinstance(scheduling, dict)
     assert scheduling["worker_count"] == 2

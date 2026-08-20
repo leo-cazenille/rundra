@@ -154,6 +154,7 @@ class PreparationPlan:
     source_mode: str
     source_root: PurePath | None
     requested_location: str = "auto"
+    selected_location: str | None = None
     rebuild: bool = False
     rebuild_image: bool = False
     offline: bool = False
@@ -170,6 +171,11 @@ class PreparationPlan:
             raise TypeError("PreparationPlan source root must be a path or None")
         if self.requested_location not in PREPARE_LOCATIONS:
             raise ValueError("PreparationPlan location is unsupported")
+        if self.selected_location is not None and self.selected_location not in {
+            "local",
+            "target",
+        }:
+            raise ValueError("PreparationPlan selected location is unsupported")
         if any(
             type(value) is not bool
             for value in (self.rebuild, self.rebuild_image, self.offline)

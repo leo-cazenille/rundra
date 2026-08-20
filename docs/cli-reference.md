@@ -128,7 +128,9 @@ the target policy authorizes `local`; otherwise it selects a scheduler build
 when `target` is authorized. Client builds publish by measured SHA-256 for
 remote execution. Forced or automatic target builds run as bounded scheduler
 work, not on an SSH controller, and complete before scientific submission
-because their SIF digest is not known in advance.
+because their SIF digest is not known in advance. `plan --json` reports the
+original `requested_location` and policy-derived `selected_location`; this
+selection reads configuration only and does not probe caches or the target.
 
 Project schema v4 additionally requires `definition.context.include`, a list of
 exact safe snapshot-relative files or directories. The definition itself is
