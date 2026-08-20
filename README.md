@@ -191,6 +191,11 @@ runtime, repeated runs must produce byte-identical
 and checks that criterion. It does not claim byte identity across different
 Python/runtime versions.
 
+For a multi-CPU application, the checked
+[Python multiprocessing example](examples/python-multiprocessing/README.md)
+reserves four CPUs per logical Task, launches four bounded child processes,
+and demonstrates placement of multiple such Tasks across Slurm compute nodes.
+
 Use `--random-seed` to override a fixed seed supplied by a project profile or
 user default. Explicit `--seeds START:STOP` uses an inclusive range in `plan`:
 `0:2` produces Tasks for seeds 0, 1, and 2. Task order follows seed-request
