@@ -4,6 +4,8 @@ All notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-08-20
+
 ### Added
 
 - RunRecord version 5 persists the resolved retrieval destination and an

@@ -1,18 +1,19 @@
-# v0.1.2 release checklist
+# v0.1.3 release checklist
 
-This checklist turns the validated `0.1.2` source tree into the v0.1.2 release.
+This checklist turns the validated `0.1.3` source tree into the v0.1.3 release.
 Checking it does not itself authorize publishing, pushing, tagging, or changing
 external services.
 
-Release status: the `v0.1.2` source candidate was published to TestPyPI on
-2026-08-20, where Shoal acceptance exposed a retrieval-destination persistence
-defect. Production publication was withheld; development resumed as 0.1.3.
+Release status: the `v0.1.2` TestPyPI candidate exposed a persisted retrieval
+destination defect during Shoal acceptance and was withheld from PyPI. The
+`v0.1.3` candidate fixes that defect and automatic definition-build placement;
+it has not yet been published to TestPyPI or PyPI.
 
 ## Scope and contracts
 
 - [ ] Confirm the release contains only the documented local, SSH/Slurm,
   SSH/OpenPBS, and optional MCP paths and the exclusions in the specification.
-- [ ] Review [`CHANGELOG.md`](../CHANGELOG.md), confirm the `0.1.2` date and
+- [ ] Review [`CHANGELOG.md`](../CHANGELOG.md), confirm the `0.1.3` date and
   contents, and leave a new empty Unreleased section.
 - [ ] Review the [CLI reference](cli-reference.md),
   [stability policy](stability.md), and every checked
@@ -60,13 +61,13 @@ tools/check_distribution.sh dist/*.whl dist/*.tar.gz
 ## Version and publication
 
 - [ ] Confirm `pyproject.toml`, `uv.lock`, `rundr --version`, and artifact
-  metadata all report `0.1.2`.
+  metadata all report `0.1.3`.
 - [ ] Rebuild from the exact intended commit and repeat the clean wheel smoke
   test against the final artifacts.
 - [ ] Confirm the GitHub repository and PyPI project names are `rundra`, while
   the console command remains `rundr`.
 - [ ] Commit the release metadata and changelog, obtain project-owner approval,
-  then create/push the signed or annotated `v0.1.2` tag according to repository
+  then create/push the signed or annotated `v0.1.3` tag according to repository
   policy.
 - [ ] Publish the exact validated sdist and wheel to PyPI only with explicit
   authorization; verify their hashes and installed `rundr` behavior.
