@@ -336,6 +336,9 @@ def test_target_only_auto_definition_build_uses_fake_slurm_dependency(
     assert submitted.preparation is not None
     assert submitted.preparation.builder_scheduler_id == "41"
     assert submitted.preparation.builder_location == "target"
+    assert submitted.preparation.image_recipe_key == remote.image_recipe_key
+    assert submitted.preparation.image_sha256 is None
+    assert submitted.container_digest is None
     assert submitted.scheduler_job_ids == ("42",)
     assert any("afterok:41" in command.argv for command in transport.commands)
 
@@ -488,7 +491,7 @@ def test_large_worker_pool_persists_and_reconciles_compact_task_state(
 
     submitted = service.submit_one(request).record
 
-    assert submitted.format_version == 5
+    assert submitted.format_version == 6
     assert submitted.run.tasks == ()
     assert submitted.task_space is not None
     assert submitted.task_space.task_count == 1_000
@@ -567,7 +570,7 @@ def test_compact_submission_resume_finishes_interrupted_record_compaction(
     recovered, action = service.recover_submission(_RUN_ID)
 
     assert action == "resumed"
-    assert recovered.format_version == 5
+    assert recovered.format_version == 6
     assert recovered.run.state is ExecutionState.SUBMITTED
     assert recovered.scheduler_job_ids == ("42",)
     assert task_store.counts(_RUN_ID).execution[ExecutionState.SUBMITTED] == 1_000
@@ -613,7 +616,7 @@ def test_compact_submission_resume_promotes_durable_sidecar_receipt(
     recovered, action = service.recover_submission(_RUN_ID)
 
     assert action == "resumed"
-    assert recovered.format_version == 5
+    assert recovered.format_version == 6
     assert recovered.run.state is ExecutionState.SUBMITTED
     assert receipts.load(_RUN_ID).outcome is SubmissionReceiptOutcome.ACCEPTED
 

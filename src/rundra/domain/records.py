@@ -12,6 +12,7 @@ from rundra.domain.models import Artifact, ExperimentSpec, NativeValue, Run, Tas
 from rundra.domain.preparation import PreparationRecord
 from rundra.domain.scaling import CompactRun, TaskSpace
 from rundra.domain.states import RetrievalState
+from rundra.schema_versions import RUN_RECORD_SCHEMA
 
 
 def _freeze_strings(value: object, *, field_name: str) -> tuple[str, ...]:
@@ -53,6 +54,7 @@ class RunRecord:
     experiment: ExperimentSpec
     source_root: PurePath
     retrieval_destination: PurePath | None = None
+    fetch_mode: str | None = None
     experiment_source: PurePath | None = None
     initiator: str | None = None
     git_commit: str | None = None
@@ -82,8 +84,8 @@ class RunRecord:
     def __post_init__(self) -> None:
         if type(self.format_version) is not int:
             raise TypeError("RunRecord format_version must be an integer")
-        if self.format_version not in {1, 2, 3, 4, 5}:
-            raise ValueError("RunRecord format_version must be 1, 2, 3, 4, or 5")
+        if self.format_version not in RUN_RECORD_SCHEMA.supported:
+            raise ValueError("RunRecord format_version is unsupported")
         if type(self.framework_version) is not str:
             raise TypeError("RunRecord framework_version must be a string")
         if not self.framework_version.strip():
@@ -91,7 +93,7 @@ class RunRecord:
         if self.format_version == 4:
             if type(self.run) is not CompactRun:
                 raise TypeError("RunRecord v4 run must be a CompactRun")
-        elif self.format_version == 5:
+        elif self.format_version in {5, 6}:
             if type(self.run) not in {Run, CompactRun}:
                 raise TypeError("RunRecord v5 run must be materialized or compact")
         elif type(self.run) is not Run:
@@ -108,17 +110,22 @@ class RunRecord:
             task.parameter_set is None for task in self.run.tasks
         ):
             raise ValueError("RunRecord v3 requires parameterized Tasks")
-        if self.format_version == 5:
+        if self.format_version in {5, 6}:
             if (
                 not isinstance(self.retrieval_destination, PurePath)
                 or not self.retrieval_destination.is_absolute()
                 or "\x00" in str(self.retrieval_destination)
             ):
                 raise ValueError(
-                    "RunRecord v5 retrieval_destination must be an absolute safe path"
+                    "RunRecord v5+ retrieval_destination must be an absolute safe path"
                 )
         elif self.retrieval_destination is not None:
             raise ValueError("RunRecord v1-v4 cannot contain a retrieval destination")
+        if self.format_version == 6:
+            if self.fetch_mode not in {"auto", "copy", "reference", "archive"}:
+                raise ValueError("RunRecord v6 fetch_mode is unsupported")
+        elif self.fetch_mode is not None:
+            raise ValueError("RunRecord v1-v5 cannot contain fetch_mode")
         if self.is_compact:
             if type(self.task_space) is not TaskSpace:
                 raise TypeError("Compact RunRecord requires a TaskSpace")
@@ -155,6 +162,14 @@ class RunRecord:
             ):
                 raise ValueError(
                     "RunRecord experiment must use the prepared image path"
+                )
+            if (
+                self.format_version == 6
+                and self.preparation.builder_status == "SUCCEEDED"
+                and self.container_digest is None
+            ):
+                raise ValueError(
+                    "Successful v6 preparation requires a verified container digest"
                 )
         if not isinstance(self.source_root, PurePath):
             raise TypeError("RunRecord source_root must be a PurePath")

@@ -131,6 +131,7 @@ from rundra.ports import (
 )
 from rundra.provenance import GitProvenanceCapture
 from rundra.results import OperationError, OperationResult
+from rundra.schema_versions import STATUS_SCHEMA, TASKS_SCHEMA
 
 _DEFAULT_PREPARATION_STORAGE = PreparationStorageConfig()
 LAST_RUN_SELECTOR = "__rundra_last_run__"
@@ -326,7 +327,7 @@ class StatusValue:
             raise TypeError(
                 "StatusValue preparation must be PreparationStatusValue or None"
             )
-        if self.format_version not in {1, 2, 3, 4, 5}:
+        if self.format_version not in STATUS_SCHEMA.supported:
             raise ValueError("StatusValue format_version is unsupported")
         for name in ("worker_count", "task_slots_per_worker"):
             item = getattr(self, name)
@@ -440,13 +441,10 @@ class TasksValue:
             raise ValueError("TasksValue limit must be positive")
         if any(type(item) is not TaskState for item in self.tasks):
             raise TypeError("TasksValue tasks must contain TaskState values")
-        if type(self.format_version) is not int or self.format_version not in {
-            1,
-            2,
-            3,
-            4,
-            5,
-        }:
+        if (
+            type(self.format_version) is not int
+            or self.format_version not in TASKS_SCHEMA.supported
+        ):
             raise ValueError("TasksValue format_version must be supported")
 
 
@@ -1519,6 +1517,7 @@ def _local_remote_preparation_inputs(
         if target_storage.cache_root is None
         else target_storage.cache_root
     )
+    assert prepared.record.image_sha256 is not None
     target_image = target_cache / "images" / f"{prepared.record.image_sha256}.sif"
     try:
         image_action = stager.publish_verified_file(
@@ -2985,8 +2984,11 @@ def fetch_operation(
     assert record is not None
     effective_mode = mode
     if effective_mode is None:
-        stored_mode = record.scheduler_metadata.get("fetch_mode", "auto")
-        effective_mode = stored_mode if type(stored_mode) is str else "auto"
+        stored_mode = record.fetch_mode
+        if stored_mode is None:
+            legacy_mode = record.scheduler_metadata.get("fetch_mode", "auto")
+            stored_mode = legacy_mode if type(legacy_mode) is str else "auto"
+        effective_mode = stored_mode
     effective_destination = (
         destination.resolve()
         if destination is not None

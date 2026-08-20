@@ -445,10 +445,11 @@ def remote_preparation_record(
             source_digest=spec.source_digest,
             source_action=spec.source_action,
             image_uri=f"definition:{recipe.path}",
-            image_sha256=spec.image_recipe_key,
+            image_sha256=None,
             image_path=image,
             image_action="build_definition_on_target",
             resolution_location="target",
+            image_recipe_key=spec.image_recipe_key,
             builder_location="target",
         )
     if type(recipe) is not PreparationImage:

@@ -215,10 +215,11 @@ class PreparationRecord:
     source_digest: str
     source_action: str
     image_uri: str
-    image_sha256: str
+    image_sha256: str | None
     image_path: PurePath
     image_action: str
     resolution_location: str
+    image_recipe_key: str | None = None
     build_cache_key: str | None = None
     builder_location: str | None = None
     builder_scheduler_id: str | None = None
@@ -234,7 +235,12 @@ class PreparationRecord:
             if type(value) is not str or not value or "\x00" in value:
                 raise ValueError(f"PreparationRecord {name} must be safe and nonblank")
         _require_sha256(self.source_digest, field_name="Source digest")
-        _require_sha256(self.image_sha256, field_name="Image digest")
+        if self.image_sha256 is not None:
+            _require_sha256(self.image_sha256, field_name="Image digest")
+        if self.image_recipe_key is not None:
+            _require_sha256(self.image_recipe_key, field_name="Image recipe key")
+        if self.image_sha256 is None and self.image_recipe_key is None:
+            raise ValueError("PreparationRecord requires an image digest or recipe key")
         if (
             not isinstance(self.image_path, PurePath)
             or not self.image_path.is_absolute()

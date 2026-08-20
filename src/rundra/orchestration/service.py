@@ -1715,13 +1715,13 @@ class OrchestrationService:
                 created_at=self._clock(),
             )
             return RunRecord(
-                format_version=5,
+                format_version=6,
                 framework_version=self._framework_version,
                 run=compact_run,
                 experiment=request.experiment,
                 source_root=request.source_root,
                 retrieval_destination=_retrieval_destination(request.fetch_destination),
-                scheduler_metadata={"fetch_mode": request.fetch_mode},
+                fetch_mode=request.fetch_mode,
                 experiment_source=request.experiment_source,
                 initiator=request.initiator,
                 git_commit=provenance.commit,
@@ -1759,13 +1759,13 @@ class OrchestrationService:
             created_at=self._clock(),
         )
         return RunRecord(
-            format_version=5,
+            format_version=6,
             framework_version=self._framework_version,
             run=run,
             experiment=request.experiment,
             source_root=request.source_root,
             retrieval_destination=_retrieval_destination(request.fetch_destination),
-            scheduler_metadata={"fetch_mode": request.fetch_mode},
+            fetch_mode=request.fetch_mode,
             experiment_source=request.experiment_source,
             initiator=request.initiator,
             git_commit=provenance.commit,
@@ -1862,7 +1862,9 @@ def _compact_record_from_metadata(
     )
     return replace(
         record,
-        format_version=5 if record.format_version == 5 else 4,
+        format_version=(
+            record.format_version if record.format_version in {5, 6} else 4
+        ),
         run=run,
         task_array_mapping=(),
         task_scheduler_ids={},

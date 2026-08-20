@@ -331,6 +331,8 @@ def _immutable_definition(record: RunRecord) -> tuple[object, ...]:
         tuple(_task_definition(task) for task in record.run.tasks),
         record.experiment,
         record.source_root,
+        record.retrieval_destination,
+        record.fetch_mode,
         record.experiment_source,
         record.task_array_mapping,
         record.task_space,
@@ -345,14 +347,14 @@ def _validate_compaction(previous: RunRecord, current: RunRecord) -> None:
         previous.format_version in {1, 2, 3} and current.format_version == 4
     )
     canonical_transition = (
-        previous.format_version == 5
-        and current.format_version == 5
+        previous.format_version in {5, 6}
+        and current.format_version == previous.format_version
         and not previous.is_compact
         and current.is_compact
     )
     if not legacy_transition and not canonical_transition:
         raise RunStoreError(
-            "Run compaction must convert v1-v3 to v4 or materialized v5 to compact v5"
+            "Run compaction must convert v1-v3 to v4 or preserve a canonical v5+ version"
         )
     if current.task_space is None or current.task_space.task_count != len(
         previous.run.tasks

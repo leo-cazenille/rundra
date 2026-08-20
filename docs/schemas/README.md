@@ -42,7 +42,8 @@ instead. Use the fields, not object-key order or human output, as the interface.
 | operation failure | [`error-v1.json`](error-v1.json) | structured `error` |
 | CLI usage failure | [`cli-usage-error-v1.json`](cli-usage-error-v1.json) | `CLI_USAGE_ERROR` |
 | persisted state | [`run-record-v1.json`](run-record-v1.json) | one complete unprepared RunRecord |
-| current persisted state | [`run-record-v5.json`](run-record-v5.json) | canonical Run kind and retrieval intent |
+| previous persisted state | [`run-record-v5.json`](run-record-v5.json) | canonical Run kind and retrieval destination |
+| current persisted state | [`run-record-v6.json`](run-record-v6.json) | typed fetch mode and verified preparation identity |
 
 Project-managed preparation uses format version 2. Version-2 plans and
 RunRecords add preparation source, image, build, cache, output-hash, and log
@@ -76,7 +77,7 @@ and retrieval strategies. The `tasks` operation returns at most 1,000
 individually identified states per request. Older documents do not gain
 version-4 fields.
 
-RunRecord version 5 is the canonical durable shape for all newly created Runs.
+RunRecord version 5 introduced the canonical durable shape for all Runs.
 It adds an explicit `run_kind`, mandatory absolute `retrieval_destination`,
 nullable preparation, and nullable compact-state fields. Materialized tasks
 always include a nullable `parameter_set`. This decouples durable schema
@@ -94,6 +95,12 @@ public interface. They provide TaskSpace identities, aggregate counts, worker
 activity, throughput, and ETA when measured. Existing v1-v4 durable RunRecords
 remain unchanged; this envelope version does not claim that a historical
 materialized record has been migrated to compact persistence.
+
+RunRecord version 6 makes `fetch_mode` a typed durable field and separates a
+definition image's deterministic recipe key from its measured SIF SHA-256.
+Pending target definition builds leave `container_digest` and `image_sha256`
+unavailable; successful preparation records the verified equal digest in both.
+Readers continue accepting versions 1 through 5 without rewriting them.
 
 For shell pipelines, use an available JSON parser rather than matching text:
 

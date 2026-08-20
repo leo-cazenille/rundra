@@ -29,6 +29,7 @@ from rundra.domain.records import RunRecord
 from rundra.domain.scaling import CompactRun, SeedRange, TaskSpace
 from rundra.domain.states import ExecutionState, RetrievalState
 from rundra.persistence.errors import RunRecordFormatError
+from rundra.schema_versions import RUN_RECORD_SCHEMA
 
 type JsonObject = dict[str, object]
 
@@ -72,6 +73,15 @@ _RECORD_FIELDS_V4 = _RECORD_FIELDS_V2 | {
 _RECORD_FIELDS_V5 = _RECORD_FIELDS_V4 | {
     "run_kind",
     "retrieval_destination",
+}
+_RECORD_FIELDS_V6 = _RECORD_FIELDS_V5 | {"fetch_mode"}
+_RECORD_FIELDS_BY_VERSION = {
+    1: _RECORD_FIELDS_V1,
+    2: _RECORD_FIELDS_V2,
+    3: _RECORD_FIELDS_V3,
+    4: _RECORD_FIELDS_V4,
+    5: _RECORD_FIELDS_V5,
+    6: _RECORD_FIELDS_V6,
 }
 
 
@@ -123,13 +133,13 @@ def record_to_dict(record: RunRecord) -> JsonObject:
         },
         "artifacts": [_artifact_to_dict(artifact) for artifact in record.artifacts],
     }
-    if record.format_version in {2, 3, 4, 5}:
+    if record.format_version in {2, 3, 4, 5, 6}:
         document["preparation"] = (
             None
             if record.preparation is None
-            else _preparation_to_dict(record.preparation)
+            else _preparation_to_dict(record.preparation, version=record.format_version)
         )
-    if record.format_version in {4, 5}:
+    if record.format_version in {4, 5, 6}:
         document.update(
             {
                 "task_space": (
@@ -146,7 +156,7 @@ def record_to_dict(record: RunRecord) -> JsonObject:
                 ),
             }
         )
-    if record.format_version == 5:
+    if record.format_version in {5, 6}:
         assert record.retrieval_destination is not None
         document.update(
             {
@@ -154,6 +164,8 @@ def record_to_dict(record: RunRecord) -> JsonObject:
                 "retrieval_destination": str(record.retrieval_destination),
             }
         )
+    if record.format_version == 6:
+        document["fetch_mode"] = record.fetch_mode
     return document
 
 
@@ -163,29 +175,17 @@ def record_from_dict(value: object) -> RunRecord:
     version = document.get("format_version")
     if type(version) is not int:
         raise RunRecordFormatError("record.format_version must be an integer")
-    if version not in {1, 2, 3, 4, 5}:
+    if version not in RUN_RECORD_SCHEMA.supported:
         raise RunRecordFormatError(f"unsupported format_version {version}")
     document.setdefault("task_array_mapping", [])
     document.setdefault("task_scheduler_ids", {})
     document.setdefault("task_native_states", {})
     document.setdefault("task_retrieval_states", {})
     document.setdefault("scheduler_metadata", {})
-    _exact_fields(
-        document,
-        _RECORD_FIELDS_V1
-        if version == 1
-        else (
-            _RECORD_FIELDS_V2
-            if version == 2
-            else (
-                _RECORD_FIELDS_V3
-                if version == 3
-                else (_RECORD_FIELDS_V4 if version == 4 else _RECORD_FIELDS_V5)
-            )
-        ),
-        path="record",
+    _exact_fields(document, _RECORD_FIELDS_BY_VERSION[version], path="record")
+    run_kind = (
+        _string(document["run_kind"], path="run_kind") if version in {5, 6} else None
     )
-    run_kind = _string(document["run_kind"], path="run_kind") if version == 5 else None
     if run_kind not in {None, "materialized", "compact"}:
         raise RunRecordFormatError("run_kind must be materialized or compact")
     run = _parse_run(
@@ -208,7 +208,12 @@ def record_from_dict(value: object) -> RunRecord:
                     document["retrieval_destination"],
                     path="retrieval_destination",
                 )
-                if version == 5
+                if version in {5, 6}
+                else None
+            ),
+            fetch_mode=(
+                _string(document["fetch_mode"], path="fetch_mode")
+                if version == 6
                 else None
             ),
             experiment_source=_optional_path(
@@ -223,8 +228,8 @@ def record_from_dict(value: object) -> RunRecord:
                 document["container_digest"], path="container_digest"
             ),
             preparation=(
-                _parse_preparation(document["preparation"])
-                if version in {2, 3, 4, 5} and document["preparation"] is not None
+                _parse_preparation(document["preparation"], version=version)
+                if version in {2, 3, 4, 5, 6} and document["preparation"] is not None
                 else None
             ),
             scheduler_job_ids=_string_tuple(
@@ -262,22 +267,22 @@ def record_from_dict(value: object) -> RunRecord:
             artifacts=_parse_artifacts(document["artifacts"]),
             task_space=(
                 _parse_task_space(document["task_space"])
-                if version in {4, 5} and document["task_space"] is not None
+                if version in {4, 5, 6} and document["task_space"] is not None
                 else None
             ),
             execution_strategy=(
                 _string(document["execution_strategy"], path="execution_strategy")
-                if version in {4, 5} and document["execution_strategy"] is not None
+                if version in {4, 5, 6} and document["execution_strategy"] is not None
                 else None
             ),
             retrieval_policy=(
                 _string(document["retrieval_policy"], path="retrieval_policy")
-                if version in {4, 5} and document["retrieval_policy"] is not None
+                if version in {4, 5, 6} and document["retrieval_policy"] is not None
                 else None
             ),
             task_state_store=(
                 _path(document["task_state_store"], path="task_state_store")
-                if version in {4, 5} and document["task_state_store"] is not None
+                if version in {4, 5, 6} and document["task_state_store"] is not None
                 else None
             ),
         )
@@ -343,8 +348,8 @@ def _datetime_or_none(value: datetime | None) -> str | None:
     return None if value is None else value.isoformat()
 
 
-def _preparation_to_dict(value: PreparationRecord) -> JsonObject:
-    return {
+def _preparation_to_dict(value: PreparationRecord, *, version: int) -> JsonObject:
+    document: JsonObject = {
         "source_identity": value.source_identity,
         "source_digest": value.source_digest,
         "source_action": value.source_action,
@@ -369,14 +374,19 @@ def _preparation_to_dict(value: PreparationRecord) -> JsonObject:
         ],
         "logs": [str(path) for path in value.logs],
     }
+    if version >= 6:
+        document["image_recipe_key"] = value.image_recipe_key
+    return document
 
 
-def _parse_preparation(value: object) -> PreparationRecord:
+def _parse_preparation(value: object, *, version: int) -> PreparationRecord:
     path = "preparation"
     document = _object(value, path=path)
     document.setdefault("builder_status", None)
     document.setdefault("builder_state", None)
     document.setdefault("build_action", None)
+    if version >= 6:
+        document.setdefault("image_recipe_key", None)
     _exact_fields(
         document,
         frozenset(
@@ -386,6 +396,7 @@ def _parse_preparation(value: object) -> PreparationRecord:
                 "source_action",
                 "image_uri",
                 "image_sha256",
+                *(("image_recipe_key",) if version >= 6 else ()),
                 "image_path",
                 "image_action",
                 "resolution_location",
@@ -433,12 +444,23 @@ def _parse_preparation(value: object) -> PreparationRecord:
                 document["source_action"], path=f"{path}.source_action"
             ),
             image_uri=_string(document["image_uri"], path=f"{path}.image_uri"),
-            image_sha256=_string(document["image_sha256"], path=f"{path}.image_sha256"),
+            image_sha256=(
+                _optional_string(document["image_sha256"], path=f"{path}.image_sha256")
+                if version >= 6
+                else _string(document["image_sha256"], path=f"{path}.image_sha256")
+            ),
             image_path=_path(document["image_path"], path=f"{path}.image_path"),
             image_action=_string(document["image_action"], path=f"{path}.image_action"),
             resolution_location=_string(
                 document["resolution_location"],
                 path=f"{path}.resolution_location",
+            ),
+            image_recipe_key=(
+                _optional_string(
+                    document["image_recipe_key"], path=f"{path}.image_recipe_key"
+                )
+                if version >= 6
+                else None
             ),
             build_cache_key=_optional_string(
                 document["build_cache_key"], path=f"{path}.build_cache_key"
@@ -559,7 +581,7 @@ def _task_to_dict(task: Task, *, version: int) -> JsonObject:
         "resources": _resources_to_dict(task.resources),
         "state": task.state.value,
     }
-    if version in {3, 5}:
+    if version in {3, 5, 6}:
         document["parameter_set"] = (
             {
                 "id": task.parameter_set.id,
@@ -779,7 +801,7 @@ def _parse_task(value: object, *, path: str, version: int) -> Task:
                 "seed",
                 "resources",
                 "state",
-                *(("parameter_set",) if version in {3, 5} else ()),
+                *(("parameter_set",) if version in {3, 5, 6} else ()),
             }
         ),
         path=path,
@@ -798,7 +820,7 @@ def _parse_task(value: object, *, path: str, version: int) -> Task:
                 _parse_parameter_set(
                     document["parameter_set"], path=f"{path}.parameter_set"
                 )
-                if version in {3, 5} and document["parameter_set"] is not None
+                if version in {3, 5, 6} and document["parameter_set"] is not None
                 else None
             ),
             state=_execution_state(document["state"], path=f"{path}.state"),
