@@ -263,6 +263,8 @@ class CompactSchedulerArrayRequest:
     task_slots_per_worker: int = 1
     output_root: PurePath | None = None
     shard_root: PurePath | None = None
+    infrastructure_retry_limit: int = 0
+    requeue_limit: int = 0
 
     def __post_init__(self) -> None:
         if type(self.task_space) is not TaskSpace:
@@ -291,6 +293,10 @@ class CompactSchedulerArrayRequest:
                 raise ValueError(f"Compact scheduler {name} must fit the TaskSpace")
         if self.worker_count * self.task_slots_per_worker > self.task_space.task_count:
             raise ValueError("Compact scheduler capacity exceeds the TaskSpace")
+        for name in ("infrastructure_retry_limit", "requeue_limit"):
+            value = getattr(self, name)
+            if type(value) is not int or value < 0:
+                raise ValueError(f"Compact scheduler {name} must be non-negative")
         if (self.output_root is None) != (self.shard_root is None):
             raise ValueError("Compact scheduler shard paths must be set together")
         for name in ("output_root", "shard_root"):

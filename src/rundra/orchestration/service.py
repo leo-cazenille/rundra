@@ -1209,7 +1209,9 @@ class OrchestrationService:
                     )
                 assert request.compact_plan.task_space is not None
                 assert request.compact_plan.worker_count is not None
+                assert request.compact_plan.execution_policy is not None
                 assert request.worker_resources is not None
+                worker_policy = request.compact_plan.execution_policy.worker_pool
                 compact_request = CompactSchedulerArrayRequest(
                     request.compact_plan.task_space,
                     compact_commands,
@@ -1224,6 +1226,10 @@ class OrchestrationService:
                         if request.shard_outputs
                         else None
                     ),
+                    infrastructure_retry_limit=(
+                        worker_policy.infrastructure_retry_limit
+                    ),
+                    requeue_limit=worker_policy.requeue_limit,
                 )
                 compact_submission = (
                     cast(
@@ -1918,10 +1924,14 @@ def _compact_observed_record(
         observation = by_native[state.scheduler_id]
         task_id = state.coordinate.task_id
         if task_id in finished:
-            code, _, _ = finished[task_id]
+            attempt, code, _, _ = finished[task_id]
             execution = ExecutionState.SUCCEEDED if code == 0 else ExecutionState.FAILED
             native_state = (
-                "BUNDLED_TASK_SUCCEEDED" if code == 0 else "BUNDLED_TASK_FAILED"
+                "BUNDLED_TASK_SUCCEEDED"
+                if code == 0
+                else (
+                    "BUNDLE_RETRY_EXHAUSTED" if code == 125 else "BUNDLED_TASK_FAILED"
+                )
             )
             updated_states.append(
                 replace(
@@ -1929,14 +1939,17 @@ def _compact_observed_record(
                     execution_state=execution,
                     native_state=native_state,
                     exit_code=code,
+                    attempt=attempt,
                 )
             )
         elif task_id in started:
+            attempt, _, _ = started[task_id]
             updated_states.append(
                 replace(
                     state,
                     execution_state=ExecutionState.RUNNING,
                     native_state="BUNDLED_TASK_RUNNING",
+                    attempt=attempt,
                 )
             )
         elif observation.state in {
@@ -1981,8 +1994,8 @@ def _compact_observed_record(
         for observation in scheduler_observations
     )
     if len(finished) >= 10 and started:
-        first_started = min(value[0] for value in started.values())
-        last_finished = max(value[1] for value in finished.values())
+        first_started = min(value[1] for value in started.values())
+        last_finished = max(value[2] for value in finished.values())
         elapsed = last_finished - first_started
         if elapsed >= 30:
             throughput = len(finished) / elapsed
@@ -2022,7 +2035,10 @@ def _compact_bundle_events(
     record: RunRecord,
     reference_ids: tuple[str, ...],
     transport: Transport | None,
-) -> tuple[dict[TaskId, tuple[int, str]], dict[TaskId, tuple[int, int, str]]]:
+) -> tuple[
+    dict[TaskId, tuple[int, int, str]],
+    dict[TaskId, tuple[int, int, int, str]],
+]:
     status_value = record.scheduler_metadata.get("bundle_status_root")
     if type(status_value) is not str or not status_value.startswith("/"):
         raise ValueError("Compact worker-pool Run has no bundle status root")
@@ -2049,30 +2065,54 @@ def _compact_bundle_events(
     if result.exit_code != 0:
         raise ValueError("Could not read compact bundled Task journals")
     assert record.task_space is not None
-    started: dict[TaskId, tuple[int, str]] = {}
-    finished: dict[TaskId, tuple[int, int, str]] = {}
+    started: dict[TaskId, tuple[int, int, str]] = {}
+    finished: dict[TaskId, tuple[int, int, int, str]] = {}
     for line in result.stdout.splitlines():
         fields = line.split("\t")
-        if fields == ["RUNDRA_TASK_EVENTS", "1"]:
+        if fields in (
+            ["RUNDRA_TASK_EVENTS", "1"],
+            ["RUNDRA_TASK_EVENTS", "2"],
+        ):
             continue
-        if len(fields) == 4 and fields[0] == "START":
+        if len(fields) in {4, 5} and fields[0] == "START":
             task_id = TaskId(fields[1])
             ordinal = int(task_id.value.removeprefix("task_"))
-            if ordinal >= record.task_space.task_count or task_id in started:
+            attempt = int(fields[2]) if len(fields) == 5 else 0
+            timestamp_index = 3 if len(fields) == 5 else 2
+            if ordinal >= record.task_space.task_count or attempt < 0:
                 raise ValueError("Compact Task START event is invalid")
-            started[task_id] = (int(fields[2]), fields[3])
+            start_event = (
+                attempt,
+                int(fields[timestamp_index]),
+                fields[timestamp_index + 1],
+            )
+            previous_start = started.get(task_id)
+            if previous_start is None or start_event[0] > previous_start[0]:
+                started[task_id] = start_event
             continue
-        if len(fields) == 5 and fields[0] == "FINISH":
+        if len(fields) in {5, 6} and fields[0] == "FINISH":
             task_id = TaskId(fields[1])
             ordinal = int(task_id.value.removeprefix("task_"))
-            code = int(fields[2])
+            attempt = int(fields[2]) if len(fields) == 6 else 0
+            code_index = 3 if len(fields) == 6 else 2
+            code = int(fields[code_index])
             if (
                 ordinal >= record.task_space.task_count
-                or task_id in finished
+                or attempt < 0
                 or not 0 <= code <= 255
             ):
                 raise ValueError("Compact Task FINISH event is invalid")
-            finished[task_id] = (code, int(fields[3]), fields[4])
+            finish_event = (
+                attempt,
+                code,
+                int(fields[code_index + 1]),
+                fields[code_index + 2],
+            )
+            previous_finish = finished.get(task_id)
+            if previous_finish is not None and previous_finish[1] != code:
+                raise ValueError("Compact Task FINISH outcomes conflict")
+            if previous_finish is None or finish_event[0] > previous_finish[0]:
+                finished[task_id] = finish_event
             continue
         if len(fields) == 2:
             task_id = TaskId(fields[0])
@@ -2084,7 +2124,7 @@ def _compact_bundle_events(
                 or not 0 <= code <= 255
             ):
                 raise ValueError("Compact legacy Task event is invalid")
-            finished[task_id] = (code, 0, "unknown")
+            finished[task_id] = (0, code, 0, "unknown")
             continue
         raise ValueError("Compact bundled Task journal is malformed")
     return started, finished

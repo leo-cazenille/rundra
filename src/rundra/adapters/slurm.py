@@ -441,6 +441,8 @@ class SlurmScheduler:
             stderr_path=_array_log_path(stderr_path, name="stderr"),
             array_stop=request.worker_count - 1,
         )
+        if request.requeue_limit > 0:
+            directives = (*directives, "#SBATCH --requeue")
         quoted_manifest = shlex.quote(str(manifest_path))
         quoted_srun = shlex.quote(self._srun)
         quoted_status_root = shlex.quote(str(status_root))
@@ -450,7 +452,8 @@ class SlurmScheduler:
             for line in (
                 (
                     f'lane="$status_root/${{SLURM_ARRAY_JOB_ID}}_'
-                    f'${{SLURM_ARRAY_TASK_ID}}.lane-{lane}.tsv"'
+                    f"${{SLURM_ARRAY_TASK_ID}}.lane-{lane}."
+                    'attempt-${attempt}.tsv"'
                 ),
                 '[ -f "$lane" ] || exit 74',
                 'cat -- "$lane" >> "$journal_tmp"',
@@ -462,9 +465,15 @@ class SlurmScheduler:
                 *directives,
                 "",
                 "set -eu",
+                "attempt=${SLURM_RESTART_COUNT:-0}",
+                'case "$attempt" in ""|*[!0-9]*) exit 64 ;; esac',
+                f'[ "$attempt" -le {request.requeue_limit} ] || exit 75',
                 f"status_root={quoted_status_root}",
                 'mkdir -p -- "$status_root"',
-                'journal="$status_root/${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}.tsv"',
+                (
+                    'journal="$status_root/${SLURM_ARRAY_JOB_ID}_'
+                    '${SLURM_ARRAY_TASK_ID}.attempt-${attempt}.tsv"'
+                ),
                 'journal_tmp="${journal}.$$"',
                 'if [ -e "$journal" ]; then exit 73; fi',
                 ': > "$journal_tmp"',
@@ -1310,14 +1319,19 @@ def render_slurm_compact_bundle_manifest(
                 f"      output_root={shlex.quote(str(output_root))}",
                 f"      runtime_root={shlex.quote(str(runtime_root))}",
                 '      mkdir -p -- "$status_root"',
+                "      attempt=${SLURM_RESTART_COUNT:-0}",
+                '      case "$attempt" in ""|*[!0-9]*) exit 64 ;; esac',
+                f'      [ "$attempt" -le {request.requeue_limit} ] || exit 75',
                 (
                     '      journal="$status_root/${SLURM_ARRAY_JOB_ID}_'
-                    '${SLURM_ARRAY_TASK_ID}.lane-${SLURM_PROCID}.tsv"'
+                    "${SLURM_ARRAY_TASK_ID}.lane-${SLURM_PROCID}."
+                    'attempt-${attempt}.tsv"'
                 ),
                 '      journal_tmp="${journal}.$$"',
                 '      if [ -e "$journal" ]; then exit 73; fi',
-                "      printf 'RUNDRA_TASK_EVENTS\\t1\\n' > \"$journal\"",
+                "      printf 'RUNDRA_TASK_EVENTS\\t2\\n' > \"$journal\"",
                 '      : > "$journal_tmp"',
+                "      tab=$(printf '\\t')",
                 f'      while [ "$ordinal" -lt {task_space.task_count} ]; do',
                 f"        parameter_set=$((ordinal / {task_space.seeds.count}))",
                 f"        seed_index=$((ordinal % {task_space.seeds.count}))",
@@ -1326,10 +1340,47 @@ def render_slurm_compact_bundle_manifest(
                     f"seed_index * {task_space.seeds.step}))"
                 ),
                 '        task_id=$(printf "task_%06d" "$ordinal")',
+                "        finished=0",
+                "        prior_starts=0",
+                (
+                    '        for prior in "$status_root/${SLURM_ARRAY_JOB_ID}_'
+                    "${SLURM_ARRAY_TASK_ID}.lane-${SLURM_PROCID}."
+                    'attempt-"*.tsv; do'
+                ),
+                '          [ -f "$prior" ] || continue',
+                '          [ "$prior" = "$journal" ] && continue',
+                (
+                    '          if grep -F "FINISH${tab}${task_id}${tab}" '
+                    '"$prior" >/dev/null; then finished=1; break; fi'
+                ),
+                (
+                    '          if grep -F "START${tab}${task_id}${tab}" '
+                    '"$prior" >/dev/null; then '
+                    "prior_starts=$((prior_starts + 1)); fi"
+                ),
+                "        done",
+                (
+                    '        if [ "$finished" -eq 1 ]; then '
+                    "ordinal=$((ordinal + stride)); continue; fi"
+                ),
+                '        rm -rf -- "$output_root/$task_id" "$runtime_root/$task_id"',
                 '        mkdir -p -- "$output_root/$task_id" "$runtime_root/$task_id"',
                 (
-                    "        printf 'START\\t%s\\t%s\\t%s\\n' \"$task_id\" "
-                    '"$(date +%s)" "$(hostname)" >> "$journal"'
+                    f'        if [ "$prior_starts" -gt '
+                    f"{request.infrastructure_retry_limit} ]; then"
+                ),
+                (
+                    "          printf 'FINISH\\t%s\\t%s\\t125\\t%s\\t%s\\n' "
+                    '"$task_id" "$attempt" "$(date +%s)" "$(hostname)" '
+                    '>> "$journal"'
+                ),
+                '          printf \'%s\\t125\\n\' "$task_id" >> "$journal_tmp"',
+                "          ordinal=$((ordinal + stride))",
+                "          continue",
+                "        fi",
+                (
+                    "        printf 'START\\t%s\\t%s\\t%s\\t%s\\n' \"$task_id\" "
+                    '"$attempt" "$(date +%s)" "$(hostname)" >> "$journal"'
                 ),
                 "        set +e",
                 '        case "$parameter_set" in',
@@ -1343,9 +1394,9 @@ def render_slurm_compact_bundle_manifest(
                     '>> "$journal_tmp"'
                 ),
                 (
-                    "        printf 'FINISH\\t%s\\t%s\\t%s\\t%s\\n' "
-                    '"$task_id" "$task_status" "$(date +%s)" "$(hostname)" '
-                    '>> "$journal"'
+                    "        printf 'FINISH\\t%s\\t%s\\t%s\\t%s\\t%s\\n' "
+                    '"$task_id" "$attempt" "$task_status" "$(date +%s)" '
+                    '"$(hostname)" >> "$journal"'
                 ),
                 "        ordinal=$((ordinal + stride))",
                 "      done",
@@ -1418,7 +1469,8 @@ def _render_compact_lane_shard(
         '      mkdir -p -- "$shard_root"',
         (
             '      shard="$shard_root/${SLURM_ARRAY_JOB_ID}_'
-            '${SLURM_ARRAY_TASK_ID}.lane-${SLURM_PROCID}.tar"'
+            "${SLURM_ARRAY_TASK_ID}.lane-${SLURM_PROCID}."
+            'attempt-${attempt}.tar"'
         ),
         '      shard_tmp="${shard}.$$"',
         '      checksum="${shard}.sha256"',
@@ -1426,6 +1478,7 @@ def _render_compact_lane_shard(
         '      index_dir=$(mktemp -d "$shard_root/.index.XXXXXX")',
         '      index="$index_dir/index.tsv"',
         '      task_list="$index_dir/tasks.txt"',
+        '      : > "$task_list"',
         (
             "      printf 'RUNDRA_SHARD\\t2\\t%s\\t%s\\n' "
             '"$SLURM_ARRAY_TASK_ID" "$SLURM_PROCID" > "$index"'

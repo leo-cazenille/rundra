@@ -3638,7 +3638,11 @@ For eligible large Slurm worker pools, CLI seed ranges remain compact through
 launch resolution, the scalable plan is used directly, and the version-4
 RunRecord plus Task-state sidecar are created before staging. Controller memory
 therefore depends on parameter-set and worker count rather than logical Task
-count. Requeue recovery and remote shard ingestion remain future work.
+count. Compact Slurm workers use immutable attempt-specific journals and shards
+to resume scheduler requeues: durably finished Tasks are skipped, interrupted
+Tasks consume the target's infrastructure retry budget, and attempt numbers are
+persisted in the compact Task sidecar. Remote shard ingestion remains future
+work.
 
 Slurm worker lanes append versioned `START` and `FINISH` events before and
 after every logical Task. Reconciliation treats started Tasks as running even

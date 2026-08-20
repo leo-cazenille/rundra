@@ -872,6 +872,7 @@ def test_slurm_scheduler_returns_bounded_compact_worker_identities() -> None:
         _MANIFEST_PATH,
         8,
         4,
+        requeue_limit=2,
     )
     transport.results.extend(
         (
@@ -891,6 +892,11 @@ def test_slurm_scheduler_returns_bounded_compact_worker_identities() -> None:
     assert len(manifest) < 15_000
     assert "1000000" in manifest
     assert "task_999999" not in manifest
+    assert any(
+        "#SBATCH --requeue" in argument
+        for call in transport.run_calls
+        for argument in call.argv
+    )
 
 
 def test_compact_manifest_executes_dynamic_tasks_and_seals_a_shard(
@@ -900,6 +906,7 @@ def test_compact_manifest_executes_dynamic_tasks_and_seals_a_shard(
     metadata = run_root / "metadata"
     output = run_root / "output"
     runtime = run_root / "runtime"
+    shards = output / ".rundra-shards"
     shards = output / ".rundra-shards"
     for path in (metadata, output, runtime):
         path.mkdir(parents=True, exist_ok=True)
@@ -927,6 +934,8 @@ def test_compact_manifest_executes_dynamic_tasks_and_seals_a_shard(
         1,
         output,
         shards,
+        infrastructure_retry_limit=1,
+        requeue_limit=2,
     )
     manifest = render_slurm_compact_bundle_manifest(
         request, status_root=metadata / "bundle-status"
@@ -939,6 +948,7 @@ def test_compact_manifest_executes_dynamic_tasks_and_seals_a_shard(
             "SLURM_ARRAY_JOB_ID": "91",
             "SLURM_ARRAY_TASK_ID": "0",
             "SLURM_PROCID": "0",
+            "SLURM_RESTART_COUNT": "0",
         },
         capture_output=True,
         check=False,
@@ -946,15 +956,86 @@ def test_compact_manifest_executes_dynamic_tasks_and_seals_a_shard(
     )
 
     assert completed.returncode == 0, completed.stderr
-    shard = shards / "91_0.lane-0.tar"
+    shard = shards / "91_0.lane-0.attempt-0.tar"
     assert shard.is_file()
-    assert (shards / "91_0.lane-0.tar.sha256").is_file()
+    assert (shards / "91_0.lane-0.attempt-0.tar.sha256").is_file()
     with tarfile.open(shard) as archive:
         assert archive.extractfile("task_000000/seed.txt").read() == b"7"
         assert archive.extractfile("task_000001/seed.txt").read() == b"8"
         assert archive.extractfile("task_000002/seed.txt").read() == b"9"
         assert archive.getmember("index.tsv").isfile()
     assert not (output / "task_000000").exists()
+
+    restarted = subprocess.run(
+        ("/bin/sh", "-c", manifest, "rundra-compact-worker", "0"),
+        env={
+            **os.environ,
+            "SLURM_ARRAY_JOB_ID": "91",
+            "SLURM_ARRAY_TASK_ID": "0",
+            "SLURM_PROCID": "0",
+            "SLURM_RESTART_COUNT": "1",
+        },
+        capture_output=True,
+        check=False,
+        encoding="utf-8",
+    )
+
+    assert restarted.returncode == 0, restarted.stderr
+    with tarfile.open(shards / "91_0.lane-0.attempt-1.tar") as archive:
+        assert archive.getnames() == ["index.tsv"]
+
+
+def test_compact_manifest_bounds_interrupted_task_retries(
+    tmp_path: PurePosixPath,
+) -> None:
+    run_root = tmp_path / "run"
+    metadata = run_root / "metadata"
+    output = run_root / "output"
+    runtime = run_root / "runtime"
+    status = metadata / "bundle-status"
+    shards = output / ".rundra-shards"
+    for path in (metadata, output, runtime, status):
+        path.mkdir(parents=True, exist_ok=True)
+    marker = run_root / "executed.txt"
+    request = CompactSchedulerArrayRequest(
+        TaskSpace(1, SeedRange(7, 7)),
+        (Command(("touch", str(marker))),),
+        ResourceRequest(),
+        ResourceRequest(),
+        metadata / "tasks.sh",
+        1,
+        output_root=output,
+        shard_root=shards,
+        infrastructure_retry_limit=0,
+        requeue_limit=2,
+    )
+    manifest = render_slurm_compact_bundle_manifest(request, status_root=status)
+    (status / "91_0.lane-0.attempt-0.tsv").write_text(
+        "RUNDRA_TASK_EVENTS\t2\nSTART\ttask_000000\t0\t1\tnode01\n",
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        ("/bin/sh", "-c", manifest, "rundra-compact-worker", "0"),
+        env={
+            **os.environ,
+            "SLURM_ARRAY_JOB_ID": "91",
+            "SLURM_ARRAY_TASK_ID": "0",
+            "SLURM_PROCID": "0",
+            "SLURM_RESTART_COUNT": "1",
+        },
+        capture_output=True,
+        check=False,
+        encoding="utf-8",
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert not marker.exists()
+    journal = (status / "91_0.lane-0.attempt-1.tsv").read_text(encoding="utf-8")
+    assert "FINISH\ttask_000000\t1\t125\t" in journal
+    with tarfile.open(shards / "91_0.lane-0.attempt-1.tar") as archive:
+        index = archive.extractfile("index.tsv").read().decode("utf-8")
+    assert "TASK\ttask_000000\t125" in index
 
 
 def test_render_sbatch_script_translates_portable_and_allowed_native_resources() -> (

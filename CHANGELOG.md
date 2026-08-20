@@ -6,6 +6,9 @@ All notable user-visible changes are recorded here.
 
 ### Added
 
+- Compact Slurm workers now recover from scheduler requeues using immutable
+  attempt journals, skip durably finished Tasks, and enforce target-owned worker
+  and per-Task infrastructure retry limits.
 - Large Slurm worker-pool launches now preserve compact seed ranges, use bounded
   preview plans, and create version-4 Run records before staging without
   materializing every logical Task.

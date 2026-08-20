@@ -358,7 +358,15 @@ def test_large_worker_pool_persists_and_reconciles_compact_task_state(
         "42_1|COMPLETED|0:0|2026-08-15T10:00:00|"
         "2026-08-15T10:01:00|node02|\n"
     )
-    journals = "\n".join(f"task_{ordinal:06d}\t0" for ordinal in range(1_000))
+    journals = "\n".join(
+        (
+            "RUNDRA_TASK_EVENTS\t2",
+            "START\ttask_000000\t0\t1\tnode01",
+            "START\ttask_000000\t1\t2\tnode02",
+            "FINISH\ttask_000000\t1\t0\t3\tnode02",
+            *(f"task_{ordinal:06d}\t0" for ordinal in range(1, 1_000)),
+        )
+    )
     transport.outcomes.extend(((0, "", ""), (0, accounting, ""), (0, journals, "")))
 
     refreshed = SchedulerLifecycleService(
@@ -371,6 +379,7 @@ def test_large_worker_pool_persists_and_reconciles_compact_task_state(
 
     assert refreshed.run.state is ExecutionState.SUCCEEDED
     assert task_store.counts(_RUN_ID).execution[ExecutionState.SUCCEEDED] == 1_000
+    assert task_store.get(_RUN_ID, 0).attempt == 1
 
 
 def test_compact_submission_resume_finishes_interrupted_record_compaction(
