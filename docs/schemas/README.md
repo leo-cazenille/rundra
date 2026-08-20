@@ -75,6 +75,13 @@ and retrieval strategies. The `tasks` operation returns at most 1,000
 individually identified states per request. Older documents do not gain
 version-4 fields.
 
+Accepted Slurm worker-pool Runs at or above 1,000 Tasks now use this durable v4
+form automatically. The Run store permits only a validated one-way conversion:
+Run identity, target, experiment, source/provenance, Task IDs, seed order, and
+current lifecycle state must remain identical. Scheduler manifest and recovery
+receipt generation are still transiently materialized and are not part of the
+v4 RunRecord.
+
 Version-5 large-Run CLI envelopes bound serialized materialized state at the
 public interface. They provide TaskSpace identities, aggregate counts, worker
 activity, throughput, and ETA when measured. Existing v1-v4 durable RunRecords

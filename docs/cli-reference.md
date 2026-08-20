@@ -91,6 +91,13 @@ sequentially, with isolated outputs, per-Task timeouts, and atomic exit
 journals. OpenPBS uses bounded scheduler arrays and does not implement Rundra's
 Slurm worker-pool strategy.
 
+For Slurm worker-pool execution with at least 1,000 logical Tasks, `run` and
+`submit` automatically replace the accepted materialized definition with a
+version-4 `CompactRun`. Per-Task scheduler, execution, exit, and retrieval state
+lives in `<RUN_ID>.tasks.sqlite3`; the JSON RunRecord contains no Task array or
+unbounded Task maps. `status`, `wait`, `cancel`, `tasks`, and `fetch` use this
+sidecar automatically when invoked with the same `--data-dir`.
+
 ```yaml
 execution:
   max_concurrent_jobs: 128

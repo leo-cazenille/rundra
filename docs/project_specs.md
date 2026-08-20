@@ -3612,14 +3612,22 @@ unsealable lease, and atomically publishes read-only uncompressed tar shards
 with indexed member hashes. Shard verification and selected extraction reject
 links and traversal and explicitly refuse computation on `fishvision`.
 
-Materialized `run` and `submit` operations now enforce `max_concurrent_jobs`
+`run` and `submit` operations enforce `max_concurrent_jobs`
 (default 256 for target-v3 policy) by mapping excess logical Tasks onto a
 bounded Slurm worker array. Workers execute deterministic assignments
 sequentially, preserve per-Task timeouts and output directories, and atomically
-publish exit journals used by lifecycle reconciliation. Compact TaskSpace
-worker submission, requeue recovery, remote shard ingestion, and launch-time
-retrieval policy remain unconnected; worker-pool support beyond materialized
-Runs is still planning-only.
+publish exit journals used by lifecycle reconciliation. After scheduler
+acceptance, worker-pool Runs with at least 1,000 Tasks are atomically converted
+to a version-4 `CompactRun`; exact Task identity, scheduler reference, native
+state, exit code, attempt, and retrieval state live in the SQLite sidecar.
+Lifecycle reconciliation, cancellation, pages, and retrieval update the sidecar
+without adding unbounded maps back to the JSON record.
+
+The scheduler request and submission recovery receipt are still built from the
+materialized execution plan before compaction. Constant-memory scheduler
+manifest generation, compact receipts, requeue recovery, and remote shard
+ingestion remain future work. A compaction failure after scheduler acceptance
+is reported explicitly and never causes an automatic duplicate submission.
 
 Slurm worker lanes append versioned `START` and `FINISH` events before and
 after every logical Task. Reconciliation treats started Tasks as running even

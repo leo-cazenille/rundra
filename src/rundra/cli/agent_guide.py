@@ -13,7 +13,7 @@ END_MARKER = "<!-- rundra-agent:end -->"
 GUIDE_TOPICS = {
     "setup": "Run doctor --agent codex --json first. Grant only reported paths and network access, restart the agent sandbox when required, then rerun doctor until ready is true.",
     "launch": "Validate and plan before submit. Use explicit seeds, review task count/resources/concurrency, retain the returned Run ID and data directory, and submit only once.",
-    "large-runs": "Use worker-pool execution within target policy, paginated list/tasks JSON, bounded wait calls without progress, archive retrieval, and an exact confirm-tasks value after plan review.",
+    "large-runs": "Use worker-pool execution within target policy. Runs with at least 1,000 Tasks automatically use compact durable Task state; inspect individuals with paginated tasks JSON, use bounded wait calls without progress, retain archive retrieval, and pass an exact confirm-tasks value after plan review.",
     "lifecycle": "Use submit, bounded wait, status/tasks, fetch, then purge. Agents should use explicit Run IDs rather than --last and may use wait --notify-file for one atomic completion signal.",
     "results": "Prefer fetch auto. Keep compact verified shards unless individual files are required; Python analysis can use rundra.artifacts.open_result_shard. Keep derived outputs separate.",
     "preparation": "Pin acquired images. Definition projects v4 declare an explicit context include list; Rundra hashes only that context plus the definition for image-cache identity.",

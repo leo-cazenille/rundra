@@ -6,6 +6,11 @@ All notable user-visible changes are recorded here.
 
 ### Added
 
+- Slurm worker-pool submissions with at least 1,000 logical Tasks now persist a
+  version-4 `CompactRun` plus a per-Run SQLite Task-state sidecar.
+- Run stores expose a narrowly validated, atomic one-way materialized-to-v4
+  compaction capability after scheduler acceptance.
+
 - Project schema version 4 gives Apptainer definition builds an explicit context
   allowlist, so unrelated source changes no longer invalidate image caches.
 - `wait --notify-file PATH` atomically publishes one private terminal JSON
@@ -26,6 +31,10 @@ All notable user-visible changes are recorded here.
   `max_memory_per_worker` ceiling during pure planning.
 
 ### Changed
+
+- `status`, `wait`, `cancel`, `tasks`, and result retrieval reconcile compact
+  worker-pool Runs through scheduler worker observations and Task journals
+  without restoring per-Task maps to the JSON RunRecord.
 
 - Large Run and status JSON responses are bounded and report aggregate TaskSpace
   and worker progress instead of serializing thousands of Task details.
