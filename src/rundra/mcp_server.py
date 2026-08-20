@@ -536,14 +536,18 @@ def build_server(
     @server.tool()
     def fetch_results(
         run_id: str,
-        destination: str,
+        destination: str | None = None,
         mode: str = "auto",
         extract: bool = False,
     ) -> dict[str, Any]:
         """Retrieve terminal or partial Run outputs into an allowed path."""
         return document(
             fetch_operation(
-                run_id, store(), settings.path(destination), mode=mode, extract=extract
+                run_id,
+                store(),
+                settings.path(destination) if destination is not None else None,
+                mode=mode,
+                extract=extract,
             )
         )
 

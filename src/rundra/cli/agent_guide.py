@@ -50,9 +50,10 @@ GUIDE = f"""{START_MARKER}
 - Treat help output as guidance only. Use `--json` or Rundra MCP tools for
   structured automation; do not parse human-oriented help text.
 - Prefer `rundr submit EXPERIMENT`, then `rundr wait RUN_ID`, then
-  `rundr fetch RUN_ID` for long Runs. Use `--destination PATH` only to override
-  the configuration-based default. Use `rundr run` only when keeping the client
-  attached is appropriate.
+  `rundr fetch RUN_ID` for long Runs. Fetch reuses the absolute destination
+  persisted by submit; use `--destination PATH` only to override it, such as on
+  another workstation. Use `rundr run` only when keeping the client attached
+  is appropriate.
 - For agents, use `rundr wait RUN_ID --json` without `--progress`: blocking wait
   emits only the final JSON document. When a tool-call deadline is shorter than
   the Run, renew bounded calls such as `--timeout 300 --json`. Reserve

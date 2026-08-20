@@ -13,3 +13,14 @@ def test_checked_run_record_v1_example_round_trips() -> None:
     record = record_from_dict(document)
 
     assert record_to_dict(record) == document
+
+
+def test_checked_run_record_v5_example_round_trips() -> None:
+    source = Path("docs/schemas/run-record-v5.json")
+    document: object = json.loads(source.read_text(encoding="utf-8"))
+
+    record = record_from_dict(document)
+
+    assert record.format_version == 5
+    assert record.retrieval_destination == Path("/tmp/rundra/retrieved/minimal")
+    assert record_to_dict(record) == document

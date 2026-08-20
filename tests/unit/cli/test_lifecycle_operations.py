@@ -447,6 +447,27 @@ def test_fetch_is_idempotent_and_preserves_successful_retrieval_state(
     assert progress_events[-1].completed == progress_events[-1].total
 
 
+def test_fetch_uses_the_destination_persisted_by_submit(tmp_path: Path) -> None:
+    legacy_store, run_id = _stored_record(tmp_path)
+    original = legacy_store.load(RunId(run_id))
+    destination = (tmp_path / "configured-retrieval").resolve()
+    canonical = replace(
+        original,
+        format_version=5,
+        retrieval_destination=destination,
+    )
+    store = JsonRunStore(tmp_path / "canonical-records")
+    store.create(canonical)
+
+    result = fetch_operation(run_id, store)
+
+    assert result.ok and isinstance(result.value, FetchValue)
+    assert result.value.destination == destination
+    assert (destination / "results/result.json").read_text(encoding="utf-8") == (
+        '{"value": 17}\n'
+    )
+
+
 def test_compact_shard_fetch_ingests_all_tasks_without_materializing_selection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

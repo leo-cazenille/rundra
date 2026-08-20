@@ -193,7 +193,7 @@ class SchedulerLifecycleService:
         current = self._refresh_preparation(record)
         if current.run.state in _TERMINAL_STATES:
             return current
-        if current.format_version == 4:
+        if current.is_compact:
             if self._task_store is None:
                 raise OrchestrationError(
                     code="TASK_STATE_UNAVAILABLE",
@@ -715,7 +715,7 @@ class OrchestrationService:
                     run_id=run_id,
                 )
             if receipt.format_version != 3:
-                if record.format_version != 4:
+                if not record.is_compact:
                     expected_task_ids = tuple(task.id for task in record.run.tasks)
                 else:
                     assert record.task_space is not None
@@ -754,7 +754,7 @@ class OrchestrationService:
                         run_id=run_id,
                     )
                 self._task_store.all_states(run_id)
-                if record.format_version != 4:
+                if not record.is_compact:
                     assert receipt.execution_strategy is not None
                     assert receipt.retrieval_policy is not None
                     compact = _compact_record_from_metadata(
@@ -782,7 +782,7 @@ class OrchestrationService:
                 scheduler_job_ids=receipt.scheduler_job_ids,
                 task_scheduler_ids=(
                     {}
-                    if receipt.format_version == 3 or record.format_version == 4
+                    if receipt.format_version == 3 or record.is_compact
                     else receipt.task_scheduler_ids or {}
                 ),
                 submitted_at=receipt.started_at,
@@ -1425,7 +1425,7 @@ class OrchestrationService:
             task_native_ids is not None
             and len(set(task_native_ids.values())) < len(task_native_ids)
         )
-        if request.compact_plan is not None and record.format_version != 4:
+        if request.compact_plan is not None and not record.is_compact:
             try:
                 assert self._task_store is not None
                 compact = _compact_record(
@@ -1448,9 +1448,7 @@ class OrchestrationService:
             scheduler_job_ids=tuple(
                 reference.native_id for reference in submission_references
             ),
-            task_scheduler_ids=(
-                {} if record.format_version == 4 else task_native_ids or {}
-            ),
+            task_scheduler_ids=({} if record.is_compact else task_native_ids or {}),
             submitted_at=submission_started_at,
             scheduler_metadata={
                 **record.scheduler_metadata,
@@ -1558,21 +1556,24 @@ class OrchestrationService:
                 run=replace(record.run, retrieval_state=RetrievalState.PENDING),
                 task_retrieval_states=(
                     {}
-                    if record.format_version == 4
+                    if record.is_compact
                     else {task.id: RetrievalState.PENDING for task in record.run.tasks}
                 ),
             )
-            if record.format_version == 4:
+            if record.is_compact:
                 assert self._task_store is not None
                 self._task_store.set_all_retrieval(
                     record.run.id, RetrievalState.PENDING
                 )
             self.store.update(updated, expected=record)
             record = updated
+            retrieval_destination = (
+                record.retrieval_destination or request.fetch_destination
+            )
             self._report(
                 ProgressPhase.RETRIEVE,
                 5 + len(units),
-                f"destination={request.fetch_destination}",
+                f"destination={retrieval_destination}",
                 run_id,
                 len(units),
             )
@@ -1585,12 +1586,12 @@ class OrchestrationService:
                             if request.shard_outputs
                             else _fetch_patterns(request.experiment.outputs, units)
                         ),
-                        destination=request.fetch_destination,
+                        destination=retrieval_destination,
                         mode="auto",
                     )
                 )
                 fetched_artifacts = _fetched_task_artifacts(fetched.artifacts, units)
-                if record.format_version == 4 and request.shard_outputs:
+                if record.is_compact and request.shard_outputs:
                     assert self._task_store is not None
                     shard_paths = tuple(
                         Path(artifact.path)
@@ -1609,13 +1610,13 @@ class OrchestrationService:
                     run=replace(record.run, retrieval_state=RetrievalState.FAILED),
                     task_retrieval_states=(
                         {}
-                        if record.format_version == 4
+                        if record.is_compact
                         else {
                             task.id: RetrievalState.FAILED for task in record.run.tasks
                         }
                     ),
                 )
-                if record.format_version == 4:
+                if record.is_compact:
                     assert self._task_store is not None
                     self._task_store.set_all_retrieval(
                         record.run.id, RetrievalState.FAILED
@@ -1632,14 +1633,14 @@ class OrchestrationService:
                 run=replace(record.run, retrieval_state=RetrievalState.SUCCEEDED),
                 task_retrieval_states=(
                     {}
-                    if record.format_version == 4
+                    if record.is_compact
                     else {
                         task.id: RetrievalState.SUCCEEDED for task in record.run.tasks
                     }
                 ),
                 artifacts=(*record.artifacts, *fetched_artifacts),
             )
-            if record.format_version == 4:
+            if record.is_compact:
                 assert self._task_store is not None
                 self._task_store.set_all_retrieval(
                     record.run.id, RetrievalState.SUCCEEDED
@@ -1767,11 +1768,12 @@ class OrchestrationService:
                 created_at=self._clock(),
             )
             return RunRecord(
-                format_version=4,
+                format_version=5,
                 framework_version=self._framework_version,
                 run=compact_run,
                 experiment=request.experiment,
                 source_root=request.source_root,
+                retrieval_destination=_retrieval_destination(request.fetch_destination),
                 experiment_source=request.experiment_source,
                 initiator=request.initiator,
                 git_commit=provenance.commit,
@@ -1809,11 +1811,12 @@ class OrchestrationService:
             created_at=self._clock(),
         )
         return RunRecord(
-            format_version=request.plan.version,
+            format_version=5,
             framework_version=self._framework_version,
             run=run,
             experiment=request.experiment,
             source_root=request.source_root,
+            retrieval_destination=_retrieval_destination(request.fetch_destination),
             experiment_source=request.experiment_source,
             initiator=request.initiator,
             git_commit=provenance.commit,
@@ -1850,11 +1853,11 @@ class OrchestrationService:
             run=replace(record.run, retrieval_state=RetrievalState.PENDING),
             task_retrieval_states=(
                 {}
-                if record.format_version == 4
+                if record.is_compact
                 else {task.id: RetrievalState.PENDING for task in record.run.tasks}
             ),
         )
-        if record.format_version == 4:
+        if record.is_compact:
             assert self._task_store is not None
             self._task_store.set_all_retrieval(record.run.id, RetrievalState.PENDING)
         self.store.update(pending, expected=record)
@@ -1864,13 +1867,13 @@ class OrchestrationService:
                 run=replace(pending.run, retrieval_state=RetrievalState.FAILED),
                 task_retrieval_states=(
                     {}
-                    if record.format_version == 4
+                    if record.is_compact
                     else {task.id: RetrievalState.FAILED for task in pending.run.tasks}
                 ),
             ),
             expected=pending,
         )
-        if record.format_version == 4:
+        if record.is_compact:
             assert self._task_store is not None
             self._task_store.set_all_retrieval(record.run.id, RetrievalState.FAILED)
 
@@ -1910,7 +1913,7 @@ def _compact_record_from_metadata(
     )
     return replace(
         record,
-        format_version=4,
+        format_version=5 if record.format_version == 5 else 4,
         run=run,
         task_array_mapping=(),
         task_scheduler_ids={},
@@ -1922,6 +1925,10 @@ def _compact_record_from_metadata(
         retrieval_policy=retrieval_policy,
         task_state_store=PurePath(task_store.path(record.run.id).name),
     )
+
+
+def _retrieval_destination(destination: PurePath) -> PurePath:
+    return PurePath(Path(str(destination)).resolve())
 
 
 def _compact_observed_record(

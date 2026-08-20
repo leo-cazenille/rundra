@@ -95,6 +95,9 @@ specifically required.
 `--task` accepts a stable Task ID or zero-based ordinal and may be repeated.
 Without it, `logs` requires a single-Task Run and `fetch` selects every Task.
 Repeated fetches are safe and update the same selected destination files.
+For newly submitted Runs, omitting `fetch --destination` reuses the absolute
+destination persisted at launch. Specify `--destination` when intentionally
+retrieving on a different workstation or into a different result tree.
 
 To check reproducibility, run again with the same source, effective config,
 seed, Python/runtime, and a different destination, then compare the raw files:

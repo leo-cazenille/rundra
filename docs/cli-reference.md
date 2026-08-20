@@ -54,6 +54,11 @@ the generated Codex profile includes the missing paths.
 | `list` | none | `--offset`, `--limit`, `--include-tasks`, `--data-dir`, `--json` | Page through compact persisted Run summaries; include per-Task details only when explicitly requested. |
 | `logs` | `RUN_ID` or `--last` | `--task`, `--data-dir`, `--json` | Read one Task's framework-managed stdout/stderr. |
 | `fetch` | `RUN_ID` or `--last` | optional `--destination`; repeatable `--task`; `--mode`; `--verbose`, `--progress`, `--data-dir`, `--json` | Idempotently retrieve all or selected Task artifacts. Auto mode uses a verified shared reference when the Run workspace is jointly visible, otherwise it copies normally. |
+
+New Runs persist the absolute destination resolved by `run` or `submit`.
+`fetch` reuses that path when `--destination` is omitted; an explicit fetch
+destination always overrides it. Legacy records without persisted retrieval
+intent retain their historical derived fallback.
 | `inspect` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Return the complete persisted RunRecord. |
 | `cancel` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Reconcile and cancel only active scheduler work; repeat safely. |
 | `purge` | `RUN_ID` or `--last` | `--workspace`, `--confirm RUN_ID`, `--dry-run`, `--data-dir`, `--json` | Preview or delete terminal Run outputs and workspaces with explicit confirmation. |

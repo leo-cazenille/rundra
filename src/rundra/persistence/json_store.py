@@ -341,8 +341,19 @@ def _immutable_definition(record: RunRecord) -> tuple[object, ...]:
 
 
 def _validate_compaction(previous: RunRecord, current: RunRecord) -> None:
-    if previous.format_version not in {1, 2, 3} or current.format_version != 4:
-        raise RunStoreError("Run compaction must convert v1-v3 to v4")
+    legacy_transition = (
+        previous.format_version in {1, 2, 3} and current.format_version == 4
+    )
+    canonical_transition = (
+        previous.format_version == 5
+        and current.format_version == 5
+        and not previous.is_compact
+        and current.is_compact
+    )
+    if not legacy_transition and not canonical_transition:
+        raise RunStoreError(
+            "Run compaction must convert v1-v3 to v4 or materialized v5 to compact v5"
+        )
     if current.task_space is None or current.task_space.task_count != len(
         previous.run.tasks
     ):
@@ -369,6 +380,7 @@ def _validate_compaction(previous: RunRecord, current: RunRecord) -> None:
         previous.git_diff,
         previous.container_digest,
         previous.preparation,
+        previous.retrieval_destination,
     )
     current_identity = (
         current.framework_version,
@@ -386,6 +398,7 @@ def _validate_compaction(previous: RunRecord, current: RunRecord) -> None:
         current.git_diff,
         current.container_digest,
         current.preparation,
+        current.retrieval_destination,
     )
     if previous_identity != current_identity:
         raise RunStoreError("Run compaction changes immutable provenance")

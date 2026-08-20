@@ -1,0 +1,158 @@
+{
+  "allocated_nodes": [],
+  "artifacts": [
+    {
+      "kind": "source_snapshot",
+      "path": "/workspaces/runs/run_0123456789abcdef0123456789abcdef/source",
+      "size_bytes": null,
+      "task_id": null
+    },
+    {
+      "kind": "effective_config",
+      "path": "/workspaces/runs/run_0123456789abcdef0123456789abcdef/input/config.yaml",
+      "size_bytes": 24,
+      "task_id": null
+    },
+    {
+      "kind": "stdout",
+      "path": "/workspaces/runs/run_0123456789abcdef0123456789abcdef/logs/task_000000.stdout",
+      "size_bytes": 15,
+      "task_id": "task_000000"
+    },
+    {
+      "kind": "stderr",
+      "path": "/workspaces/runs/run_0123456789abcdef0123456789abcdef/logs/task_000000.stderr",
+      "size_bytes": 0,
+      "task_id": "task_000000"
+    },
+    {
+      "kind": "raw_result",
+      "path": "/work/minimal/retrieved/results/result.json",
+      "size_bytes": 42,
+      "task_id": "task_000000"
+    }
+  ],
+  "completed_at": "2026-08-15T08:02:00+00:00",
+  "container_digest": null,
+  "execution_strategy": null,
+  "experiment": {
+    "command": {
+      "argv": [
+        "python3",
+        "main.py",
+        "--config",
+        "{config}",
+        "--seed",
+        "{seed}"
+      ],
+      "environment": {},
+      "working_directory": null
+    },
+    "container": {
+      "gpu": false,
+      "image": "containers/project.sif"
+    },
+    "name": "minimal",
+    "outputs": [
+      "results/**"
+    ],
+    "resources": {
+      "cpus_per_task": 1,
+      "gpus_per_task": 0,
+      "memory_bytes": 1073741824,
+      "native": {},
+      "nodes": 1,
+      "tasks": 1,
+      "walltime_microseconds": 300000000
+    },
+    "sync_excludes": [],
+    "version": 1
+  },
+  "experiment_source": "examples/minimal/experiment.yaml",
+  "format_version": 5,
+  "framework_version": "0.1.0.dev0",
+  "git_branch": "main",
+  "git_commit": "0123456789abcdef0123456789abcdef01234567",
+  "git_diff": "diff --git a/main.py b/main.py\n--- a/main.py\n+++ b/main.py\n@@ -1 +1 @@\n-print('old')\n+print('new')\n",
+  "git_dirty": true,
+  "initiator": null,
+  "native_state": "EXITED",
+  "preparation": null,
+  "retrieval_destination": "/tmp/rundra/retrieved/minimal",
+  "retrieval_policy": null,
+  "run": {
+    "created_at": "2026-08-15T08:00:00+00:00",
+    "experiment_name": "minimal",
+    "id": "run_0123456789abcdef0123456789abcdef",
+    "retrieval_state": "SUCCEEDED",
+    "state": "SUCCEEDED",
+    "target": {
+      "container": {
+        "kind": "apptainer",
+        "options": {}
+      },
+      "name": "local",
+      "scheduler": {
+        "kind": "local",
+        "options": {}
+      },
+      "staging": {
+        "kind": "local",
+        "options": {}
+      },
+      "transport": {
+        "kind": "local",
+        "options": {}
+      },
+      "workspace": ".rundra"
+    },
+    "tasks": [
+      {
+        "config": {
+          "content": "population:\n  size: 100\n",
+          "source": "examples/minimal/config.yaml"
+        },
+        "experiment_name": "minimal",
+        "id": "task_000000",
+        "parameter_set": null,
+        "resources": {
+          "cpus_per_task": 1,
+          "gpus_per_task": 0,
+          "memory_bytes": 1073741824,
+          "native": {},
+          "nodes": 1,
+          "tasks": 1,
+          "walltime_microseconds": 300000000
+        },
+        "run_id": "run_0123456789abcdef0123456789abcdef",
+        "seed": 17,
+        "state": "SUCCEEDED"
+      }
+    ]
+  },
+  "run_kind": "materialized",
+  "scheduler_job_ids": [
+    "local-0123456789abcdef0123456789abcdef"
+  ],
+  "scheduler_metadata": {
+    "transport": "local"
+  },
+  "source_root": "/work/minimal",
+  "started_at": "2026-08-15T08:01:00+00:00",
+  "submitted_at": "2026-08-15T08:01:00+00:00",
+  "task_array_mapping": [],
+  "task_exit_codes": {
+    "task_000000": 0
+  },
+  "task_native_states": {
+    "task_000000": "EXITED"
+  },
+  "task_retrieval_states": {
+    "task_000000": "SUCCEEDED"
+  },
+  "task_scheduler_ids": {
+    "task_000000": "local-0123456789abcdef0123456789abcdef"
+  },
+  "task_space": null,
+  "task_state_store": null
+}

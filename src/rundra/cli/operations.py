@@ -325,7 +325,7 @@ class StatusValue:
             raise TypeError(
                 "StatusValue preparation must be PreparationStatusValue or None"
             )
-        if self.format_version not in {1, 2, 3, 4}:
+        if self.format_version not in {1, 2, 3, 4, 5}:
             raise ValueError("StatusValue format_version is unsupported")
         for name in ("worker_count", "task_slots_per_worker"):
             item = getattr(self, name)
@@ -2297,7 +2297,7 @@ def status_operation(
     try:
         counts = (
             task_store.counts(record.run.id).execution
-            if record.format_version == 4 and task_store is not None
+            if record.is_compact and task_store is not None
             else None
         )
     except RunStoreError as store_error:
@@ -2466,7 +2466,7 @@ def list_runs_operation(
                             record,
                             (
                                 task_store.counts(record.run.id).execution
-                                if record.format_version == 4 and task_store is not None
+                                if record.is_compact and task_store is not None
                                 else None
                             ),
                         )
@@ -2686,7 +2686,7 @@ def tasks_operation(
     if error is not None:
         return OperationResult.failure("tasks", error)
     assert record is not None
-    if record.format_version != 4:
+    if not record.is_compact:
         try:
             materialized_page = _materialized_task_page(
                 record, offset=offset, limit=limit
@@ -2941,7 +2941,11 @@ def fetch_operation(
     if error is not None:
         return OperationResult.failure("fetch", error)
     assert record is not None
-    effective_destination = destination or _default_fetch_destination(record)
+    effective_destination = (
+        destination.resolve()
+        if destination is not None
+        else _default_fetch_destination(record)
+    )
     with store.operation_lock(record.run.id):
         return _fetch_operation_locked(
             str(record.run.id),
@@ -2957,6 +2961,8 @@ def fetch_operation(
 
 
 def _default_fetch_destination(record: RunRecord) -> Path:
+    if record.retrieval_destination is not None:
+        return Path(str(record.retrieval_destination))
     project_root = (
         Path(str(record.experiment_source)).parent
         if record.experiment_source is not None
@@ -3025,11 +3031,11 @@ def _fetch_operation_locked(
                 {"run_id": str(record.run.id), "state": record.run.state.value},
             ),
         )
-    compact_all = record.format_version == 4 and sharded and tasks is None
+    compact_all = record.is_compact and sharded and tasks is None
     selected = () if compact_all else _selected_task_ids(record, tasks)
     if isinstance(selected, OperationError):
         return OperationResult.failure("fetch", selected)
-    if record.format_version == 4 and task_store is None:
+    if record.is_compact and task_store is None:
         return OperationResult.failure(
             "fetch",
             OperationError(
@@ -3038,7 +3044,7 @@ def _fetch_operation_locked(
                 {"run_id": str(record.run.id)},
             ),
         )
-    if record.format_version == 4 and sharded:
+    if record.is_compact and sharded:
         assert task_store is not None
         return _fetch_compact_shards_locked(
             record,
@@ -3072,7 +3078,7 @@ def _fetch_operation_locked(
         task_total=len(selected),
     )
     if transitioning:
-        if record.format_version == 4:
+        if record.is_compact:
             assert task_store is not None
             task_store.set_retrieval(
                 record.run.id, transitioning, RetrievalState.PENDING
@@ -3087,9 +3093,7 @@ def _fetch_operation_locked(
                     tuple(retrieval_states.values())
                 ),
             ),
-            task_retrieval_states=(
-                {} if record.format_version == 4 else retrieval_states
-            ),
+            task_retrieval_states=({} if record.is_compact else retrieval_states),
         )
         try:
             store.update(pending, expected=record)
@@ -3111,7 +3115,7 @@ def _fetch_operation_locked(
         )
     except (OSError, RuntimeError, ValueError) as error:
         if transitioning:
-            if record.format_version == 4:
+            if record.is_compact:
                 assert task_store is not None
                 task_store.set_retrieval(
                     record.run.id, transitioning, RetrievalState.FAILED
@@ -3128,7 +3132,7 @@ def _fetch_operation_locked(
                         ),
                     ),
                     task_retrieval_states=(
-                        {} if record.format_version == 4 else retrieval_states
+                        {} if record.is_compact else retrieval_states
                     ),
                 )
                 store.update(failed, expected=record)
@@ -3151,7 +3155,7 @@ def _fetch_operation_locked(
             )
     except ValueError as error:
         if transitioning:
-            if record.format_version == 4:
+            if record.is_compact:
                 assert task_store is not None
                 task_store.set_retrieval(
                     record.run.id, transitioning, RetrievalState.FAILED
@@ -3168,7 +3172,7 @@ def _fetch_operation_locked(
                         ),
                     ),
                     task_retrieval_states=(
-                        {} if record.format_version == 4 else retrieval_states
+                        {} if record.is_compact else retrieval_states
                     ),
                 )
                 store.update(failed, expected=record)
@@ -3184,7 +3188,7 @@ def _fetch_operation_locked(
         )
     for task_id in selected:
         retrieval_states[task_id] = RetrievalState.SUCCEEDED
-    if record.format_version == 4:
+    if record.is_compact:
         assert task_store is not None
         task_store.set_retrieval(record.run.id, selected, RetrievalState.SUCCEEDED)
     retrieval_state = aggregate_retrieval_state(tuple(retrieval_states.values()))
@@ -3192,7 +3196,7 @@ def _fetch_operation_locked(
     succeeded = replace(
         record,
         run=replace(record.run, retrieval_state=retrieval_state),
-        task_retrieval_states=({} if record.format_version == 4 else retrieval_states),
+        task_retrieval_states=({} if record.is_compact else retrieval_states),
         artifacts=merged,
     )
     try:
@@ -3535,7 +3539,7 @@ def _selected_task_id(record: RunRecord, value: str | None) -> TaskId | Operatio
             "TASK_REQUIRED", "Select a Task when a Run contains multiple Tasks"
         )
     compact_member = (
-        record.format_version == 4
+        record.is_compact
         and record.task_space is not None
         and int(selected.value.removeprefix("task_")) < record.task_space.task_count
     )
@@ -3552,7 +3556,7 @@ def _selected_task_ids(
     record: RunRecord, values: Sequence[str] | None
 ) -> tuple[TaskId, ...] | OperationError:
     if values is None:
-        if record.format_version == 4 and record.task_space is not None:
+        if record.is_compact and record.task_space is not None:
             return tuple(
                 record.task_space.coordinate(ordinal).task_id
                 for ordinal in range(record.task_space.task_count)
@@ -3580,7 +3584,7 @@ def _selected_task_ids(
 def _task_retrieval_states(
     record: RunRecord, task_store: SqliteTaskStore | None = None
 ) -> dict[TaskId, RetrievalState]:
-    if record.format_version == 4:
+    if record.is_compact:
         if task_store is None:
             return {}
         return {

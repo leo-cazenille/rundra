@@ -4,8 +4,9 @@ This checklist turns the validated `0.1.2` source tree into the v0.1.2 release.
 Checking it does not itself authorize publishing, pushing, tagging, or changing
 external services.
 
-Release status: the `v0.1.2` source candidate was frozen on 2026-08-20. It has
-not been tagged, pushed, or published to TestPyPI or production PyPI.
+Release status: the `v0.1.2` source candidate was published to TestPyPI on
+2026-08-20, where Shoal acceptance exposed a retrieval-destination persistence
+defect. Production publication was withheld; development resumed as 0.1.3.
 
 ## Scope and contracts
 

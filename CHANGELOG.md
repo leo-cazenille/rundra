@@ -4,6 +4,17 @@ All notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
+### Added
+
+- RunRecord version 5 persists the resolved retrieval destination and an
+  explicit materialized/compact Run kind independently of preparation and
+  parameter-sweep capabilities.
+
+### Fixed
+
+- A later `fetch RUN_ID` now reuses the destination resolved by `submit` unless
+  an explicit fetch destination overrides it.
+
 ## [0.1.2] - 2026-08-20
 
 ### Added

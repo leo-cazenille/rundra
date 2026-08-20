@@ -52,6 +52,7 @@ class RunRecord:
     run: Run
     experiment: ExperimentSpec
     source_root: PurePath
+    retrieval_destination: PurePath | None = None
     experiment_source: PurePath | None = None
     initiator: str | None = None
     git_commit: str | None = None
@@ -81,8 +82,8 @@ class RunRecord:
     def __post_init__(self) -> None:
         if type(self.format_version) is not int:
             raise TypeError("RunRecord format_version must be an integer")
-        if self.format_version not in {1, 2, 3, 4}:
-            raise ValueError("RunRecord format_version must be 1, 2, 3, or 4")
+        if self.format_version not in {1, 2, 3, 4, 5}:
+            raise ValueError("RunRecord format_version must be 1, 2, 3, 4, or 5")
         if type(self.framework_version) is not str:
             raise TypeError("RunRecord framework_version must be a string")
         if not self.framework_version.strip():
@@ -90,6 +91,9 @@ class RunRecord:
         if self.format_version == 4:
             if type(self.run) is not CompactRun:
                 raise TypeError("RunRecord v4 run must be a CompactRun")
+        elif self.format_version == 5:
+            if type(self.run) not in {Run, CompactRun}:
+                raise TypeError("RunRecord v5 run must be materialized or compact")
         elif type(self.run) is not Run:
             raise TypeError("RunRecord v1-v3 run must be a Run")
         if type(self.experiment) is not ExperimentSpec:
@@ -104,20 +108,31 @@ class RunRecord:
             task.parameter_set is None for task in self.run.tasks
         ):
             raise ValueError("RunRecord v3 requires parameterized Tasks")
-        if self.format_version == 4:
+        if self.format_version == 5:
+            if (
+                not isinstance(self.retrieval_destination, PurePath)
+                or not self.retrieval_destination.is_absolute()
+                or "\x00" in str(self.retrieval_destination)
+            ):
+                raise ValueError(
+                    "RunRecord v5 retrieval_destination must be an absolute safe path"
+                )
+        elif self.retrieval_destination is not None:
+            raise ValueError("RunRecord v1-v4 cannot contain a retrieval destination")
+        if self.is_compact:
             if type(self.task_space) is not TaskSpace:
-                raise TypeError("RunRecord v4 requires a TaskSpace")
+                raise TypeError("Compact RunRecord requires a TaskSpace")
             if self.execution_strategy not in {"multi-array", "worker-pool"}:
-                raise ValueError("RunRecord v4 execution_strategy is unsupported")
+                raise ValueError("Compact RunRecord execution_strategy is unsupported")
             if self.retrieval_policy not in {"all", "manifest", "none"}:
-                raise ValueError("RunRecord v4 retrieval_policy is unsupported")
+                raise ValueError("Compact RunRecord retrieval_policy is unsupported")
             if (
                 not isinstance(self.task_state_store, PurePath)
                 or self.task_state_store.is_absolute()
                 or self.task_state_store.name != str(self.task_state_store)
             ):
                 raise ValueError(
-                    "RunRecord v4 task_state_store must be one relative filename"
+                    "Compact RunRecord task_state_store must be one relative filename"
                 )
         elif any(
             value is not None
@@ -128,7 +143,7 @@ class RunRecord:
                 self.task_state_store,
             )
         ):
-            raise ValueError("RunRecord v1-v3 cannot contain v4 scaling fields")
+            raise ValueError("Materialized RunRecord cannot contain compact fields")
         if self.preparation is not None:
             if self.container_digest != self.preparation.image_sha256:
                 raise ValueError(
@@ -204,8 +219,10 @@ class RunRecord:
                 "RunRecord task_array_mapping must contain ArrayTaskMappings"
             )
         if task_array_mapping:
-            if self.format_version == 4:
-                raise ValueError("RunRecord v4 cannot materialize an array mapping")
+            if self.is_compact:
+                raise ValueError(
+                    "Compact RunRecord cannot materialize an array mapping"
+                )
             if self.run.target.scheduler.kind not in {"pbs", "slurm"}:
                 raise ValueError(
                     "RunRecord task_array_mapping requires a Slurm target or PBS target"
@@ -315,10 +332,18 @@ class RunRecord:
             raise ValueError("RunRecord artifacts contain an unknown TaskId")
         object.__setattr__(self, "artifacts", artifacts)
 
+    @property
+    def is_compact(self) -> bool:
+        return type(self.run) is CompactRun
+
+    @property
+    def run_kind(self) -> str:
+        return "compact" if self.is_compact else "materialized"
+
     def _known_task_id(self, task_id: TaskId | None, task_ids: set[TaskId]) -> bool:
         if task_id is None:
             return True
-        if self.format_version != 4:
+        if not self.is_compact:
             return task_id in task_ids
         assert self.task_space is not None
         return int(task_id.value.removeprefix("task_")) < self.task_space.task_count

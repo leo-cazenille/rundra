@@ -19,6 +19,7 @@ Every RunRecord stores:
 - the normalized experiment, exact effective configuration text, and explicit
   seed for every Task;
 - the target stack, workspace root, source root, and experiment source path;
+- for version 5, the absolute retrieval destination resolved before staging;
 - portable resources and explicit backend-native resources;
 - portable execution/retrieval states and available native scheduler states;
 - scheduler Run/Task identities, array mapping, exits, nodes, scalar metadata,

@@ -1727,6 +1727,11 @@ rundr fetch <run-id> --destination retrieved --task 17 --task 18
 
 Retrieves configured/requested outputs and relevant metadata.
 
+RunRecord version 5 persists the absolute retrieval destination resolved before
+staging. A later `fetch` without `--destination` reuses that exact path;
+an explicit fetch destination overrides it. Implementations must not silently
+derive a different path for a version-5 Run.
+
 The destination must be deterministic or explicitly reported.
 
 Fetching should be idempotent where practical.

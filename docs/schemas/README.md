@@ -42,6 +42,7 @@ instead. Use the fields, not object-key order or human output, as the interface.
 | operation failure | [`error-v1.json`](error-v1.json) | structured `error` |
 | CLI usage failure | [`cli-usage-error-v1.json`](cli-usage-error-v1.json) | `CLI_USAGE_ERROR` |
 | persisted state | [`run-record-v1.json`](run-record-v1.json) | one complete unprepared RunRecord |
+| current persisted state | [`run-record-v5.json`](run-record-v5.json) | canonical Run kind and retrieval intent |
 
 Project-managed preparation uses format version 2. Version-2 plans and
 RunRecords add preparation source, image, build, cache, output-hash, and log
@@ -74,6 +75,12 @@ RunRecords identify the sparse SQLite task-state sidecar and record execution
 and retrieval strategies. The `tasks` operation returns at most 1,000
 individually identified states per request. Older documents do not gain
 version-4 fields.
+
+RunRecord version 5 is the canonical durable shape for all newly created Runs.
+It adds an explicit `run_kind`, mandatory absolute `retrieval_destination`,
+nullable preparation, and nullable compact-state fields. Materialized tasks
+always include a nullable `parameter_set`. This decouples durable schema
+evolution from plan, preparation, sweep, and compact-execution versions.
 
 Accepted Slurm worker-pool Runs at or above 1,000 Tasks now use this durable v4
 form automatically. The Run store permits only a validated one-way conversion:
