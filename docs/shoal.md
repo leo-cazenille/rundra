@@ -54,6 +54,7 @@ files. The target name defaults to `shoal` and can be overridden when needed:
 | three-element CPU array | `--run-shoal-array-test` | yes |
 | disconnected lifecycle and cancellation | `--run-shoal-lifecycle-test` | three bounded CPU jobs |
 | three-seed Pogosim array | `--run-shoal-pogosim-test` | yes |
+| two-node Python multiprocessing | `--run-shoal-multiprocessing-test` | yes |
 
 Passing only a resource-specific switch is insufficient; the general switch is
 always required. Run one bounded module at a time and inspect its plan/preflight
@@ -507,6 +508,33 @@ the mean MSD values were 402,824 and 34,472 respectively, with a paired mean
 ballistic/long-tumble ratio of 11.94. These results confirm the expected strong
 separation between mostly ballistic and long-tumble motion while exercising
 the complete large-scale submit, schedule, retrieve, and analysis path.
+
+## Python multiprocessing acceptance
+
+The checked [Python multiprocessing example](../examples/python-multiprocessing/README.md)
+uses four standard-library child processes per logical Task. Its gated Shoal
+test submits 20 Tasks through two workers with ten slots each. Every slot
+requests four CPUs, so each worker requests all 40 CPUs on one node and the
+test requires exactly two distinct hosts from `shoal1` through `shoal8`.
+
+The test injects `RUNDRA_SHOAL_CPU_IMAGE`, copies the configured target, and
+lowers only the temporary activation threshold. It verifies the pure plan,
+all numerical results and process evidence, retrieval, and persisted allocated
+nodes. Run it only when reserving two complete nodes is acceptable:
+
+```bash
+RUNDRA_SHOAL_TARGETS_FILE=~/.config/rundra/targets.yaml \
+RUNDRA_SHOAL_CPU_IMAGE=/absolute/path/to/python-capable-cpu-image.sif \
+  uv run pytest tests/system/test_shoal_multiprocessing.py \
+    -m 'shoal_system and shoal_multiprocessing' \
+    --run-shoal-system-tests \
+    --run-shoal-multiprocessing-test \
+    -vv
+```
+
+The test process and analysis run on bigfish. `fishvision` remains limited to
+SSH, staging, retrieval, and Slurm control operations; all Python computation
+runs inside the two Slurm allocations.
 
 ## Production PyPI package acceptance
 

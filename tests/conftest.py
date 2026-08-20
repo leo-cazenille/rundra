@@ -64,6 +64,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="enable explicit 1x8, 2x20, and 8x40 Shoal scaling tests",
     )
+    parser.addoption(
+        "--run-shoal-multiprocessing-test",
+        action="store_true",
+        default=False,
+        help="enable the two-node Shoal Python multiprocessing test",
+    )
 
 
 def pytest_collection_modifyitems(
@@ -80,6 +86,7 @@ def pytest_collection_modifyitems(
     run_lifecycle = bool(config.getoption("--run-shoal-lifecycle-test"))
     run_pogosim = bool(config.getoption("--run-shoal-pogosim-test"))
     run_scaling = bool(config.getoption("--run-shoal-scaling-tests"))
+    run_multiprocessing = bool(config.getoption("--run-shoal-multiprocessing-test"))
     skip_system = pytest.mark.skip(
         reason="requires the explicit --run-shoal-system-tests opt-in"
     )
@@ -110,6 +117,9 @@ def pytest_collection_modifyitems(
     skip_scaling = pytest.mark.skip(
         reason="requires both Shoal system and explicit scaling opt-ins"
     )
+    skip_multiprocessing = pytest.mark.skip(
+        reason="requires both Shoal system and multiprocessing opt-ins"
+    )
     for item in items:
         if "docker_pbs" in item.keywords and not run_docker_pbs:
             item.add_marker(skip_docker_pbs)
@@ -117,6 +127,10 @@ def pytest_collection_modifyitems(
             item.add_marker(skip_docker_slurm)
         elif "shoal_scaling" in item.keywords and not (run_system and run_scaling):
             item.add_marker(skip_scaling)
+        elif "shoal_multiprocessing" in item.keywords and not (
+            run_system and run_multiprocessing
+        ):
+            item.add_marker(skip_multiprocessing)
         elif "shoal_pogosim" in item.keywords and not (run_system and run_pogosim):
             item.add_marker(skip_pogosim)
         elif "shoal_lifecycle" in item.keywords and not (run_system and run_lifecycle):
