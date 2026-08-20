@@ -1,0 +1,16 @@
+version: 1
+default_profile: local
+
+defaults:
+  config: config.json
+  source_root: .
+
+profiles:
+  local:
+    target: local
+    destination: retrieved/local
+  shoal:
+    target: shoal
+    destination: retrieved/shoal
+    workers: 2
+    task_slots_per_worker: 10

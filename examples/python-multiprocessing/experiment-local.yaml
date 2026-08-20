@@ -1,0 +1,21 @@
+version: 1
+
+experiment:
+  name: python-multiprocessing-local
+
+command:
+  argv: [python3, main.py, --config, "{config}", --seed, "{seed}"]
+
+resources:
+  nodes: 1
+  tasks: 1
+  cpus_per_task: 4
+  gpus_per_task: 0
+  memory: 256MiB
+  walltime: "00:05:00"
+
+outputs:
+  include: [results/**]
+
+sync:
+  exclude: [retrieved/, derived/]
