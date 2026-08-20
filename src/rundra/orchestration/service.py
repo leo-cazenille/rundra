@@ -465,6 +465,7 @@ class RunExecutionRequest:
     requested_workers: int | None = None
     requested_task_slots_per_worker: int | None = None
     compact_plan: ExecutionPlan | None = None
+    compact_configs: tuple[ExpandedConfig, ...] = ()
 
     def __post_init__(self) -> None:
         if type(self.plan) is not ExecutionPlan:
@@ -531,14 +532,28 @@ class RunExecutionRequest:
         if self.compact_plan is not None:
             if type(self.compact_plan) is not ExecutionPlan:
                 raise TypeError("compact_plan must be an ExecutionPlan or None")
+            direct = self.plan == self.compact_plan
             if (
                 self.compact_plan.task_space is None
-                or self.compact_plan.task_space.task_count != len(self.plan.units)
                 or self.compact_plan.strategy != "worker-pool"
             ):
+                raise ValueError("compact_plan must describe a worker-pool TaskSpace")
+            if not direct and self.compact_plan.task_space.task_count != len(
+                self.plan.units
+            ):
+                raise ValueError("compact_plan must describe every materialized Task")
+            if direct and len(self.compact_configs) != (
+                self.compact_plan.task_space.parameter_set_count
+            ):
                 raise ValueError(
-                    "compact_plan must describe every materialized worker-pool Task"
+                    "direct compact execution requires every parameter config"
                 )
+        if not isinstance(self.compact_configs, tuple) or any(
+            type(config) is not ExpandedConfig for config in self.compact_configs
+        ):
+            raise TypeError("compact_configs must contain ExpandedConfigs")
+        if self.compact_plan is None and self.compact_configs:
+            raise ValueError("compact_configs require a compact_plan")
 
 
 @dataclass(frozen=True, slots=True)
@@ -840,6 +855,12 @@ class OrchestrationService:
     ) -> RunExecutionResult:
         self._validate_request(request)
         units = request.plan.units
+        task_total = (
+            request.compact_plan.task_space.task_count
+            if request.compact_plan is not None
+            and request.compact_plan.task_space is not None
+            else len(units)
+        )
         run_id = self._run_id_factory()
         if type(run_id) is not RunId:
             raise TypeError("Run ID factory must return a RunId")
@@ -851,14 +872,20 @@ class OrchestrationService:
                     provenance = captured
             except Exception:
                 provenance = GitProvenance()
+        direct_compact = _is_direct_compact_request(request)
+        if direct_compact:
+            assert self._task_store is not None
+            assert request.compact_plan is not None
+            assert request.compact_plan.task_space is not None
+            self._task_store.create(run_id, request.compact_plan.task_space)
         record = self._created_record(request, run_id, provenance)
         self.store.create(record)
         self._report(
             ProgressPhase.STAGE,
             2,
-            f"run={run_id} target={request.plan.target.name} tasks={len(units)} checking capabilities",
+            f"run={run_id} target={request.plan.target.name} tasks={task_total} checking capabilities",
             run_id,
-            len(units),
+            task_total,
         )
 
         try:
@@ -877,7 +904,7 @@ class OrchestrationService:
             2,
             "capabilities verified; staging immutable inputs",
             run_id,
-            len(units),
+            task_total,
         )
 
         updated = _with_execution_state(record, ExecutionState.STAGING)
@@ -935,7 +962,7 @@ class OrchestrationService:
             3,
             f"workspace={workspace.root}",
             run_id,
-            len(units),
+            task_total,
         )
 
         preparation_reference = None
@@ -1369,7 +1396,7 @@ class OrchestrationService:
             task_native_ids is not None
             and len(set(task_native_ids.values())) < len(task_native_ids)
         )
-        if request.compact_plan is not None:
+        if request.compact_plan is not None and record.format_version != 4:
             try:
                 assert self._task_store is not None
                 compact = _compact_record(
@@ -1608,10 +1635,16 @@ class OrchestrationService:
                 "OrchestrationService.execute_one requires a RunExecutionRequest"
             )
         units = request.plan.units
-        if len(units) > 1 and request.plan.strategy not in {
-            SLURM_ARRAY,
-            SCHEDULER_ARRAY,
-        }:
+        direct_compact = _is_direct_compact_request(request)
+        if (
+            len(units) > 1
+            and request.plan.strategy
+            not in {
+                SLURM_ARRAY,
+                SCHEDULER_ARRAY,
+            }
+            and not direct_compact
+        ):
             raise OrchestrationError(
                 code="UNSUPPORTED_TASK_COUNT",
                 message=(
@@ -1629,6 +1662,14 @@ class OrchestrationService:
                 code="PLAN_MISMATCH",
                 message="Execution plan resources do not match the experiment",
             )
+        if direct_compact:
+            assert request.compact_plan is not None
+            if request.compact_plan.experiment_name != request.experiment.name:
+                raise OrchestrationError(
+                    code="PLAN_MISMATCH",
+                    message="Compact plan and experiment names do not match",
+                )
+            return
         if request.plan.version == 3:
             parameter_configs: list[ExpandedConfig] = []
             seen_parameters: set[str] = set()
@@ -1671,6 +1712,41 @@ class OrchestrationService:
         run_id: RunId,
         provenance: GitProvenance,
     ) -> RunRecord:
+        if _is_direct_compact_request(request):
+            assert request.compact_plan is not None
+            assert request.compact_plan.task_space is not None
+            assert request.compact_plan.retrieval_policy is not None
+            assert self._task_store is not None
+            compact_run = CompactRun(
+                id=run_id,
+                experiment_name=request.experiment.name,
+                target=request.plan.target,
+                tasks=(),
+                created_at=self._clock(),
+            )
+            return RunRecord(
+                format_version=4,
+                framework_version=self._framework_version,
+                run=compact_run,
+                experiment=request.experiment,
+                source_root=request.source_root,
+                experiment_source=request.experiment_source,
+                initiator=request.initiator,
+                git_commit=provenance.commit,
+                git_branch=provenance.branch,
+                git_dirty=provenance.dirty,
+                git_diff=provenance.diff,
+                container_digest=(
+                    request.preparation.image_sha256
+                    if request.preparation is not None
+                    else None
+                ),
+                preparation=request.preparation,
+                task_space=request.compact_plan.task_space,
+                execution_strategy=request.compact_plan.strategy,
+                retrieval_policy=request.compact_plan.retrieval_policy,
+                task_state_store=PurePath(self._task_store.path(run_id).name),
+            )
         tasks = tuple(
             Task(
                 id=unit.task_id,
@@ -2414,11 +2490,29 @@ def _compact_container_request(
 def _compact_parameter_units(request: RunExecutionRequest) -> tuple[ExecutionUnit, ...]:
     assert request.compact_plan is not None
     assert request.compact_plan.task_space is not None
+    if request.compact_configs:
+        seed = request.compact_plan.task_space.seeds.start
+        seed_count = request.compact_plan.task_space.seeds.count
+        return tuple(
+            ExecutionUnit(
+                task_id=TaskId.from_ordinal(ordinal * seed_count),
+                seed=seed,
+                config=expanded.config,
+                command=request.experiment.command,
+                resources=request.experiment.resources,
+                parameter_set=expanded.parameter_set,
+            )
+            for ordinal, expanded in enumerate(request.compact_configs)
+        )
     seed_count = request.compact_plan.task_space.seeds.count
     return tuple(
         request.plan.units[ordinal * seed_count]
         for ordinal in range(request.compact_plan.task_space.parameter_set_count)
     )
+
+
+def _is_direct_compact_request(request: RunExecutionRequest) -> bool:
+    return request.compact_plan is not None and request.plan == request.compact_plan
 
 
 def _compact_task_manifest(

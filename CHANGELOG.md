@@ -6,6 +6,9 @@ All notable user-visible changes are recorded here.
 
 ### Added
 
+- Large Slurm worker-pool launches now preserve compact seed ranges, use bounded
+  preview plans, and create version-4 Run records before staging without
+  materializing every logical Task.
 - Compact worker-pool Runs use constant-size scheduler requests, bounded worker
   submissions, ordinal-driven Slurm manifests, and one staged config per
   parameter set instead of per-Task command and configuration expansion.

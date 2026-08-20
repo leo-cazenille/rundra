@@ -3634,8 +3634,11 @@ scheduler IDs, and SQLite sidecar filename. The sidecar transaction persists
 all Task scheduler identities and root IDs before receipt acceptance. `resume`
 can therefore finish an interrupted receipt transition or RunRecord compaction
 without duplicate submission. Initial CLI sweep planning and pre-submission
-RunRecord construction still materialize logical Tasks. Constant-memory launch
-planning, requeue recovery, and remote shard ingestion remain future work.
+For eligible large Slurm worker pools, CLI seed ranges remain compact through
+launch resolution, the scalable plan is used directly, and the version-4
+RunRecord plus Task-state sidecar are created before staging. Controller memory
+therefore depends on parameter-set and worker count rather than logical Task
+count. Requeue recovery and remote shard ingestion remain future work.
 
 Slurm worker lanes append versioned `START` and `FINISH` events before and
 after every logical Task. Reconciliation treats started Tasks as running even

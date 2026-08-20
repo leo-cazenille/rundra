@@ -44,6 +44,7 @@ from rundra.domain.models import (
 from rundra.domain.preparation import PreparationRecord
 from rundra.domain.purge import PurgeOutcome
 from rundra.domain.records import RunRecord
+from rundra.domain.scaling import SeedRange
 from rundra.domain.states import ExecutionState, RetrievalState
 from rundra.orchestration.progress import ProgressEvent
 from rundra.persistence import JsonRunStore, PurgeReceiptStore, record_from_dict
@@ -786,7 +787,7 @@ def test_run_input_resolution_accepts_explicit_inclusive_seed_range(
     )
 
     assert result.ok and result.value is not None
-    assert result.value.seeds == (7, 8, 9)
+    assert result.value.seeds == SeedRange(7, 9)
     assert result.value.seed is None
     assert result.value.launch.values["seeds"] == "7:9"
     assert result.value.launch.sources["seeds"] == "cli"

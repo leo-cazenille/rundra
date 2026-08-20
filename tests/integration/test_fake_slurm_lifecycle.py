@@ -328,11 +328,14 @@ def test_large_worker_pool_persists_and_reconciles_compact_task_state(
     )
     request = _request(tmp_path, seeds=tuple(range(1_000)))
     compact_plan = _compact_plan(request)
+    compact_configs = (ExpandedConfig(request.plan.units[0].config),)
     request = replace(
         request,
+        plan=compact_plan,
         max_concurrent_jobs=2,
         max_workers=2,
         compact_plan=compact_plan,
+        compact_configs=compact_configs,
         worker_resources=compact_plan.worker_resources,
     )
     receipts = SubmissionReceiptStore(tmp_path / "records")

@@ -527,7 +527,7 @@ class PlanValue:
 @dataclass(frozen=True, slots=True)
 class ResolvedRunInputs:
     config: Path
-    seeds: tuple[int, ...]
+    seeds: tuple[int, ...] | SeedRange
     target: str
     targets_file: Path
     source_root: Path
@@ -555,13 +555,17 @@ class ResolvedRunInputs:
         ):
             if not isinstance(getattr(self, name), Path):
                 raise TypeError(f"ResolvedRunInputs {name} must be a Path")
-        if (
+        if type(self.seeds) is SeedRange:
+            pass
+        elif (
             not isinstance(self.seeds, tuple)
             or not self.seeds
             or any(type(seed) is not int for seed in self.seeds)
             or len(set(self.seeds)) != len(self.seeds)
         ):
-            raise TypeError("ResolvedRunInputs seeds must be unique integers")
+            raise TypeError(
+                "ResolvedRunInputs seeds must be a SeedRange or unique integers"
+            )
         if type(self.target) is not str or not self.target:
             raise ValueError("ResolvedRunInputs target must be nonblank")
         if type(self.resolution) is not ResolvedLaunch:
@@ -618,15 +622,15 @@ class ResolvedRunInputs:
                 "task_slots_per_worker",
             ),
         )
-        if len(self.seeds) == 1:
+        if self.seed is not None:
             seed_source = (
                 "config"
-                if self.sweep is not None and self.sweep.seeds == self.seeds
+                if self.sweep is not None and self.sweep.seeds == (self.seed,)
                 else self.resolution.sources.get("seed", "generated")
             )
             return LaunchResolutionValue(
                 base.profile,
-                {**base.values, "seed": self.seeds[0]},
+                {**base.values, "seed": self.seed},
                 {
                     **base.sources,
                     "seed": seed_source,
@@ -637,16 +641,27 @@ class ResolvedRunInputs:
             if self.sweep is not None and self.sweep.seeds == self.seeds
             else "cli"
         )
+        first = self.seeds.start if isinstance(self.seeds, SeedRange) else self.seeds[0]
+        last = self.seeds.stop if isinstance(self.seeds, SeedRange) else self.seeds[-1]
         return LaunchResolutionValue(
             base.profile,
-            {**base.values, "seeds": f"{self.seeds[0]}:{self.seeds[-1]}"},
+            {**base.values, "seeds": f"{first}:{last}"},
             {**base.sources, "seeds": seeds_source},
         )
 
     @property
     def seed(self) -> int | None:
         """Return the single seed when this is not a replicated launch."""
+        if isinstance(self.seeds, SeedRange):
+            return self.seeds.start if self.seeds.count == 1 else None
         return self.seeds[0] if len(self.seeds) == 1 else None
+
+    @property
+    def seed_count(self) -> int:
+        """Return the number of resolved seeds without expanding a range."""
+        return (
+            self.seeds.count if isinstance(self.seeds, SeedRange) else len(self.seeds)
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1194,7 +1209,9 @@ def resolve_run_inputs_operation(
     if type(random_seed) is not bool:
         raise TypeError("random_seed must be a boolean")
     try:
-        explicit_seeds = expand_seeds(seeds=seeds) if seeds is not None else None
+        explicit_seeds: tuple[int, ...] | SeedRange | None = (
+            compact_seed_range(seeds=seeds) if seeds is not None else None
+        )
         cli_values = LaunchValues(
             config=config,
             seed=seed,
@@ -1533,8 +1550,9 @@ def run_operation(
         experiment = load_experiment(experiment_source)
         expansion = sweep or load_sweep_config(config_source)
         config = expansion.configs[0].config
-        seed_values = _execution_seed_values(seed=seed, seeds=seeds)
-        task_total = len(seed_values) * len(expansion.configs)
+        task_total = _execution_seed_count(seed=seed, seeds=seeds) * len(
+            expansion.configs
+        )
         targets_config = load_targets_config(targets_source)
         targets = targets_config.targets
         if target_name not in targets:
@@ -1677,29 +1695,12 @@ def run_operation(
                 "not configured",
                 task_total=task_total,
             )
-        plan = (
-            create_sweep_plan(
-                effective_experiment,
-                expansion.configs,
-                target,
-                seeds=seed_values,
-                preparation=preparation,
-            )
-            if expansion.is_sweep
-            else create_plan(
-                effective_experiment,
-                config,
-                target,
-                seeds=seed_values,
-                preparation=preparation,
-            )
-        )
         scaling_plan = (
             _create_effective_scaling_plan(
                 effective_experiment,
                 expansion.configs,
                 target,
-                _seed_range_from_values(seed_values),
+                _execution_seed_range(seed=seed, seeds=seeds),
                 policy,
                 targets_config.version,
                 preparation=preparation,
@@ -1709,6 +1710,34 @@ def run_operation(
             if policy is not None
             else None
         )
+        direct_compact = (
+            task_store is not None
+            and scaling_plan is not None
+            and scaling_plan.strategy == "worker-pool"
+            and task_total >= _COMPACT_EXECUTION_THRESHOLD
+        )
+        if direct_compact:
+            assert scaling_plan is not None
+            plan = scaling_plan
+        else:
+            seed_values = _execution_seed_values(seed=seed, seeds=seeds)
+            plan = (
+                create_sweep_plan(
+                    effective_experiment,
+                    expansion.configs,
+                    target,
+                    seeds=seed_values,
+                    preparation=preparation,
+                )
+                if expansion.is_sweep
+                else create_plan(
+                    effective_experiment,
+                    config,
+                    target,
+                    seeds=seed_values,
+                    preparation=preparation,
+                )
+            )
         service = OrchestrationService(
             store=store,
             stager=stager,
@@ -1755,17 +1784,11 @@ def run_operation(
                 ),
                 shard_outputs=(
                     target_name in targets_config.execution
-                    and len(plan.units)
+                    and task_total
                     >= targets_config.execution[target_name].output_shard_tasks
                 ),
-                compact_plan=(
-                    scaling_plan
-                    if task_store is not None
-                    and scaling_plan is not None
-                    and scaling_plan.strategy == "worker-pool"
-                    and task_total >= _COMPACT_EXECUTION_THRESHOLD
-                    else None
-                ),
+                compact_plan=(scaling_plan if direct_compact else None),
+                compact_configs=(expansion.configs if direct_compact else ()),
             )
         )
         record = result.record
@@ -1848,8 +1871,9 @@ def submit_operation(
         experiment = load_experiment(experiment_source)
         expansion = sweep or load_sweep_config(config_source)
         config = expansion.configs[0].config
-        seed_values = _execution_seed_values(seed=seed, seeds=seeds)
-        task_total = len(seed_values) * len(expansion.configs)
+        task_total = _execution_seed_count(seed=seed, seeds=seeds) * len(
+            expansion.configs
+        )
         targets_config = load_targets_config(targets_source)
         targets = targets_config.targets
         if target_name not in targets:
@@ -1979,29 +2003,12 @@ def submit_operation(
                 "not configured",
                 task_total=task_total,
             )
-        plan = (
-            create_sweep_plan(
-                effective_experiment,
-                expansion.configs,
-                target,
-                seeds=seed_values,
-                preparation=preparation,
-            )
-            if expansion.is_sweep
-            else create_plan(
-                effective_experiment,
-                config,
-                target,
-                seeds=seed_values,
-                preparation=preparation,
-            )
-        )
         scaling_plan = (
             _create_effective_scaling_plan(
                 effective_experiment,
                 expansion.configs,
                 target,
-                _seed_range_from_values(seed_values),
+                _execution_seed_range(seed=seed, seeds=seeds),
                 policy,
                 targets_config.version,
                 preparation=preparation,
@@ -2011,6 +2018,34 @@ def submit_operation(
             if policy is not None
             else None
         )
+        direct_compact = (
+            task_store is not None
+            and scaling_plan is not None
+            and scaling_plan.strategy == "worker-pool"
+            and task_total >= _COMPACT_EXECUTION_THRESHOLD
+        )
+        if direct_compact:
+            assert scaling_plan is not None
+            plan = scaling_plan
+        else:
+            seed_values = _execution_seed_values(seed=seed, seeds=seeds)
+            plan = (
+                create_sweep_plan(
+                    effective_experiment,
+                    expansion.configs,
+                    target,
+                    seeds=seed_values,
+                    preparation=preparation,
+                )
+                if expansion.is_sweep
+                else create_plan(
+                    effective_experiment,
+                    config,
+                    target,
+                    seeds=seed_values,
+                    preparation=preparation,
+                )
+            )
         service = OrchestrationService(
             store=store,
             stager=stager,
@@ -2058,17 +2093,11 @@ def submit_operation(
                 ),
                 shard_outputs=(
                     target_name in targets_config.execution
-                    and len(plan.units)
+                    and task_total
                     >= targets_config.execution[target_name].output_shard_tasks
                 ),
-                compact_plan=(
-                    scaling_plan
-                    if task_store is not None
-                    and scaling_plan is not None
-                    and scaling_plan.strategy == "worker-pool"
-                    and task_total >= _COMPACT_EXECUTION_THRESHOLD
-                    else None
-                ),
+                compact_plan=(scaling_plan if direct_compact else None),
+                compact_configs=(expansion.configs if direct_compact else ()),
             )
         )
         _report_progress(
@@ -3650,6 +3679,8 @@ def _launch_resolution_value(
 
 
 def _execution_seed_values(*, seed: object, seeds: object) -> tuple[int, ...]:
+    if type(seeds) is SeedRange:
+        return tuple(seeds.at(ordinal) for ordinal in range(seeds.count))
     if isinstance(seeds, tuple):
         if seed is not None:
             raise PlanningError(
@@ -3663,6 +3694,42 @@ def _execution_seed_values(*, seed: object, seeds: object) -> tuple[int, ...]:
             )
         return seeds
     return expand_seeds(seed=seed, seeds=seeds)
+
+
+def _execution_seed_range(*, seed: object, seeds: object) -> SeedRange:
+    if type(seeds) is SeedRange:
+        if seed is not None:
+            raise PlanningError(
+                code="SEED_CONFLICT", message="seed and seeds are mutually exclusive"
+            )
+        return seeds
+    if isinstance(seeds, tuple):
+        if seed is not None:
+            raise PlanningError(
+                code="SEED_CONFLICT", message="seed and seeds are mutually exclusive"
+            )
+        return _seed_range_from_values(seeds)
+    return compact_seed_range(seed=seed, seeds=seeds)
+
+
+def _execution_seed_count(*, seed: object, seeds: object) -> int:
+    if type(seeds) is SeedRange:
+        if seed is not None:
+            raise PlanningError(
+                code="SEED_CONFLICT", message="seed and seeds are mutually exclusive"
+            )
+        return seeds.count
+    if isinstance(seeds, tuple):
+        if seed is not None:
+            raise PlanningError(
+                code="SEED_CONFLICT", message="seed and seeds are mutually exclusive"
+            )
+        if not seeds:
+            raise PlanningError(
+                code="SEED_REQUIRED", message="Provide one seed or range"
+            )
+        return len(seeds)
+    return compact_seed_range(seed=seed, seeds=seeds).count
 
 
 def _unsupported_execution_target(

@@ -78,6 +78,13 @@ targets:
         "_execution_adapters",
         lambda _: (object(), object(), object(), object()),
     )
+    monkeypatch.setattr(
+        operations,
+        "expand_seeds",
+        lambda **_: (_ for _ in ()).throw(
+            AssertionError("large worker-pool launch expanded its seed range")
+        ),
+    )
 
     with pytest.raises(RuntimeError, match="captured"):
         operations.submit_operation(
@@ -106,3 +113,6 @@ targets:
     assert request.compact_plan is not None
     assert request.compact_plan.task_space is not None
     assert request.compact_plan.task_space.task_count == 1_000
+    assert request.plan is request.compact_plan
+    assert len(request.plan.units) == 10
+    assert len(request.compact_configs) == 1
