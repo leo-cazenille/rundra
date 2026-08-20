@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from rundra.cli.agent_guide import GUIDE, agent_guide_operation
+from rundra.cli.agent_guide import GUIDE, GUIDE_TOPICS, agent_guide_operation
 
 
 def test_agent_guide_print_write_update_and_check(tmp_path: Path) -> None:
@@ -23,6 +23,19 @@ def test_agent_guide_print_write_update_and_check(tmp_path: Path) -> None:
     assert "transcript tokens" in printed.value.content
     assert written.ok and updated.ok and checked.ok
     assert path.read_text(encoding="utf-8").count("rundra-agent:start") == 1
+
+
+def test_agent_guide_exposes_bounded_topics() -> None:
+    topics = agent_guide_operation(list_topics=True)
+    large = agent_guide_operation(topic="large-runs")
+    unknown = agent_guide_operation(topic="missing")
+
+    assert topics.ok and topics.value is not None
+    assert all(name in topics.value.content for name in GUIDE_TOPICS)
+    assert large.ok and large.value is not None
+    assert "worker-pool" in large.value.content
+    assert unknown.error is not None
+    assert unknown.error.code == "UNKNOWN_GUIDE_TOPIC"
 
 
 def test_agent_guide_check_reports_drift_and_rejects_bad_markers(

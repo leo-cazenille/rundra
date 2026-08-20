@@ -10,6 +10,16 @@ from rundra.results import OperationError, OperationResult
 START_MARKER = "<!-- rundra-agent:start -->"
 END_MARKER = "<!-- rundra-agent:end -->"
 
+GUIDE_TOPICS = {
+    "setup": "Run doctor --agent codex --json first. Grant only reported paths and network access, restart the agent sandbox when required, then rerun doctor until ready is true.",
+    "launch": "Validate and plan before submit. Use explicit seeds, review task count/resources/concurrency, retain the returned Run ID and data directory, and submit only once.",
+    "large-runs": "Use worker-pool execution within target policy, paginated list/tasks JSON, bounded wait calls without progress, archive retrieval, and an exact confirm-tasks value after plan review.",
+    "lifecycle": "Use submit, bounded wait, status/tasks, fetch, then purge. Agents should use explicit Run IDs rather than --last and may use wait --notify-file for one atomic completion signal.",
+    "results": "Prefer fetch auto. Keep compact verified shards unless individual files are required; Python analysis can use rundra.artifacts.open_result_shard. Keep derived outputs separate.",
+    "preparation": "Pin acquired images. Definition projects v4 declare an explicit context include list; Rundra hashes only that context plus the definition for image-cache identity.",
+    "recovery": "After interrupted submit, resume the same Run ID. If outcome remains unknown, inspect the scheduler read-only and use resolve-submission only after proving that no job exists.",
+}
+
 GUIDE = f"""{START_MARKER}
 ## Rundra experiment execution
 
@@ -31,6 +41,8 @@ GUIDE = f"""{START_MARKER}
   the exact requested `--confirm-tasks N` value only after reviewing the plan.
 - Use `rundr help` to discover available operations and the common workflow.
   Use `rundr help COMMAND` for command-specific arguments and options.
+- Use `rundr agent-guide --list-topics` and `rundr agent-guide --topic TOPIC`
+  for bounded workflow-specific guidance instead of rereading this full guide.
 - See https://pypi.org/project/rundra/ for installation and overview
   documentation. That page describes the latest release; `rundr version` and
   the installed `rundr help` output are authoritative for the local version.
@@ -84,12 +96,42 @@ class AgentGuideValue:
 
 
 def agent_guide_operation(
-    *, write: Path | None = None, check: Path | None = None
+    *,
+    write: Path | None = None,
+    check: Path | None = None,
+    topic: str | None = None,
+    list_topics: bool = False,
 ) -> OperationResult[AgentGuideValue]:
-    if write is not None and check is not None:
+    selected = sum(
+        value
+        for value in (
+            write is not None,
+            check is not None,
+            topic is not None,
+            list_topics,
+        )
+    )
+    if selected > 1:
         return OperationResult.failure(
             "agent-guide",
-            OperationError("CLI_USAGE_ERROR", "--write and --check are exclusive"),
+            OperationError("CLI_USAGE_ERROR", "agent-guide actions are exclusive"),
+        )
+    if list_topics:
+        content = "\n".join(f"{name}: {GUIDE_TOPICS[name]}" for name in GUIDE_TOPICS)
+        return OperationResult.success(
+            "agent-guide", AgentGuideValue(content + "\n", "topics")
+        )
+    if topic is not None:
+        content = GUIDE_TOPICS.get(topic)
+        if content is None:
+            return OperationResult.failure(
+                "agent-guide",
+                OperationError(
+                    "UNKNOWN_GUIDE_TOPIC", f"Unknown agent-guide topic: {topic}"
+                ),
+            )
+        return OperationResult.success(
+            "agent-guide", AgentGuideValue(content + "\n", "topic")
         )
     if check is not None:
         try:

@@ -18,7 +18,7 @@ from mcp.server.auth.settings import AuthSettings
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import AnyHttpUrl
 
-from rundra.cli.agent_guide import GUIDE
+from rundra.cli.agent_guide import GUIDE, GUIDE_TOPICS
 from rundra.cli.doctor import doctor_operation
 from rundra.cli.operations import (
     cancel_operation,
@@ -141,7 +141,10 @@ def build_server(
         instructions=(
             "Plan before submission. Use explicit seeds and preserve Run IDs. "
             "For long work use submit_experiment, wait_run, then fetch_results. "
-            "Use resume_submission after an interrupted submit and page list_runs."
+            "Use bounded waits without interactive progress, page list_runs and "
+            "list_tasks, retain compact archives for large results, and call "
+            "get_guidance for workflow-specific instructions. Use "
+            "resume_submission after an interrupted submit."
         ),
         token_verifier=token_verifier,
         auth=_STATIC_AUTH_SETTINGS if token_verifier is not None else None,
@@ -213,6 +216,21 @@ def build_server(
     def agent_guide() -> str:
         """Canonical portable instructions for agents using Rundra."""
         return GUIDE
+
+    @server.tool()
+    def get_guidance(topic: str) -> dict[str, Any]:
+        """Return bounded agent instructions for one named workflow topic."""
+        guidance = GUIDE_TOPICS.get(topic)
+        if guidance is None:
+            return {
+                "ok": False,
+                "error": {
+                    "code": "UNKNOWN_GUIDE_TOPIC",
+                    "message": f"Unknown guidance topic: {topic}",
+                    "details": {"topics": list(GUIDE_TOPICS)},
+                },
+            }
+        return {"ok": True, "topic": topic, "guidance": guidance}
 
     @server.tool()
     def validate_experiment(experiment: str) -> dict[str, Any]:

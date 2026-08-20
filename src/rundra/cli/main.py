@@ -7,7 +7,11 @@ from importlib.metadata import version as distribution_version
 from pathlib import Path
 from typing import IO, Any, Never, cast
 
-from rundra.cli.agent_guide import AgentGuideValue, agent_guide_operation
+from rundra.cli.agent_guide import (
+    GUIDE_TOPICS,
+    AgentGuideValue,
+    agent_guide_operation,
+)
 from rundra.cli.capability_doctor import DoctorValue, doctor_operation
 from rundra.cli.operations import (
     LAST_RUN_SELECTOR,
@@ -37,6 +41,7 @@ from rundra.cli.progress import (
     close_progress_reporter,
     create_progress_reporter,
 )
+from rundra.cli.notification import write_wait_notification
 from rundra.cli.render import render_human, render_json
 from rundra.persistence import (
     JsonRunStore,
@@ -220,6 +225,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit one terminal alert when the Run completes",
     )
+    wait.add_argument(
+        "--notify-file",
+        type=Path,
+        metavar="PATH",
+        help="atomically write one terminal JSON notification",
+    )
     _add_feedback_arguments(wait)
     _add_store_option(wait)
     _add_json_option(wait)
@@ -317,6 +328,8 @@ def build_parser() -> argparse.ArgumentParser:
     guide_action = agent_guide.add_mutually_exclusive_group()
     guide_action.add_argument("--write", type=Path, metavar="PATH")
     guide_action.add_argument("--check", type=Path, metavar="PATH")
+    guide_action.add_argument("--topic", choices=tuple(GUIDE_TOPICS))
+    guide_action.add_argument("--list-topics", action="store_true")
     _add_json_option(agent_guide)
 
     help_command = subparsers.add_parser(
@@ -865,7 +878,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             dry_run=arguments.dry_run,
         )
     elif arguments.command == "agent-guide":
-        result = agent_guide_operation(write=arguments.write, check=arguments.check)
+        result = agent_guide_operation(
+            write=arguments.write,
+            check=arguments.check,
+            topic=arguments.topic,
+            list_topics=arguments.list_topics,
+        )
     else:
         raise AssertionError(f"Unhandled CLI command: {arguments.command}")
     close_progress_reporter(progress)
@@ -876,6 +894,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         and isinstance(result.value, WaitValue)
     ):
         _emit_wait_notification(result.value, sys.stderr)
+    if (
+        arguments.command == "wait"
+        and arguments.notify_file is not None
+        and result.ok
+        and isinstance(result.value, WaitValue)
+        and result.value.terminal
+    ):
+        try:
+            write_wait_notification(arguments.notify_file, result.value)
+        except (OSError, ValueError) as error:
+            result = OperationResult.failure(
+                "wait",
+                OperationError(
+                    "NOTIFICATION_FAILED",
+                    str(error),
+                    {"run_id": str(result.value.status.run_id)},
+                ),
+            )
     output = render_json(result) if arguments.json else render_human(result)
     stream = sys.stdout if arguments.json or result.ok else sys.stderr
     print(output, file=stream)
