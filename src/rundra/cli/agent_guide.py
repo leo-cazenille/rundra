@@ -15,7 +15,7 @@ GUIDE_TOPICS = {
     "launch": "Validate and plan before submit. Use explicit seeds, review task count/resources/concurrency, retain the returned Run ID and data directory, and submit only once.",
     "large-runs": "Use worker-pool execution within target policy. Runs with at least 1,000 Tasks automatically use compact durable Task state; inspect individuals with paginated tasks JSON, use bounded wait calls without progress, retain archive retrieval, and pass an exact confirm-tasks value after plan review.",
     "lifecycle": "Use submit, bounded wait, status/tasks, fetch, then purge. Agents should use explicit Run IDs rather than --last and may use wait --notify-file for one atomic completion signal.",
-    "results": "Prefer fetch auto. Keep compact verified shards unless individual files are required; Python analysis can use rundra.artifacts.open_result_shard. Keep derived outputs separate.",
+    "results": "Prefer fetch auto. Compact archive fetch verifies and records exact Task coverage automatically; add --extract only when individual files are required. Python analysis can use rundra.artifacts.open_result_shard directly. Keep derived outputs separate.",
     "preparation": "Pin acquired images. Definition projects v4 declare an explicit context include list; Rundra hashes only that context plus the definition for image-cache identity.",
     "recovery": "After interrupted submit, resume the same Run ID. If outcome remains unknown, inspect the scheduler read-only and use resolve-submission only after proving that no job exists.",
 }

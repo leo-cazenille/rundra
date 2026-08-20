@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType
@@ -104,6 +104,11 @@ class SqliteTaskStore:
                     CREATE TABLE IF NOT EXISTS submission_job (
                         position INTEGER PRIMARY KEY,
                         native_id TEXT NOT NULL UNIQUE
+                    );
+                    CREATE TABLE IF NOT EXISTS result_shard (
+                        ordinal INTEGER PRIMARY KEY,
+                        shard_name TEXT NOT NULL,
+                        exit_code INTEGER NOT NULL
                     );
                     """
                 )
@@ -437,6 +442,186 @@ class SqliteTaskStore:
                 f"Could not update compact retrieval for Run {run_id}: {error}"
             ) from error
 
+    def prepare_all_retrieval(self, run_id: RunId) -> int:
+        """Mark every non-retrieved compact Task pending without expanding it."""
+
+        try:
+            with self._open_existing(run_id) as connection:
+                current_values = tuple(
+                    RetrievalState(row[0])
+                    for row in connection.execute(
+                        "SELECT DISTINCT retrieval_state FROM task_state "
+                        "WHERE retrieval_state != ?",
+                        (RetrievalState.SUCCEEDED.value,),
+                    )
+                )
+                for current in current_values:
+                    validate_retrieval_transition(current, RetrievalState.PENDING)
+                connection.execute("BEGIN IMMEDIATE")
+                cursor = connection.execute(
+                    "UPDATE task_state SET retrieval_state = ? "
+                    "WHERE retrieval_state != ?",
+                    (
+                        RetrievalState.PENDING.value,
+                        RetrievalState.SUCCEEDED.value,
+                    ),
+                )
+                return cursor.rowcount
+        except (sqlite3.Error, ValueError) as error:
+            raise RunStoreError(
+                f"Could not prepare compact retrieval for Run {run_id}: {error}"
+            ) from error
+
+    def fail_pending_retrieval(self, run_id: RunId) -> int:
+        """Fail only compact Tasks left pending by an unsuccessful ingestion."""
+
+        try:
+            with self._open_existing(run_id) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                cursor = connection.execute(
+                    "UPDATE task_state SET retrieval_state = ? "
+                    "WHERE retrieval_state = ?",
+                    (RetrievalState.FAILED.value, RetrievalState.PENDING.value),
+                )
+                return cursor.rowcount
+        except sqlite3.Error as error:
+            raise RunStoreError(
+                f"Could not fail compact retrieval for Run {run_id}: {error}"
+            ) from error
+
+    def ingest_result_shards(
+        self,
+        run_id: RunId,
+        shards: Iterable[tuple[str, Mapping[TaskId, int]]],
+        *,
+        selected: Sequence[TaskId] | None = None,
+    ) -> int:
+        """Atomically validate shard coverage and mark proven Tasks retrieved."""
+
+        if not isinstance(shards, Iterable):
+            raise TypeError("Result shard ingestion requires an iterable")
+        requested = None if selected is None else tuple(selected)
+        if requested is not None and (
+            not requested
+            or any(type(task_id) is not TaskId for task_id in requested)
+            or len(set(requested)) != len(requested)
+        ):
+            raise ValueError("Selected shard Tasks must be nonempty and unique")
+        task_space = self.task_space(run_id)
+        requested_ordinals = (
+            None
+            if requested is None
+            else {
+                self._task_ordinal(task_id, task_space.task_count)
+                for task_id in requested
+            }
+        )
+        try:
+            with self._open_existing(run_id) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute(
+                    "CREATE TABLE IF NOT EXISTS result_shard ("
+                    "ordinal INTEGER PRIMARY KEY, "
+                    "shard_name TEXT NOT NULL, exit_code INTEGER NOT NULL)"
+                )
+                for shard_name, task_exit_codes in shards:
+                    if (
+                        type(shard_name) is not str
+                        or not shard_name
+                        or "/" in shard_name
+                        or "\\" in shard_name
+                        or "\x00" in shard_name
+                        or not isinstance(task_exit_codes, Mapping)
+                    ):
+                        raise RunStoreError("Result shard identity is invalid")
+                    for task_id, exit_code in task_exit_codes.items():
+                        if type(task_id) is not TaskId or type(exit_code) is not int:
+                            raise RunStoreError("Result shard Task outcome is invalid")
+                        ordinal = self._task_ordinal(task_id, task_space.task_count)
+                        if (
+                            requested_ordinals is not None
+                            and ordinal not in requested_ordinals
+                        ):
+                            continue
+                        row = connection.execute(
+                            "SELECT execution_state, retrieval_state, exit_code "
+                            "FROM task_state WHERE ordinal = ?",
+                            (ordinal,),
+                        ).fetchone()
+                        if row is None:
+                            raise RunStoreError(
+                                f"Result shard Task {task_id} has no durable state"
+                            )
+                        execution = ExecutionState(cast(str, row[0]))
+                        retrieval = RetrievalState(cast(str, row[1]))
+                        durable_exit = cast(int | None, row[2])
+                        if (
+                            execution
+                            not in {ExecutionState.SUCCEEDED, ExecutionState.FAILED}
+                            or durable_exit != exit_code
+                        ):
+                            raise RunStoreError(
+                                f"Result shard outcome disagrees with Task {task_id}"
+                            )
+                        existing = connection.execute(
+                            "SELECT shard_name, exit_code FROM result_shard "
+                            "WHERE ordinal = ?",
+                            (ordinal,),
+                        ).fetchone()
+                        if existing is not None and existing != (
+                            shard_name,
+                            exit_code,
+                        ):
+                            raise RunStoreError(
+                                f"Result shard Task {task_id} has duplicate coverage"
+                            )
+                        validate_retrieval_transition(
+                            retrieval, RetrievalState.SUCCEEDED
+                        )
+                        connection.execute(
+                            "INSERT OR IGNORE INTO result_shard VALUES (?, ?, ?)",
+                            (ordinal, shard_name, exit_code),
+                        )
+                        connection.execute(
+                            "UPDATE task_state SET retrieval_state = ? "
+                            "WHERE ordinal = ?",
+                            (RetrievalState.SUCCEEDED.value, ordinal),
+                        )
+                if requested_ordinals is None:
+                    covered = cast(
+                        int,
+                        connection.execute(
+                            "SELECT COUNT(*) FROM result_shard"
+                        ).fetchone()[0],
+                    )
+                    expected = task_space.task_count
+                else:
+                    connection.execute(
+                        "CREATE TEMP TABLE requested_ordinal ("
+                        "ordinal INTEGER PRIMARY KEY)"
+                    )
+                    connection.executemany(
+                        "INSERT INTO requested_ordinal VALUES (?)",
+                        ((ordinal,) for ordinal in requested_ordinals),
+                    )
+                    covered = cast(
+                        int,
+                        connection.execute(
+                            "SELECT COUNT(*) FROM result_shard "
+                            "INNER JOIN requested_ordinal USING (ordinal)"
+                        ).fetchone()[0],
+                    )
+                    expected = len(requested_ordinals)
+                if covered != expected:
+                    raise RunStoreError(
+                        f"Result shards cover {covered} of {expected} requested Tasks"
+                    )
+                return covered
+        except (sqlite3.Error, ValueError) as error:
+            raise RunStoreError(
+                f"Could not ingest result shards for Run {run_id}: {error}"
+            ) from error
+
     def set_retrieval(
         self,
         run_id: RunId,
@@ -526,6 +711,16 @@ class SqliteTaskStore:
             raise RunStoreError(
                 f"Task state row {coordinate.ordinal} is invalid: {error}"
             ) from error
+
+    @staticmethod
+    def _task_ordinal(task_id: TaskId, task_count: int) -> int:
+        try:
+            ordinal = int(task_id.value.removeprefix("task_"))
+        except ValueError as error:
+            raise RunStoreError(f"Invalid compact Task identity: {task_id}") from error
+        if not 0 <= ordinal < task_count or TaskId.from_ordinal(ordinal) != task_id:
+            raise RunStoreError(f"Compact Task is outside its TaskSpace: {task_id}")
+        return ordinal
 
     @staticmethod
     def _validate_identity(run_id: RunId, task_space: TaskSpace) -> None:

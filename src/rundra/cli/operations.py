@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import hashlib
 import secrets
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from importlib.metadata import version
@@ -107,7 +106,10 @@ from rundra.orchestration.service import (
     RunExecutionRequest,
     SchedulerLifecycleService,
 )
-from rundra.orchestration.shards import extract_shard, read_shard_index
+from rundra.orchestration.shards import (
+    extract_shard,
+    read_verified_shard_index,
+)
 from rundra.persistence import (
     PurgeReceiptStore,
     RunNotFoundError,
@@ -3023,7 +3025,8 @@ def _fetch_operation_locked(
                 {"run_id": str(record.run.id), "state": record.run.state.value},
             ),
         )
-    selected = _selected_task_ids(record, tasks)
+    compact_all = record.format_version == 4 and sharded and tasks is None
+    selected = () if compact_all else _selected_task_ids(record, tasks)
     if isinstance(selected, OperationError):
         return OperationResult.failure("fetch", selected)
     if record.format_version == 4 and task_store is None:
@@ -3034,6 +3037,20 @@ def _fetch_operation_locked(
                 f"Run {record.run.id} requires its compact Task state",
                 {"run_id": str(record.run.id)},
             ),
+        )
+    if record.format_version == 4 and sharded:
+        assert task_store is not None
+        return _fetch_compact_shards_locked(
+            record,
+            store,
+            destination,
+            selected=selected,
+            select_all=compact_all,
+            stager=stager,
+            mode=effective_mode,
+            extract=extract,
+            progress=progress,
+            task_store=task_store,
         )
     try:
         retrieval_states = _task_retrieval_states(record, task_store)
@@ -3203,6 +3220,176 @@ def _fetch_operation_locked(
             format_version=record.format_version,
         ),
     )
+
+
+def _fetch_compact_shards_locked(
+    record: RunRecord,
+    store: RunStore,
+    destination: Path,
+    *,
+    selected: tuple[TaskId, ...],
+    select_all: bool,
+    stager: Stager | None,
+    mode: str,
+    extract: bool,
+    progress: ProgressObserver | None,
+    task_store: SqliteTaskStore,
+) -> OperationResult[FetchValue]:
+    assert record.task_space is not None
+    task_total = record.task_space.task_count if select_all else len(selected)
+    counts = task_store.counts(record.run.id)
+    transitioning: tuple[TaskId, ...] = ()
+    if select_all:
+        transition_count = task_total - counts.retrieval[RetrievalState.SUCCEEDED]
+    else:
+        states = tuple(
+            task_store.get(record.run.id, int(task_id.value.removeprefix("task_")))
+            for task_id in selected
+        )
+        transitioning = tuple(
+            state.coordinate.task_id
+            for state in states
+            if state.retrieval_state is not RetrievalState.SUCCEEDED
+        )
+        transition_count = len(transitioning)
+    _report_progress(
+        progress,
+        ProgressPhase.RETRIEVE,
+        5 + task_total - transition_count,
+        f"mode={mode} destination={destination} tasks={task_total}",
+        record.run.id,
+        task_total=task_total,
+    )
+    if transition_count:
+        try:
+            if select_all:
+                task_store.prepare_all_retrieval(record.run.id)
+            else:
+                task_store.set_retrieval(
+                    record.run.id, transitioning, RetrievalState.PENDING
+                )
+            pending = replace(
+                record,
+                run=replace(
+                    record.run,
+                    retrieval_state=_compact_retrieval_state(task_store, record.run.id),
+                ),
+            )
+            store.update(pending, expected=record)
+            record = pending
+        except RunStoreError as error:
+            return OperationResult.failure(
+                "fetch", _run_store_operation_error(error, record.run.id)
+            )
+    workspace = _record_workspace(record)
+    try:
+        active_stager = stager or _record_stager(record)
+        fetched = active_stager.fetch(
+            FetchRequest(
+                workspace,
+                (".rundra-shards/*.tar", ".rundra-shards/*.sha256"),
+                destination,
+                mode,
+            )
+        )
+        artifacts = _selected_fetch_artifacts(record, selected, fetched.artifacts)
+        shard_paths = tuple(
+            Path(artifact.path)
+            for artifact in artifacts
+            if artifact.kind is ArtifactKind.OUTPUT_SHARD
+            and str(artifact.path).endswith(".tar")
+        )
+        if extract:
+            artifacts = (
+                *artifacts,
+                *_extract_fetched_shards(
+                    record,
+                    destination,
+                    artifacts,
+                    None if select_all else selected,
+                ),
+            )
+        if shard_paths:
+            task_store.ingest_result_shards(
+                record.run.id,
+                _verified_shard_rows(record, shard_paths),
+                selected=None if select_all else selected,
+            )
+        elif select_all:
+            task_store.set_all_retrieval(record.run.id, RetrievalState.SUCCEEDED)
+        else:
+            task_store.set_retrieval(record.run.id, selected, RetrievalState.SUCCEEDED)
+    except (OSError, RuntimeError, ValueError) as error:
+        try:
+            if select_all:
+                task_store.fail_pending_retrieval(record.run.id)
+            elif transitioning:
+                task_store.set_retrieval(
+                    record.run.id, transitioning, RetrievalState.FAILED
+                )
+            failed = replace(
+                record,
+                run=replace(
+                    record.run,
+                    retrieval_state=_compact_retrieval_state(task_store, record.run.id),
+                ),
+            )
+            store.update(failed, expected=record)
+        except RunStoreError:
+            pass
+        return OperationResult.failure(
+            "fetch",
+            OperationError(
+                "RESULT_RETRIEVAL_FAILED",
+                f"Run {record.run.id} result shard ingestion failed: {error}",
+                {"run_id": str(record.run.id)},
+            ),
+        )
+    retrieval_state = _compact_retrieval_state(task_store, record.run.id)
+    succeeded = replace(
+        record,
+        run=replace(record.run, retrieval_state=retrieval_state),
+        artifacts=_merge_artifacts(record.artifacts, artifacts),
+    )
+    try:
+        store.update(succeeded, expected=record)
+    except RunStoreError as error:
+        return OperationResult.failure(
+            "fetch", _run_store_operation_error(error, record.run.id)
+        )
+    _report_progress(
+        progress,
+        ProgressPhase.COMPLETE,
+        6 + task_total,
+        f"retrieval={retrieval_state.value} destination={destination}",
+        record.run.id,
+        task_total=task_total,
+    )
+    return OperationResult.success(
+        "fetch",
+        FetchValue(
+            record.run.id,
+            destination,
+            retrieval_state,
+            artifacts,
+            selected,
+            format_version=record.format_version,
+        ),
+    )
+
+
+def _compact_retrieval_state(
+    task_store: SqliteTaskStore, run_id: RunId
+) -> RetrievalState:
+    counts = task_store.counts(run_id).retrieval
+    total = sum(counts.values())
+    if counts[RetrievalState.SUCCEEDED] == total:
+        return RetrievalState.SUCCEEDED
+    if counts[RetrievalState.FAILED]:
+        return RetrievalState.FAILED
+    if counts[RetrievalState.NOT_REQUESTED] == total:
+        return RetrievalState.NOT_REQUESTED
+    return RetrievalState.PENDING
 
 
 def _load_record(
@@ -3470,7 +3657,7 @@ def _extract_fetched_shards(
     record: RunRecord,
     destination: Path,
     artifacts: tuple[Artifact, ...],
-    selected: tuple[TaskId, ...],
+    selected: tuple[TaskId, ...] | None,
 ) -> tuple[Artifact, ...]:
     configured_host = record.run.target.transport.options.get("host")
     controller_hostname = configured_host if isinstance(configured_host, str) else None
@@ -3480,15 +3667,20 @@ def _extract_fetched_shards(
         if artifact.kind is ArtifactKind.OUTPUT_SHARD
         and str(artifact.path).endswith(".tar")
     )
-    selected_names = {str(task_id): task_id for task_id in selected}
+    selected_names = (
+        None if selected is None else {str(task_id): task_id for task_id in selected}
+    )
     covered: set[str] = set()
     extracted_artifacts: list[Artifact] = []
     output_root = destination / "output"
     for shard in shard_paths:
-        _verify_shard_checksum(shard)
-        index = read_shard_index(shard, controller_hostname=controller_hostname)
+        index = read_verified_shard_index(
+            shard, controller_hostname=controller_hostname
+        )
         shard_tasks = tuple(
-            task_id for task_id in selected_names if task_id in index.task_exit_codes
+            task_id
+            for task_id in index.task_exit_codes
+            if selected_names is None or task_id in selected_names
         )
         if not shard_tasks:
             continue
@@ -3498,7 +3690,12 @@ def _extract_fetched_shards(
             task_ids=shard_tasks,
             controller_hostname=controller_hostname,
         ):
-            task_id = selected_names[path.relative_to(output_root).parts[0]]
+            task_name = path.relative_to(output_root).parts[0]
+            task_id = (
+                TaskId(task_name)
+                if selected_names is None
+                else selected_names[task_name]
+            )
             extracted_artifacts.append(
                 Artifact(
                     ArtifactKind.RAW_RESULT,
@@ -3508,31 +3705,25 @@ def _extract_fetched_shards(
                 )
             )
         covered.update(shard_tasks)
-    missing = set(selected_names) - covered
+    missing = set() if selected_names is None else set(selected_names) - covered
     if missing:
         raise ValueError(f"Result shards do not contain selected Task {min(missing)}")
     return tuple(extracted_artifacts)
 
 
-def _verify_shard_checksum(shard: Path) -> None:
-    checksum = shard.with_suffix(f"{shard.suffix}.sha256")
-    try:
-        fields = checksum.read_text(encoding="ascii").strip().split()
-    except OSError as error:
-        raise ValueError(f"Shard checksum is unavailable for {shard.name}") from error
-    if (
-        len(fields) != 2
-        or fields[1] != shard.name
-        or len(fields[0]) != 64
-        or any(value not in "0123456789abcdef" for value in fields[0])
-    ):
-        raise ValueError(f"Shard checksum is invalid for {shard.name}")
-    digest = hashlib.sha256()
-    with shard.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    if digest.hexdigest() != fields[0]:
-        raise ValueError(f"Shard checksum mismatch for {shard.name}")
+def _verified_shard_rows(
+    record: RunRecord, shard_paths: Sequence[Path]
+) -> Iterable[tuple[str, Mapping[TaskId, int]]]:
+    configured_host = record.run.target.transport.options.get("host")
+    controller_hostname = configured_host if isinstance(configured_host, str) else None
+    for shard in shard_paths:
+        index = read_verified_shard_index(
+            shard, controller_hostname=controller_hostname
+        )
+        yield (
+            shard.name,
+            {TaskId(task_id): code for task_id, code in index.task_exit_codes.items()},
+        )
 
 
 def _artifact_for(

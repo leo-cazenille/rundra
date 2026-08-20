@@ -1061,9 +1061,11 @@ metadata records the shard root. Fetches select the lane archives rather than
 requesting files that were compacted, reducing a 20,000-Task Run with 320 lanes
 to roughly 640 result files including checksums.
 
-`rundr fetch --extract` verifies each archive checksum and indexed member hash,
-rejects unsafe paths and symlink parents, and atomically publishes only selected
-Task files. `--mode archive` is rejected for unsharded Runs. On a shared target,
+Compact archive fetch verifies each archive checksum and index and
+transactionally validates complete Task coverage against durable exit codes.
+`rundr fetch --extract` additionally verifies each indexed member hash, rejects
+unsafe paths and symlink parents, and atomically publishes only selected Task
+files. `--mode archive` is rejected for unsharded Runs. On a shared target,
 `auto --extract` selects archive materialization instead of a reference. Without
 `--extract`, archives remain compact. Python analysis may use the public
 `rundra.artifacts.open_result_shard` reader, which verifies the whole-archive
@@ -3641,8 +3643,10 @@ therefore depends on parameter-set and worker count rather than logical Task
 count. Compact Slurm workers use immutable attempt-specific journals and shards
 to resume scheduler requeues: durably finished Tasks are skipped, interrupted
 Tasks consume the target's infrastructure retry budget, and attempt numbers are
-persisted in the compact Task sidecar. Remote shard ingestion remains future
-work.
+persisted in the compact Task sidecar. Compact archive fetch streams verified
+shard indexes into one SQLite transaction, validates exact Task coverage and
+durable exit codes, and updates per-Task retrieval without materializing the
+complete TaskSpace.
 
 Slurm worker lanes append versioned `START` and `FINISH` events before and
 after every logical Task. Reconciliation treats started Tasks as running even

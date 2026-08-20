@@ -87,6 +87,44 @@ def read_shard_index(
     return _parse_index(value) if index_kind == "json" else _parse_tsv_index(content)
 
 
+def read_verified_shard_index(
+    path: Path,
+    *,
+    hostname: str | None = None,
+    controller_hostname: str | None = None,
+) -> ShardIndex:
+    """Verify a shard's whole-archive sidecar before reading its index."""
+
+    checksum = Path(f"{path}.sha256")
+    try:
+        if not checksum.is_file() or checksum.is_symlink():
+            raise ShardError(f"Output shard checksum is missing: {checksum}")
+        fields = checksum.read_text(encoding="ascii").strip().split()
+    except OSError as error:
+        raise ShardError(f"Could not read output shard checksum: {error}") from error
+    if (
+        len(fields) != 2
+        or fields[1] != path.name
+        or len(fields[0]) != 64
+        or any(value not in "0123456789abcdef" for value in fields[0])
+    ):
+        raise ShardError(f"Output shard checksum is invalid: {checksum}")
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+    except OSError as error:
+        raise ShardError(f"Could not hash output shard: {error}") from error
+    if digest.hexdigest() != fields[0]:
+        raise ShardError(f"Output shard checksum mismatch: {path.name}")
+    return read_shard_index(
+        path,
+        hostname=hostname,
+        controller_hostname=controller_hostname,
+    )
+
+
 def _parse_tsv_index(content: str) -> ShardIndex:
     lines = content.splitlines()
     if not lines:
@@ -137,16 +175,14 @@ def _parse_tsv_index(content: str) -> ShardIndex:
             members.append(IndexedShardMember(relative, size, digest))
         else:
             raise ShardError("Output shard TSV row is invalid")
-    if not tasks:
-        raise ShardError("Output shard TSV contains no Tasks")
     try:
         ordinals = tuple(int(task_id.removeprefix("task_")) for task_id in tasks)
     except ValueError as error:
         raise ShardError("Output shard TSV Task ordinal is invalid") from error
     return ShardIndex(
         lease_ordinal=worker * 1_000_000 + lane,
-        task_start=min(ordinals),
-        task_stop=max(ordinals) + 1,
+        task_start=min(ordinals) if ordinals else 0,
+        task_stop=max(ordinals) + 1 if ordinals else 0,
         task_exit_codes=tasks,
         members=tuple(members),
     )

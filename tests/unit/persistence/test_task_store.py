@@ -141,3 +141,59 @@ def test_task_store_expands_bounded_worker_assignment_transactionally(
         "91_2",
         "91_0",
     ]
+
+
+def test_result_shard_ingestion_is_complete_atomic_and_idempotent(
+    tmp_path: Path,
+) -> None:
+    store = SqliteTaskStore(tmp_path)
+    space = TaskSpace(1, SeedRange(0, 2))
+    store.create(_RUN_ID, space)
+    store.initialize_compact_submission(_RUN_ID, ("91_0",), scheduler_job_ids=("91",))
+    store.update_batch(
+        _RUN_ID,
+        tuple(
+            TaskState(
+                space.coordinate(ordinal),
+                ExecutionState.SUCCEEDED if ordinal != 1 else ExecutionState.FAILED,
+                scheduler_id="91_0",
+                native_state="COMPLETED" if ordinal != 1 else "FAILED",
+                exit_code=0 if ordinal != 1 else 7,
+            )
+            for ordinal in range(3)
+        ),
+    )
+    store.prepare_all_retrieval(_RUN_ID)
+
+    with pytest.raises(RunStoreError, match="cover 2 of 3"):
+        store.ingest_result_shards(
+            _RUN_ID,
+            (
+                (
+                    "first.tar",
+                    {
+                        TaskId.from_ordinal(0): 0,
+                        TaskId.from_ordinal(1): 7,
+                    },
+                ),
+            ),
+        )
+
+    assert store.counts(_RUN_ID).retrieval[RetrievalState.SUCCEEDED] == 0
+    shards = (
+        (
+            "first.tar",
+            {TaskId.from_ordinal(0): 0, TaskId.from_ordinal(1): 7},
+        ),
+        ("second.tar", {TaskId.from_ordinal(2): 0}),
+    )
+    assert store.ingest_result_shards(_RUN_ID, shards) == 3
+    assert store.ingest_result_shards(_RUN_ID, shards) == 3
+    assert store.counts(_RUN_ID).retrieval[RetrievalState.SUCCEEDED] == 3
+
+    with pytest.raises(RunStoreError, match="duplicate coverage"):
+        store.ingest_result_shards(
+            _RUN_ID,
+            (("duplicate.tar", {TaskId.from_ordinal(0): 0}),),
+            selected=(TaskId.from_ordinal(0),),
+        )

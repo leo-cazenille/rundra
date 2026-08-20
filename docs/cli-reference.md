@@ -98,6 +98,12 @@ lives in `<RUN_ID>.tasks.sqlite3`; the JSON RunRecord contains no Task array or
 unbounded Task maps. `status`, `wait`, `cancel`, `tasks`, and `fetch` use this
 sidecar automatically when invoked with the same `--data-dir`.
 
+Compact archive fetch verifies every copied shard checksum and index, then
+transactionally records exact per-Task shard coverage in the sidecar. Missing,
+duplicate, or outcome-mismatched coverage fails without partial retrieval
+success. `--extract` additionally verifies member hashes and materializes
+individual files; omit it when analysis can read compact shards directly.
+
 ```yaml
 execution:
   max_concurrent_jobs: 128

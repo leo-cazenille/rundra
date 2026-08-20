@@ -44,10 +44,16 @@ from rundra.domain.models import (
 from rundra.domain.preparation import PreparationRecord
 from rundra.domain.purge import PurgeOutcome
 from rundra.domain.records import RunRecord
-from rundra.domain.scaling import SeedRange
+from rundra.domain.scaling import SeedRange, TaskSpace
 from rundra.domain.states import ExecutionState, RetrievalState
 from rundra.orchestration.progress import ProgressEvent
-from rundra.persistence import JsonRunStore, PurgeReceiptStore, record_from_dict
+from rundra.persistence import (
+    JsonRunStore,
+    PurgeReceiptStore,
+    SqliteTaskStore,
+    TaskState,
+    record_from_dict,
+)
 from rundra.ports import (
     CapabilityCheck,
     ContainerRequest,
@@ -55,6 +61,7 @@ from rundra.ports import (
     FetchResult,
 )
 from rundra.results import OperationResult
+from tests.unit.persistence.test_v4_record import _v4_record
 
 
 class RecordingFetchStager:
@@ -438,6 +445,86 @@ def test_fetch_is_idempotent_and_preserves_successful_retrieval_state(
     )
     assert result_document(second)["fetch"]["artifacts"][0]["kind"] == "raw_result"
     assert progress_events[-1].completed == progress_events[-1].total
+
+
+def test_compact_shard_fetch_ingests_all_tasks_without_materializing_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from rundra.orchestration.workers import TaskOutcome, WorkerLease, seal_output_shard
+
+    record = _v4_record()
+    space = TaskSpace(1, SeedRange(0, 1))
+    record = replace(
+        record,
+        task_space=space,
+        scheduler_metadata={"result_shards": True},
+    )
+    store = JsonRunStore(tmp_path / "records")
+    store.create(record)
+    task_store = SqliteTaskStore(tmp_path / "records")
+    task_store.create(record.run.id, space)
+    task_store.initialize_compact_submission(
+        record.run.id, ("91_0",), scheduler_job_ids=("91",)
+    )
+    task_store.update_batch(
+        record.run.id,
+        tuple(
+            TaskState(
+                space.coordinate(ordinal),
+                ExecutionState.SUCCEEDED,
+                scheduler_id="91_0",
+                native_state="COMPLETED",
+                exit_code=0,
+            )
+            for ordinal in range(2)
+        ),
+    )
+    source = tmp_path / "source"
+    for ordinal in range(2):
+        task_root = source / str(TaskId.from_ordinal(ordinal))
+        task_root.mkdir(parents=True)
+        (task_root / "result.txt").write_text(str(ordinal), encoding="utf-8")
+    output_shard = seal_output_shard(
+        source,
+        tmp_path / "fetched/output/.rundra-shards",
+        WorkerLease(0, 0, 2),
+        tuple(TaskOutcome(space.coordinate(ordinal), 0) for ordinal in range(2)),
+    )
+    checksum = Path(f"{output_shard.path}.sha256")
+    checksum.write_text(
+        f"{output_shard.sha256}  {output_shard.path.name}\n", encoding="ascii"
+    )
+
+    class ShardStager:
+        def fetch(self, request: FetchRequest) -> FetchResult:
+            return FetchResult(
+                (
+                    Artifact(ArtifactKind.RAW_RESULT, output_shard.path),
+                    Artifact(ArtifactKind.RAW_RESULT, checksum),
+                )
+            )
+
+    monkeypatch.setattr(
+        task_store,
+        "all_states",
+        lambda *_: (_ for _ in ()).throw(
+            AssertionError("compact shard fetch materialized all Task states")
+        ),
+    )
+
+    result = fetch_operation(
+        str(record.run.id),
+        store,
+        tmp_path / "fetched",
+        stager=ShardStager(),  # type: ignore[arg-type]
+        mode="archive",
+        task_store=task_store,
+    )
+
+    assert result.ok and isinstance(result.value, FetchValue)
+    assert result.value.task_ids == ()
+    assert result.value.retrieval_state is RetrievalState.SUCCEEDED
+    assert task_store.counts(record.run.id).retrieval[RetrievalState.SUCCEEDED] == 2
 
 
 def test_concurrent_fetches_are_idempotent_and_preserve_one_artifact(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -72,3 +74,17 @@ def test_shard_rejects_unknown_task_selection(tmp_path: Path) -> None:
             hostname="worker-node",
             controller_hostname="controller",
         )
+
+
+def test_attempt_shard_index_may_contain_no_new_tasks(tmp_path: Path) -> None:
+    shard = tmp_path / "attempt.tar"
+    content = b"RUNDRA_SHARD\t2\t0\t0\n"
+    with tarfile.open(shard, mode="w") as archive:
+        member = tarfile.TarInfo("index.tsv")
+        member.size = len(content)
+        archive.addfile(member, io.BytesIO(content))
+
+    index = read_shard_index(shard)
+
+    assert index.task_start == index.task_stop == 0
+    assert index.task_exit_codes == {}

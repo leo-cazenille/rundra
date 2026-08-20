@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePath, PurePosixPath
@@ -47,6 +47,7 @@ from rundra.orchestration.preparation import (
     read_remote_preparation_result,
 )
 from rundra.orchestration.progress import ProgressEvent, ProgressObserver, ProgressPhase
+from rundra.orchestration.shards import read_verified_shard_index
 from rundra.persistence.base import CompactRunStore, RunStore
 from rundra.persistence.errors import RunStoreError
 from rundra.persistence.submission_store import (
@@ -1567,6 +1568,19 @@ class OrchestrationService:
                     )
                 )
                 fetched_artifacts = _fetched_task_artifacts(fetched.artifacts, units)
+                if record.format_version == 4 and request.shard_outputs:
+                    assert self._task_store is not None
+                    shard_paths = tuple(
+                        Path(artifact.path)
+                        for artifact in fetched_artifacts
+                        if artifact.kind is ArtifactKind.OUTPUT_SHARD
+                        and str(artifact.path).endswith(".tar")
+                    )
+                    if shard_paths:
+                        self._task_store.ingest_result_shards(
+                            record.run.id,
+                            _verified_result_shard_rows(record, shard_paths),
+                        )
             except Exception as error:
                 failed = replace(
                     record,
@@ -2738,3 +2752,18 @@ def _fetched_task_artifacts(
                 )
         result.append(replace(artifact, task_id=task_id))
     return tuple(result)
+
+
+def _verified_result_shard_rows(
+    record: RunRecord, shard_paths: tuple[Path, ...]
+) -> Iterable[tuple[str, Mapping[TaskId, int]]]:
+    configured_host = record.run.target.transport.options.get("host")
+    controller_hostname = configured_host if isinstance(configured_host, str) else None
+    for shard in shard_paths:
+        index = read_verified_shard_index(
+            shard, controller_hostname=controller_hostname
+        )
+        yield (
+            shard.name,
+            {TaskId(task_id): code for task_id, code in index.task_exit_codes.items()},
+        )

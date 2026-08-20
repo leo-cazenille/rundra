@@ -6,6 +6,8 @@ All notable user-visible changes are recorded here.
 
 ### Added
 
+- Compact archive fetch now transactionally ingests verified result-shard
+  indexes into per-Task retrieval state without materializing all Task IDs.
 - Compact Slurm workers now recover from scheduler requeues using immutable
   attempt journals, skip durably finished Tasks, and enforce target-owned worker
   and per-Task infrastructure retry limits.
