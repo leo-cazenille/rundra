@@ -443,6 +443,26 @@ def test_failed_preparation_prevents_scientific_status_progression(tmp_path) -> 
     assert scheduler.queried == [(SchedulerReference("900"),)]
 
 
+def test_queued_preparation_persists_as_submitted(tmp_path) -> None:
+    record = _prepared_record()
+    store = JsonRunStore(tmp_path / "records")
+    store.create(record)
+    scheduler = PreparedLifecycleScheduler(
+        SchedulerObservation(
+            SchedulerReference("900"), ExecutionState.QUEUED, "PENDING"
+        ),
+        _observation(ExecutionState.RUNNING, "RUNNING"),
+    )
+
+    refreshed = SchedulerLifecycleService(store=store, scheduler=scheduler).refresh(
+        record
+    )
+
+    assert refreshed.preparation is not None
+    assert refreshed.preparation.builder_status == "SUBMITTED"
+    assert refreshed.preparation.builder_state == "PENDING"
+
+
 def test_status_finalizes_completed_async_preparation_provenance(tmp_path) -> None:
     submitted = _prepared_record()
     preparation = submitted.preparation
@@ -507,6 +527,30 @@ def test_cancel_covers_preparation_and_dependent_scientific_job(tmp_path) -> Non
         (SchedulerReference("900"),),
         (_REFERENCE,),
     ]
+
+
+def test_cancel_closes_interrupted_preparation_only_run(tmp_path) -> None:
+    record = replace(_prepared_record(), scheduler_job_ids=(), task_scheduler_ids={})
+    store = JsonRunStore(tmp_path / "records")
+    store.create(record)
+    scheduler = PreparedLifecycleScheduler(
+        SchedulerObservation(
+            SchedulerReference("900"), ExecutionState.RUNNING, "RUNNING"
+        ),
+        _observation(ExecutionState.CANCELLED, "CANCELLED"),
+    )
+
+    cancelled = SchedulerLifecycleService(
+        store=store,
+        scheduler=scheduler,
+        clock=lambda: _CREATED + timedelta(seconds=4),
+    ).cancel(record)
+
+    assert cancelled.run.state is ExecutionState.CANCELLED
+    assert cancelled.native_state == "PREPARATION_ONLY_CANCELLED"
+    assert cancelled.preparation is not None
+    assert cancelled.preparation.builder_status == "CANCELLED"
+    assert scheduler.cancelled == [(SchedulerReference("900"),)]
 
 
 def test_concurrent_status_refreshes_converge_without_record_corruption(

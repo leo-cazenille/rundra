@@ -88,6 +88,14 @@ _TERMINAL_STATES = frozenset(
 )
 
 
+def _preparation_status(state: ExecutionState) -> str:
+    return (
+        ExecutionState.SUBMITTED.value
+        if state is ExecutionState.QUEUED
+        else state.value
+    )
+
+
 def _remote_preparation_resources(
     image: object,
     build: PreparationBuild | None,
@@ -214,7 +222,7 @@ class SchedulerLifecycleService:
             record,
             preparation=replace(
                 preparation,
-                builder_status=observation.state.value,
+                builder_status=_preparation_status(observation.state),
                 builder_state=observation.native_state,
             ),
         )
@@ -327,6 +335,14 @@ class SchedulerLifecycleService:
         if record.run.state in _TERMINAL_STATES:
             return record
         record = self._cancel_preparation(record)
+        if not record.scheduler_job_ids:
+            updated = replace(
+                _with_execution_state(record, ExecutionState.CANCELLED),
+                completed_at=self._clock(),
+                native_state="PREPARATION_ONLY_CANCELLED",
+            )
+            self._store.update(updated, expected=record)
+            return updated
         if len(record.run.tasks) == 1:
             return self._cancel_single(
                 record, timeout=timeout, poll_interval=poll_interval
@@ -372,7 +388,7 @@ class SchedulerLifecycleService:
             record,
             preparation=replace(
                 preparation,
-                builder_status=observation.state.value,
+                builder_status=_preparation_status(observation.state),
                 builder_state=observation.native_state,
             ),
         )
@@ -863,7 +879,7 @@ class OrchestrationService:
                         record,
                         preparation=replace(
                             record.preparation,
-                            builder_status=observation.state.value,
+                            builder_status=_preparation_status(observation.state),
                             builder_state=observation.native_state,
                         ),
                     )
