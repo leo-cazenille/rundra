@@ -23,9 +23,11 @@ jobs:
             echo "Release version must be stable X.Y.Z, got: ${version}" >&2
             exit 1
           fi
-          if test "${GITHUB_REF_TYPE}" != "tag" || test "${GITHUB_REF_NAME}" != "v${version}"; then
-            echo "Release workflow must run from matching tag v${version}" >&2
-            exit 1
+          if test "${GITHUB_EVENT_NAME}" = "release"; then
+            if test "${GITHUB_REF_TYPE}" != "tag" || test "${GITHUB_REF_NAME}" != "v${version}"; then
+              echo "Production release must run from matching tag v${version}" >&2
+              exit 1
+            fi
           fi
       - name: Synchronize locked environment
         run: uv sync --locked

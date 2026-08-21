@@ -6,8 +6,9 @@ external services.
 
 Release status: `0.1.4.dev0` was mistakenly uploaded to TestPyPI from a manual
 workflow dispatch. It is a distinct prerelease and does not prevent publishing
-the stable `0.1.4` candidate. The release workflow now requires both a stable
-`X.Y.Z` project version and an exact matching `vX.Y.Z` tag.
+the stable `0.1.4` candidate. The release workflow now requires a stable
+`X.Y.Z` project version for TestPyPI and additionally requires an exact matching
+`vX.Y.Z` tag for production PyPI publication.
 
 ## Scope and contracts
 
