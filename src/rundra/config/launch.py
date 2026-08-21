@@ -677,4 +677,7 @@ def _overlay(base: LaunchValues, override: LaunchValues) -> LaunchValues:
             if override.task_slots_per_worker is not None
             else base.task_slots_per_worker
         ),
+        fetch_mode=(
+            override.fetch_mode if override.fetch_mode is not None else base.fetch_mode
+        ),
     )

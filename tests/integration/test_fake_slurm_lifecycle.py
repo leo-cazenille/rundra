@@ -405,6 +405,40 @@ def test_bundled_array_reconciles_atomic_task_journals(tmp_path: Path) -> None:
     assert refreshed.run.state is ExecutionState.FAILED
 
 
+def test_dependency_pending_bundle_without_journals_remains_queued(
+    tmp_path: Path,
+) -> None:
+    service, transport, store = _service(
+        tmp_path,
+        deque(
+            [
+                (0, "MaxArraySize = 1001\n", ""),
+                (0, "", ""),
+                (0, "", ""),
+                (0, "42\n", ""),
+            ]
+        ),
+    )
+    request = replace(
+        _request(tmp_path, seeds=(10, 11, 12, 13, 14)),
+        max_concurrent_jobs=2,
+    )
+    submitted = service.submit_one(request).record
+    pending = "42_0|PENDING|N/A|(null)\n42_1|PENDING|N/A|(null)\n"
+    transport.outcomes.extend(((0, pending, ""), (0, "", "")))
+
+    refreshed = SchedulerLifecycleService(
+        store=store,
+        scheduler=service._scheduler,
+        transport=transport,
+        clock=lambda: _NOW,
+    ).refresh(submitted)
+
+    assert refreshed.run.state is ExecutionState.QUEUED
+    assert all(task.state is ExecutionState.QUEUED for task in refreshed.run.tasks)
+    assert str(transport.commands[-1].argv[2]).endswith("done; done; :")
+
+
 def test_large_bundled_cancel_reaches_scancel_before_task_reconciliation(
     tmp_path: Path,
 ) -> None:
@@ -500,6 +534,19 @@ def test_large_worker_pool_persists_and_reconciles_compact_task_state(
     assert receipts.load(_RUN_ID).format_version == 3
     assert receipts.path(_RUN_ID).stat().st_size < 2_000
 
+    pending_workers = "42_0|PENDING|N/A|(null)\n42_1|PENDING|N/A|(null)\n"
+    transport.outcomes.extend(((0, pending_workers, ""), (0, "", "")))
+    pending_record = SchedulerLifecycleService(
+        store=store,
+        scheduler=service._scheduler,
+        transport=transport,
+        clock=lambda: _NOW,
+        task_store=task_store,
+    ).refresh(submitted)
+    assert pending_record.run.state is ExecutionState.QUEUED
+    assert task_store.counts(_RUN_ID).execution[ExecutionState.QUEUED] == 1_000
+    assert str(transport.commands[-1].argv[2]).endswith("done; done; :")
+
     accounting = (
         "42_0|COMPLETED|0:0|2026-08-15T10:00:00|"
         "2026-08-15T10:01:00|node01|\n"
@@ -523,7 +570,7 @@ def test_large_worker_pool_persists_and_reconciles_compact_task_state(
         transport=transport,
         clock=lambda: _NOW,
         task_store=task_store,
-    ).refresh(submitted)
+    ).refresh(pending_record)
 
     assert refreshed.run.state is ExecutionState.SUCCEEDED
     assert task_store.counts(_RUN_ID).execution[ExecutionState.SUCCEEDED] == 1_000

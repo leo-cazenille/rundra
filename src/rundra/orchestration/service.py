@@ -2117,7 +2117,7 @@ def _compact_bundle_events(
                     'if [ -f "$aggregate" ]; then cat -- "$aggregate"; continue; fi; '
                     'for path in "$status/$native".lane-*.tsv '
                     '"$status/$native".lane-*.tsv.*; do '
-                    '[ -f "$path" ] && cat -- "$path"; done; done'
+                    '[ -f "$path" ] && cat -- "$path"; done; done; :'
                 ),
                 "rundra-compact-bundle-status",
                 status_value,
@@ -2394,7 +2394,7 @@ def _apply_bundle_journals(
                         'if [ -f "$aggregate" ]; then cat -- "$aggregate"; continue; fi; '
                         'for path in "$status/$native".lane-*.tsv '
                         '"$status/$native".lane-*.tsv.*; do '
-                        '[ -f "$path" ] && cat -- "$path"; done; done'
+                        '[ -f "$path" ] && cat -- "$path"; done; done; :'
                     ),
                     "rundra-bundle-status",
                     status_value,
