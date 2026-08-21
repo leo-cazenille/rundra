@@ -44,6 +44,7 @@ from rundra.orchestration.service import (
     OrchestrationService,
     RunExecutionRequest,
     SchedulerLifecycleService,
+    _progress_estimate,
 )
 from rundra.persistence import (
     JsonRunStore,
@@ -379,6 +380,7 @@ def test_bundled_array_reconciles_atomic_task_journals(tmp_path: Path) -> None:
     journals = "\n".join(
         (
             "task_000000\t0",
+            "task_000000\t0",
             "task_000002\t9",
             "task_000004\t0",
             "task_000001\t0",
@@ -437,6 +439,44 @@ def test_dependency_pending_bundle_without_journals_remains_queued(
     assert refreshed.run.state is ExecutionState.QUEUED
     assert all(task.state is ExecutionState.QUEUED for task in refreshed.run.tasks)
     assert str(transport.commands[-1].argv[2]).endswith("done; done; :")
+
+
+def test_bundled_journal_rejects_conflicting_terminal_outcomes(
+    tmp_path: Path,
+) -> None:
+    service, transport, store = _service(
+        tmp_path,
+        deque(
+            [
+                (0, "MaxArraySize = 1001\n", ""),
+                (0, "", ""),
+                (0, "", ""),
+                (0, "42\n", ""),
+            ]
+        ),
+    )
+    request = replace(
+        _request(tmp_path, seeds=(10, 11, 12, 13, 14)),
+        max_concurrent_jobs=2,
+    )
+    submitted = service.submit_one(request).record
+    accounting = (
+        "42_0|COMPLETED|0:0|2026-08-15T10:00:00|"
+        "2026-08-15T10:01:00|node01|\n"
+        "42_1|COMPLETED|0:0|2026-08-15T10:00:00|"
+        "2026-08-15T10:01:00|node02|\n"
+    )
+    transport.outcomes.extend(
+        ((0, "", ""), (0, accounting, ""), (0, "task_000000\t0\ntask_000000\t1", ""))
+    )
+
+    with pytest.raises(ValueError, match="outcomes conflict"):
+        SchedulerLifecycleService(
+            store=store,
+            scheduler=service._scheduler,
+            transport=transport,
+            clock=lambda: _NOW,
+        ).refresh(submitted)
 
 
 def test_large_bundled_cancel_reaches_scancel_before_task_reconciliation(
@@ -557,8 +597,11 @@ def test_large_worker_pool_persists_and_reconciles_compact_task_state(
         (
             "RUNDRA_TASK_EVENTS\t2",
             "START\ttask_000000\t0\t1\tnode01",
+            "FINISH\ttask_000000\t0\t9\t2\tnode01",
             "START\ttask_000000\t1\t2\tnode02",
             "FINISH\ttask_000000\t1\t0\t3\tnode02",
+            "FINISH\ttask_000000\t1\t0\t3\tnode02",
+            "task_000000\t0",
             *(f"task_{ordinal:06d}\t0" for ordinal in range(1, 1_000)),
         )
     )
@@ -573,8 +616,33 @@ def test_large_worker_pool_persists_and_reconciles_compact_task_state(
     ).refresh(pending_record)
 
     assert refreshed.run.state is ExecutionState.SUCCEEDED
+    assert refreshed.native_state == "BUNDLED_TASK_SUCCEEDED"
     assert task_store.counts(_RUN_ID).execution[ExecutionState.SUCCEEDED] == 1_000
     assert task_store.get(_RUN_ID, 0).attempt == 1
+    stale = replace(
+        refreshed,
+        run=replace(refreshed.run, state=ExecutionState.RUNNING),
+        native_state="MIXED",
+    )
+    repaired = SchedulerLifecycleService(
+        store=store,
+        scheduler=service._scheduler,
+        task_store=task_store,
+    )._repair_aggregate_state(stale)
+    assert repaired.run.state is ExecutionState.SUCCEEDED
+    assert repaired.native_state == "BUNDLED_TASK_SUCCEEDED"
+
+
+def test_progress_estimate_requires_representative_nonterminal_sample() -> None:
+    assert _progress_estimate(100, (0,) * 19, tuple(range(60, 79))) is None
+
+    estimate = _progress_estimate(100, (0,) * 20, tuple(range(60, 80)))
+
+    assert estimate is not None
+    throughput, eta = estimate
+    assert throughput == pytest.approx(20 / 79)
+    assert eta == pytest.approx(80 / throughput)
+    assert _progress_estimate(20, (0,) * 20, tuple(range(60, 80))) is None
 
 
 def test_compact_submission_resume_finishes_interrupted_record_compaction(

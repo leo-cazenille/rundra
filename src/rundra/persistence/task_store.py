@@ -672,6 +672,23 @@ class SqliteTaskStore:
         retrieval[RetrievalState.NOT_REQUESTED] += implicit
         return TaskStateCounts(task_space.task_count, execution, retrieval)
 
+    def native_state_counts(self, run_id: RunId) -> Mapping[str | None, int]:
+        """Return bounded native-state counts, including implicit unset Tasks."""
+
+        task_space = self.task_space(run_id)
+        with self._open_existing(run_id) as connection:
+            rows = tuple(
+                connection.execute(
+                    "SELECT native_state, COUNT(*) FROM task_state "
+                    "GROUP BY native_state"
+                )
+            )
+        counts = {cast(str | None, value): cast(int, count) for value, count in rows}
+        implicit = task_space.task_count - sum(counts.values())
+        if implicit:
+            counts[None] = counts.get(None, 0) + implicit
+        return MappingProxyType(counts)
+
     def _open_existing(self, run_id: RunId) -> sqlite3.Connection:
         path = self.path(run_id)
         if not path.is_file() or path.is_symlink():

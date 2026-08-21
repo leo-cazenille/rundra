@@ -28,6 +28,13 @@ transcripts. Agents should use blocking `wait --json`, or renew `wait --timeout
 `wait --notify-file PATH` writes nothing until a terminal observation, then
 atomically replaces a mode-0600 JSON document containing the Run ID, state, and
 observation time. A path already owned by another Run and symlinks are rejected.
+Worker-pool Tasks remain `QUEUED` while an `afterok` preparation dependency is
+pending, even though no bundle journals exist yet. Journal reconciliation is
+idempotent across identical canonical and temporary fragments and fails only
+for malformed or contradictory Task events. Status omits throughput and ETA
+until at least 20 Tasks and 10 percent of the Run have completed over a
+60-second observation window; heterogeneous Task durations can still make the
+resulting estimate noisy.
 For synchronous arrays the bar total is six lifecycle units plus the number of
 Tasks; scheduler updates show terminal/total, running, queued, failed, and
 allocated-node counts.

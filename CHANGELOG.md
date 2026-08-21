@@ -4,6 +4,15 @@ All notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Worker status tolerates dependency-pending Runs without journals and merges
+  identical events visible through overlapping atomic journal fragments.
+- Run aggregates self-heal from durable Task state, compact retries supersede
+  older attempts, and undersampled or terminal Runs no longer retain noisy ETA.
+- CLI `--fetch-mode` survives launch-layer overlay and is persisted in new Run
+  records.
+
 ## [0.1.4] - 2026-08-21
 
 ### Added

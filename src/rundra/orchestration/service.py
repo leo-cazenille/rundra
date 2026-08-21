@@ -6,6 +6,7 @@ import os
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from math import ceil
 from pathlib import Path, PurePath, PurePosixPath
 from time import monotonic, sleep
 from typing import cast
@@ -96,6 +97,9 @@ _TERMINAL_STATES = frozenset(
         ExecutionState.CANCELLED,
     }
 )
+_MIN_ETA_SAMPLE_COUNT = 20
+_MIN_ETA_SAMPLE_FRACTION = 0.10
+_MIN_ETA_WINDOW_SECONDS = 60
 
 
 def _preparation_status(state: ExecutionState) -> str:
@@ -205,6 +209,10 @@ class SchedulerLifecycleService:
         """Query and durably apply every Task scheduler observation."""
         _require_record(record)
         current = self._refresh_preparation(record)
+        repaired = self._repair_aggregate_state(current)
+        if repaired != current:
+            self._store.update(repaired, expected=current)
+            current = repaired
         if current.run.state in _TERMINAL_STATES:
             return current
         # A preparation scheduler identity is durable before scientific jobs are
@@ -251,6 +259,46 @@ class SchedulerLifecycleService:
         )
         self._store.update(updated, expected=current)
         return updated
+
+    def _repair_aggregate_state(self, record: RunRecord) -> RunRecord:
+        if record.is_compact:
+            if self._task_store is None:
+                return record
+            counts = self._task_store.counts(record.run.id)
+            state = aggregate_execution_state(
+                tuple(item for item, count in counts.execution.items() if count > 0)
+            )
+            native_state = _aggregate_native_counts(
+                self._task_store.native_state_counts(record.run.id)
+            )
+        else:
+            if not record.run.tasks:
+                return record
+            state = aggregate_execution_state(
+                tuple(task.state for task in record.run.tasks)
+            )
+            native_state = (
+                _aggregate_native_counts(
+                    {
+                        value: sum(
+                            item == value for item in record.task_native_states.values()
+                        )
+                        for value in set(record.task_native_states.values())
+                    }
+                )
+                if set(record.task_native_states)
+                == {task.id for task in record.run.tasks}
+                else None
+            )
+        return replace(
+            record,
+            run=(
+                replace(record.run, state=state)
+                if record.run.state is not state
+                else record.run
+            ),
+            native_state=native_state or record.native_state,
+        )
 
     def _refresh_preparation(self, record: RunRecord) -> RunRecord:
         preparation = record.preparation
@@ -2056,16 +2104,18 @@ def _compact_observed_record(
         observation.state is ExecutionState.RUNNING
         for observation in scheduler_observations
     )
-    if len(finished) >= 10 and started:
-        first_started = min(value[1] for value in started.values())
-        last_finished = max(value[2] for value in finished.values())
-        elapsed = last_finished - first_started
-        if elapsed >= 30:
-            throughput = len(finished) / elapsed
-            scheduler_metadata["throughput_tasks_per_second"] = throughput
-            scheduler_metadata["eta_seconds"] = (
-                len(updated_states) - len(finished)
-            ) / throughput
+    scheduler_metadata.pop("throughput_tasks_per_second", None)
+    scheduler_metadata.pop("eta_seconds", None)
+    estimate = _progress_estimate(
+        len(updated_states),
+        tuple(value[1] for value in started.values()),
+        tuple(value[2] for value in finished.values()),
+    )
+    if estimate is not None:
+        (
+            scheduler_metadata["throughput_tasks_per_second"],
+            scheduler_metadata["eta_seconds"],
+        ) = estimate
     nodes = tuple(
         str(node)
         for observation in scheduler_observations
@@ -2076,10 +2126,16 @@ def _compact_observed_record(
         for observation in scheduler_observations
         if observation.started_at is not None
     )
-    native_states = tuple(
+    scheduler_native_states = tuple(
         dict.fromkeys(
             observation.native_state for observation in scheduler_observations
         )
+    )
+    task_native_state = _aggregate_native_counts(
+        {
+            value: sum(item.native_state == value for item in updated_states)
+            for value in {item.native_state for item in updated_states}
+        }
     )
     terminal = execution_state in _TERMINAL_STATES
     return replace(
@@ -2089,7 +2145,14 @@ def _compact_observed_record(
         started_at=record.started_at
         or (min(started_values) if started_values else None),
         completed_at=(record.completed_at or observed_at if terminal else None),
-        native_state=(native_states[0] if len(native_states) == 1 else "MIXED"),
+        native_state=(
+            task_native_state
+            or (
+                scheduler_native_states[0]
+                if len(scheduler_native_states) == 1
+                else "MIXED"
+            )
+        ),
         scheduler_metadata=scheduler_metadata,
     )
 
@@ -2150,6 +2213,12 @@ def _compact_bundle_events(
                 fields[timestamp_index + 1],
             )
             previous_start = started.get(task_id)
+            if (
+                previous_start is not None
+                and start_event[0] == previous_start[0]
+                and start_event != previous_start
+            ):
+                raise ValueError("Compact Task START events conflict")
             if previous_start is None or start_event[0] > previous_start[0]:
                 started[task_id] = start_event
             continue
@@ -2172,8 +2241,12 @@ def _compact_bundle_events(
                 fields[code_index + 2],
             )
             previous_finish = finished.get(task_id)
-            if previous_finish is not None and previous_finish[1] != code:
-                raise ValueError("Compact Task FINISH outcomes conflict")
+            if (
+                previous_finish is not None
+                and finish_event[0] == previous_finish[0]
+                and finish_event != previous_finish
+            ):
+                raise ValueError("Compact Task FINISH events conflict")
             if previous_finish is None or finish_event[0] > previous_finish[0]:
                 finished[task_id] = finish_event
             continue
@@ -2181,13 +2254,13 @@ def _compact_bundle_events(
             task_id = TaskId(fields[0])
             ordinal = int(task_id.value.removeprefix("task_"))
             code = int(fields[1])
-            if (
-                ordinal >= record.task_space.task_count
-                or task_id in finished
-                or not 0 <= code <= 255
-            ):
+            if ordinal >= record.task_space.task_count or not 0 <= code <= 255:
                 raise ValueError("Compact legacy Task event is invalid")
-            finished[task_id] = (0, code, 0, "unknown")
+            previous_finish = finished.get(task_id)
+            if previous_finish is not None and previous_finish[1] != code:
+                raise ValueError("Compact legacy Task outcome conflicts")
+            if previous_finish is None:
+                finished[task_id] = (0, code, 0, "unknown")
             continue
         raise ValueError("Compact bundled Task journal is malformed")
     return started, finished
@@ -2196,6 +2269,30 @@ def _compact_bundle_events(
 def _with_execution_state(record: RunRecord, state: ExecutionState) -> RunRecord:
     tasks = tuple(replace(task, state=state) for task in record.run.tasks)
     return replace(record, run=replace(record.run, tasks=tasks, state=state))
+
+
+def _aggregate_native_counts(counts: Mapping[str | None, int]) -> str | None:
+    observed = {value for value, count in counts.items() if count > 0}
+    if not observed or None in observed:
+        return None
+    return next(iter(observed)) if len(observed) == 1 else "MIXED"
+
+
+def _progress_estimate(
+    total: int,
+    started_at: tuple[int, ...],
+    finished_at: tuple[int, ...],
+) -> tuple[float, float] | None:
+    if total < 1 or len(finished_at) >= total or not started_at:
+        return None
+    required = max(_MIN_ETA_SAMPLE_COUNT, ceil(total * _MIN_ETA_SAMPLE_FRACTION))
+    if len(finished_at) < required:
+        return None
+    elapsed = max(finished_at) - min(started_at)
+    if elapsed < _MIN_ETA_WINDOW_SECONDS:
+        return None
+    throughput = len(finished_at) / elapsed
+    return throughput, (total - len(finished_at)) / throughput
 
 
 def _progress_state(
@@ -2411,22 +2508,33 @@ def _apply_bundle_journals(
                 continue
             if len(fields) == 4 and fields[0] == "START":
                 task_id = TaskId(fields[1])
-                if task_id not in known or task_id in journal_started:
+                if task_id not in known:
                     raise ValueError("Bundled Task START event is invalid")
-                journal_started[task_id] = (int(fields[2]), fields[3])
+                start_event = (int(fields[2]), fields[3])
+                previous = journal_started.get(task_id)
+                if previous is not None and previous != start_event:
+                    raise ValueError("Bundled Task START events conflict")
+                journal_started[task_id] = start_event
                 continue
             if len(fields) == 5 and fields[0] == "FINISH":
                 task_id = TaskId(fields[1])
-                if task_id not in known or task_id in journal_finished:
+                if task_id not in known:
                     raise ValueError("Bundled Task FINISH event is invalid")
                 code = int(fields[2])
-                journal_finished[task_id] = (code, int(fields[3]), fields[4])
+                finish_event = (code, int(fields[3]), fields[4])
+                previous_finish = journal_finished.get(task_id)
+                if previous_finish is not None and previous_finish != finish_event:
+                    raise ValueError("Bundled Task FINISH events conflict")
+                existing_code = journal_codes.get(task_id)
+                if existing_code is not None and existing_code != code:
+                    raise ValueError("Bundled Task exit outcomes conflict")
+                journal_finished[task_id] = finish_event
                 journal_codes[task_id] = code
                 continue
             if len(fields) != 2:
                 raise ValueError("Bundled Task status journal is malformed")
             task_id = TaskId(fields[0])
-            if task_id not in known or task_id in journal_codes:
+            if task_id not in known:
                 raise ValueError("Bundled Task status journal has invalid identities")
             try:
                 code = int(fields[1])
@@ -2434,6 +2542,9 @@ def _apply_bundle_journals(
                 raise ValueError("Bundled Task exit code is malformed") from error
             if not 0 <= code <= 255:
                 raise ValueError("Bundled Task exit code is outside shell range")
+            existing_code = journal_codes.get(task_id)
+            if existing_code is not None and existing_code != code:
+                raise ValueError("Bundled Task exit outcomes conflict")
             journal_codes[task_id] = code
     tasks = []
     exit_codes = dict(record.task_exit_codes)
@@ -2478,15 +2589,24 @@ def _apply_bundle_journals(
             if observation.state is ExecutionState.RUNNING
         }
     )
-    if len(journal_finished) >= 10 and journal_started:
-        first_started = min(value[0] for value in journal_started.values())
-        last_finished = max(value[1] for value in journal_finished.values())
-        elapsed = last_finished - first_started
-        if elapsed >= 30:
-            throughput = len(journal_finished) / elapsed
-            remaining = len(task_tuple) - len(journal_finished)
-            scheduler_metadata["throughput_tasks_per_second"] = throughput
-            scheduler_metadata["eta_seconds"] = remaining / throughput
+    scheduler_metadata.pop("throughput_tasks_per_second", None)
+    scheduler_metadata.pop("eta_seconds", None)
+    estimate = _progress_estimate(
+        len(task_tuple),
+        tuple(value[0] for value in journal_started.values()),
+        tuple(value[1] for value in journal_finished.values()),
+    )
+    if estimate is not None:
+        (
+            scheduler_metadata["throughput_tasks_per_second"],
+            scheduler_metadata["eta_seconds"],
+        ) = estimate
+    native_state = _aggregate_native_counts(
+        {
+            value: sum(item == value for item in native_states.values())
+            for value in set(native_states.values())
+        }
+    )
     return replace(
         record,
         run=replace(
@@ -2496,6 +2616,7 @@ def _apply_bundle_journals(
         ),
         task_exit_codes=exit_codes,
         task_native_states=native_states,
+        native_state=native_state or record.native_state,
         scheduler_metadata=scheduler_metadata,
     )
 

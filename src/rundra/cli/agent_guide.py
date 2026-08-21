@@ -14,7 +14,7 @@ GUIDE_TOPICS = {
     "setup": "Run doctor --agent codex --json first. Grant only reported paths and network access, restart the agent sandbox when required, then rerun doctor until ready is true.",
     "launch": "Validate and plan before submit. Use explicit seeds, review task count/resources/concurrency, retain the returned Run ID and data directory, and submit only once.",
     "large-runs": "Use worker-pool execution within target policy. Runs with at least 1,000 Tasks automatically use compact durable Task state; inspect individuals with paginated tasks JSON, use bounded wait calls without progress, retain archive retrieval, and pass an exact confirm-tasks value after plan review.",
-    "lifecycle": "Use submit, bounded wait, status/tasks, fetch, then purge. Agents should use explicit Run IDs rather than --last and may use wait --notify-file for one atomic completion signal.",
+    "lifecycle": "Use submit, bounded wait, status/tasks, fetch, then purge. Dependency-pending workers remain queued before journals exist; Rundra merges identical atomic journal fragments and rejects contradictory outcomes. ETA is omitted until at least 20 Tasks, 10% completion, and 60 seconds of evidence. Agents should use explicit Run IDs rather than --last.",
     "results": "Prefer fetch auto. Set project-v5 fetch_mode: copy when downstream analysis requires ordinary files instead of a shared reference manifest. Compact archive fetch verifies exact Task coverage; add --extract only when individual files are required. Keep derived outputs separate.",
     "preparation": "Pin acquired images. Definition projects v4+ declare an explicit context include list; Rundra hashes only that context plus the definition for image-cache identity. Scientific jobs use Rundra-owned afterok dependencies and must not be resubmitted while preparation runs.",
     "provenance": "Inspect the Run record after submission. Prepared Runs record the verified image digest; actual launches record container_runtime and container_runtime_version when available. Plan and doctor intentionally do not claim execution-time runtime identity.",
@@ -59,6 +59,13 @@ GUIDE = f"""{START_MARKER}
   the Run, renew bounded calls such as `--timeout 300 --json`. Reserve
   `--progress` for interactive humans because captured TQDM redraws can consume
   transcript tokens. `--notify` adds one terminal alert but no polling output.
+- Workers waiting on preparation remain `QUEUED` before their status journals
+  exist. Rundra merges identical events that overlap during atomic journal
+  publication and reports contradictory outcomes as corruption. Do not bypass
+  a Rundra journal error by inferring success from scheduler output alone.
+- ETA is intentionally absent until at least 20 Tasks and 10 percent of the Run
+  have finished over at least 60 seconds. Treat any ETA as an estimate for the
+  observed workload mix, not a deadline for heterogeneous Tasks.
 - Preserve the Run ID and the exact `--data-dir` used at submission. Lifecycle
   commands must use the same Run store. `--last` is convenient interactively,
   but agents should retain explicit Run IDs to avoid selecting concurrent work.

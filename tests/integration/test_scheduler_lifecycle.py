@@ -517,6 +517,32 @@ def test_queued_preparation_persists_as_submitted(tmp_path) -> None:
     assert refreshed.preparation.builder_state == "PENDING"
 
 
+def test_refresh_repairs_terminal_aggregate_from_durable_task_facts(
+    tmp_path: Path,
+) -> None:
+    record = _record()
+    task = replace(record.run.tasks[0], state=ExecutionState.SUCCEEDED)
+    stale = replace(
+        record,
+        run=replace(record.run, state=ExecutionState.RUNNING, tasks=(task,)),
+        native_state="MIXED",
+        task_native_states={task.id: "BUNDLED_TASK_SUCCEEDED"},
+        task_exit_codes={task.id: 0},
+    )
+    store = JsonRunStore(tmp_path / "records")
+    store.create(stale)
+    scheduler = SequenceScheduler(deque())
+
+    repaired = SchedulerLifecycleService(store=store, scheduler=scheduler).refresh(
+        stale
+    )
+
+    assert repaired.run.state is ExecutionState.SUCCEEDED
+    assert repaired.native_state == "BUNDLED_TASK_SUCCEEDED"
+    assert scheduler.query_calls == 0
+    assert store.load(stale.run.id) == repaired
+
+
 def test_v6_completed_preparation_atomically_persists_verified_image(
     tmp_path: Path,
 ) -> None:

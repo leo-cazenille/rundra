@@ -3876,3 +3876,23 @@ arrays, bounded subjob concurrency, successful retrieval, partial scientific
 failure, and durable cancellation. It uses a shared workspace and OpenPBS
 `$usecp` mappings, never disables SSH host verification, and does not run in
 the default unit suite.
+
+## M20 journal reconciliation and aggregate repair
+
+Worker-pool journal discovery treats no matching files as an empty event set,
+which is expected while scheduler workers wait on a preparation dependency.
+Canonical event journals and PID-suffixed temporary summaries may be visible
+at the same time. Reconciliation merges identical Task facts idempotently and
+rejects only malformed identities or contradictory outcomes for the same Task
+attempt. For compact retries, a higher attempt supersedes lower attempts.
+
+Before a terminal short-circuit, status derives portable Run state from durable
+materialized Tasks or compact SQLite counts. A complete common Task-native
+state replaces stale aggregate `MIXED`; genuinely different Task-native states
+remain `MIXED`. This repair performs no scheduler submission and preserves
+Task facts as the authority.
+
+Throughput and ETA are absent until at least 20 Tasks and 10 percent of the Run
+have completed over at least 60 seconds. Estimates are removed when the sample
+becomes inapplicable or the Run is terminal and remain advisory for
+heterogeneous workloads.
