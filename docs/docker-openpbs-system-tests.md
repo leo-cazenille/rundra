@@ -2,8 +2,12 @@
 
 Rundra includes an opt-in two-MOM OpenPBS cluster that exercises the complete
 SSH, rsync, OpenPBS, Apptainer, waiting, reconciliation, and retrieval path.
-The suite covers a successful mapped array, partial array failure with retained
-outputs, cancellation, and evidence that scientific commands ran on MOM nodes.
+The suite covers a successful mapped array, a bounded two-worker/two-lane pool,
+partial array failure with retained outputs, cancellation, retrieval, and
+evidence that scientific commands ran on MOM nodes. The worker case also
+checks the public scheduler capability document. OpenPBS targets use
+`worker_pool.requeue_limit: 0` because scheduler-driven worker reruns are not
+advertised by this backend.
 
 Run it on an amd64 Linux Docker host with Compose v2 and `/dev/fuse`:
 

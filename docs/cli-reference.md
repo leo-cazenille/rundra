@@ -10,7 +10,7 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 | `validate` | `EXPERIMENT` | `--json` | Validate experiment YAML without executing. |
 | `plan` | `EXPERIMENT` | `--config`, `--seed`/`--seeds`/`--random-seed`, `--target`, `--targets-file`, `--project-file`, `--profile`, preparation options, `--execution-strategy`, `--retrieval`, `--workers`, `--task-slots-per-worker`, `--json` | Resolve and inspect execution without target contact or state changes. |
 | `targets` | none | `--targets-file`, `--json` | Validate and list configured targets. |
-| `doctor` | optional `EXPERIMENT` | launch path overrides, `--connect`, `--local-target-access`, `--scheduler-probe`, `--probe-timeout`, `--no-write-probe`, `--agent`, `--json` | Audit installation, sandbox paths, target access, reversible staging, and an optional bounded scheduler submission. |
+| `doctor` | optional `EXPERIMENT` | launch path overrides, `--connect`, `--local-target-access`, `--prepare-location`, `--scheduler-probe`, `--probe-timeout`, `--no-write-probe`, `--agent`, `--json` | Audit installation, sandbox paths, target access, reversible staging, preparation caches, and an optional bounded scheduler submission. |
 | `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--workers`, `--task-slots-per-worker`, `--verbose`, `--progress`, `--progress-interval`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
 | `wait` | `RUN_ID` or `--last` | `--timeout`, `--poll-interval`, `--notify`, `--notify-file PATH`, `--data-dir`, `--verbose`, `--progress`, `--progress-interval`, `--json` | Reconcile until terminal or a renewable timeout; optionally emit an alert or atomic terminal JSON file. |
 | `agent-guide` | none | `--write PATH`, `--check PATH`, `--topic TOPIC`, `--list-topics`, `--json` | Print, install, check, or select bounded portable agent instructions. |
@@ -242,8 +242,17 @@ worker resources, and scheduler-controlled placement. Operators must configure
 limits and defaults from known site policy; Rundra does not infer cores,
 exclusive placement, or memory overcommit.
 
+`rundr targets --json`, `rundr doctor --json`, and plan format 8 expose the
+selected scheduler's typed capabilities. These include arrays, dependencies,
+compact worker pools, scheduler-driven rerun recovery, and probes. Consult
+these flags instead of inferring features from a scheduler name. OpenPBS
+supports bounded worker pools but requires `requeue_limit: 0`; Slurm supports
+scheduler-driven worker reruns.
+
 `rundr doctor EXPERIMENT --offline` performs an additional cache-only audit for
-local preparation. It verifies the exact pinned Git commit and the verified
-prebuilt or definition-built image. A cold cache sets `ready` to false and
-returns `OFFLINE_SOURCE_CACHE_MISS` or `OFFLINE_IMAGE_CACHE_MISS`; warm the
-cache with one preparation run that omits `--offline`.
+preparation. Use `--prepare-location local` to require client caches,
+`--prepare-location target --connect` to probe exact target-side cache keys, or
+`auto` to audit the effective route. It verifies the exact pinned Git commit
+and verified immutable image identity without fetching or pulling. A cold
+cache sets `ready` to false and returns an actionable source or image cache
+miss; warm the selected cache with one preparation run that omits `--offline`.

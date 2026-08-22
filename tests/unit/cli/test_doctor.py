@@ -35,7 +35,7 @@ targets:
 
     assert result.ok and result.value is not None
     assert result.value.ready
-    assert result.value.format_version == 2
+    assert result.value.format_version == 3
     assert any(check.name == "workspace" for check in result.value.checks)
     assert not (tmp_path / "workspace").exists()
 
@@ -87,7 +87,7 @@ def test_bootstrap_doctor_reports_paths_and_generates_codex_profile(
     assert not data_dir.exists()
     assert not cache.exists()
     document = render_json(result)
-    assert '"format_version":2' in document
+    assert '"format_version":3' in document
     assert '"complete":true' in document
 
 

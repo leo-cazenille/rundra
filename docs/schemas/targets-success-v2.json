@@ -1,0 +1,27 @@
+{
+  "format_version": 2,
+  "ok": true,
+  "operation": "targets",
+  "source": "examples/minimal/targets.yaml",
+  "targets": [
+    {
+      "container": {"options": {}, "type": "native"},
+      "name": "local",
+      "scheduler": {
+        "capabilities": {
+          "arrays": false,
+          "compact_worker_pool": false,
+          "dependencies": false,
+          "detached_submission": false,
+          "scheduler_probe": false,
+          "scheduler_requeue_recovery": false
+        },
+        "options": {},
+        "type": "local"
+      },
+      "staging": {"options": {}, "type": "local"},
+      "transport": {"options": {}, "type": "local"},
+      "workspace": ".rundra"
+    }
+  ]
+}

@@ -4,6 +4,15 @@ All notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
+### Added
+
+- Scheduler capabilities are derived from a central registry and exposed in
+  target-shaped JSON for capability-driven agent planning.
+- OpenPBS supports compact worker-pool arrays with concurrent lanes,
+  preparation dependencies, durable journals, and bounded scheduler roots.
+- Remote offline doctor probes honor `--prepare-location` and verify target
+  source and prebuilt-image cache inputs when connected.
+
 ### Fixed
 
 - Added `doctor --offline` cache-readiness checks so cold pinned Git or image

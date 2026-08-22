@@ -125,7 +125,7 @@ class ExecutionPlan:
             raise ValueError("ExecutionPlan v2 requires preparation")
         if self.version == 3 and any(unit.parameter_set is None for unit in self.units):
             raise ValueError("ExecutionPlan v3 requires parameterized units")
-        if self.version in {4, 5, 6, 7}:
+        if self.version in {4, 5, 6, 7, 8}:
             if type(self.task_space) is not TaskSpace:
                 raise ValueError("Scalable ExecutionPlan requires a TaskSpace")
             if type(self.execution_policy) is not ExecutionPolicy:
@@ -147,7 +147,7 @@ class ExecutionPlan:
                     )
             elif self.worker_count is not None:
                 raise ValueError("multi-array plans cannot define worker_count")
-            if self.version in {5, 6, 7}:
+            if self.version in {5, 6, 7, 8}:
                 if (
                     type(self.task_slots_per_worker) is not int
                     or self.task_slots_per_worker < 1

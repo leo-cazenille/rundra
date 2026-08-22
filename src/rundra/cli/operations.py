@@ -16,14 +16,12 @@ from rundra.adapters import (
     LocalStager,
     LocalTransport,
     NativeRuntime,
-    OpenPBSScheduler,
     PBSScriptError,
     PurgeError,
     RemoteApptainerRuntime,
     RsyncStager,
     RsyncUploadError,
     SharedStager,
-    SlurmScheduler,
     SlurmScriptError,
     SSHPurger,
     SSHTransport,
@@ -131,6 +129,7 @@ from rundra.ports import (
 )
 from rundra.provenance import GitProvenanceCapture
 from rundra.results import OperationError, OperationResult
+from rundra.scheduler_registry import scheduler_for_target
 from rundra.schema_versions import RUN_LIST_SCHEMA, STATUS_SCHEMA, TASKS_SCHEMA
 
 _DEFAULT_PREPARATION_STORAGE = PreparationStorageConfig()
@@ -169,6 +168,7 @@ class ValidationValue:
 class TargetsValue:
     source: Path
     targets: Mapping[str, Target]
+    format_version: int = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -985,7 +985,9 @@ def _create_effective_scaling_plan(
         retrieval_policy=retrieval_policy,
         preparation=preparation,
         version=(
-            7
+            8
+            if targets_version >= 8
+            else 7
             if targets_version >= 7
             else 6
             if targets_version >= 6
@@ -4109,16 +4111,10 @@ def _execution_adapters(
             ssh_executable=executable,
             ssh_config_file=config_file,
         )
-    scheduler: Scheduler = (
-        OpenPBSScheduler(
-            remote_transport,
-            log_directory=target.workspace / ".rundra-scheduler-logs",
-        )
-        if target.scheduler.kind == "pbs"
-        else SlurmScheduler(
-            remote_transport,
-            log_directory=target.workspace / ".rundra-scheduler-logs",
-        )
+    scheduler = scheduler_for_target(
+        target,
+        remote_transport,
+        log_directory=target.workspace / ".rundra-scheduler-logs",
     )
     return (
         remote_transport,
@@ -4130,10 +4126,10 @@ def _execution_adapters(
 
 def _record_scheduler(record: RunRecord) -> Scheduler:
     transport = _record_ssh_transport(record)
-    scheduler_type = record.run.target.scheduler.kind
-    scheduler_class = OpenPBSScheduler if scheduler_type == "pbs" else SlurmScheduler
-    return scheduler_class(
-        transport, log_directory=record.run.target.workspace / ".rundra-scheduler-logs"
+    return scheduler_for_target(
+        record.run.target,
+        transport,
+        log_directory=record.run.target.workspace / ".rundra-scheduler-logs",
     )
 
 

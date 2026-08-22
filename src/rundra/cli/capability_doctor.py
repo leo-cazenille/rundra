@@ -29,7 +29,10 @@ from rundra.domain.models import (
 )
 from rundra.domain.preparation import PreparationPlan, PreparationStorageConfig
 from rundra.domain.states import ExecutionState
-from rundra.orchestration.preparation import probe_local_offline_preparation
+from rundra.orchestration.preparation import (
+    probe_local_offline_preparation,
+    probe_remote_offline_preparation,
+)
 from rundra.ports import Scheduler, SchedulerGroup, SchedulerReference, SchedulerUnit
 from rundra.results import OperationError, OperationResult
 
@@ -66,7 +69,7 @@ class DoctorValue:
     scheduler_probed: bool
     agent: str
     agent_config: str | None
-    format_version: int = 2
+    format_version: int = 3
 
     @property
     def ready(self) -> bool:
@@ -219,15 +222,9 @@ def doctor_operation(
             if scheduler_probe and connected:
                 checks.append(_scheduler_probe(target, probe_timeout))
             if offline and preparation is not None and experiment_source is not None:
-                if target.transport.kind != "local":
-                    checks.append(
-                        DoctorCheck(
-                            "offline_preparation_cache",
-                            "fail",
-                            "offline preparation cache probing currently requires a local target",
-                        )
-                    )
-                else:
+                location = preparation.requested_location
+                use_local = target.transport.kind == "local" or location == "local"
+                if use_local:
                     try:
                         experiment = load_experiment(experiment_source)
                         local_cache = (
@@ -264,6 +261,39 @@ def doctor_operation(
                                 "offline_preparation_cache", "fail", error.message
                             )
                         )
+                elif connected:
+                    target_storage = targets_config.preparation.get(
+                        target_name, PreparationStorageConfig()
+                    )
+                    probe = probe_remote_offline_preparation(
+                        preparation,
+                        target,
+                        _transport(target),
+                        cache_root=target_storage.cache_root,
+                        image_search_paths=target_storage.image_search_paths,
+                    )
+                    checks.extend(
+                        (
+                            DoctorCheck(
+                                "offline_source_cache",
+                                "pass" if probe.source_ready else "fail",
+                                probe.source_message,
+                            ),
+                            DoctorCheck(
+                                "offline_image_cache",
+                                "pass" if probe.image_ready else "fail",
+                                probe.image_message,
+                            ),
+                        )
+                    )
+                else:
+                    checks.append(
+                        DoctorCheck(
+                            "offline_target_cache",
+                            "fail",
+                            "target cache was not checked; rerun with --connect",
+                        )
+                    )
         else:
             assert legacy.error is not None
             checks.append(DoctorCheck("selected_target", "fail", legacy.error.message))
@@ -284,6 +314,13 @@ def doctor_operation(
             DoctorAction(
                 "OFFLINE_IMAGE_CACHE_MISS",
                 "rerun the preparation once without --offline to cache the verified image",
+            )
+        )
+    if statuses.get("offline_target_cache") == "fail":
+        actions.append(
+            DoctorAction(
+                "OFFLINE_TARGET_CACHE_UNVERIFIED",
+                "rerun doctor with --offline --connect to verify target cache inputs",
             )
         )
     config = _codex_config(requirements) if agent == "codex" else None

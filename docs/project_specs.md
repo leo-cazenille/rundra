@@ -3906,3 +3906,9 @@ definition-cache rules as execution. It performs no network acquisition,
 container build, application compilation, or scheduler submission. Missing
 inputs make the audit not ready and expose stable source/image remediation
 codes. Ordinary `doctor` retains its access-oriented meaning.
+
+## M22 scheduler capabilities and OpenPBS compact workers
+
+Scheduler behavior is described by immutable adapter-owned capabilities for detached submission, arrays, dependencies, compact worker pools, scheduler rerun recovery, and scheduler probes. Target files select a backend but cannot claim capabilities. Planning and adapter construction use the central registry rather than implicit fallbacks.
+
+Slurm and OpenPBS implement compact worker arrays over the same TaskSpace and journal contracts. OpenPBS supports preparation dependencies, concurrent lanes, compact state, cancellation, failure propagation, and retrieval. OpenPBS does not promise scheduler-driven rerun recovery, so its worker policies require `requeue_limit: 0`.

@@ -40,6 +40,7 @@ from rundra.domain.states import ExecutionState, RetrievalState
 from rundra.orchestration.models import ExecutionPlan, ExecutionUnit
 from rundra.persistence import receipt_document, record_to_dict
 from rundra.results import OperationResult
+from rundra.scheduler_registry import scheduler_capabilities_document
 
 _FORMAT_VERSION = 1
 
@@ -87,7 +88,8 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
     elif isinstance(value, TargetsValue):
         document["source"] = str(value.source)
         document["targets"] = [
-            _target_document(value.targets[name]) for name in sorted(value.targets)
+            _target_document(value.targets[name], include_capabilities=True)
+            for name in sorted(value.targets)
         ]
     elif isinstance(value, DoctorValue):
         document["doctor"] = {
@@ -96,6 +98,11 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
             "target": None if value.target is None else value.target.name,
             "connected": value.connected,
             "scheduler_probed": value.scheduler_probed,
+            "scheduler_capabilities": (
+                None
+                if value.target is None
+                else scheduler_capabilities_document(value.target.scheduler.kind)
+            ),
             "ready": value.ready,
             "complete": value.complete,
             "checks": [
@@ -539,7 +546,7 @@ def _plan_document(plan: ExecutionPlan) -> dict[str, Any]:
     document = {
         "version": plan.version,
         "experiment": plan.experiment_name,
-        "target": _target_document(plan.target),
+        "target": _target_document(plan.target, include_capabilities=plan.version >= 8),
         "strategy": plan.strategy,
         "staging_backend": plan.staging_backend,
         "resources": _resources_document(resources),
@@ -597,7 +604,7 @@ def _plan_document(plan: ExecutionPlan) -> dict[str, Any]:
     }
     if plan.preparation is not None:
         document["preparation"] = _preparation_document(plan.preparation)
-    if plan.version in {4, 5, 6, 7}:
+    if plan.version in {4, 5, 6, 7, 8}:
         assert plan.task_space is not None
         assert plan.execution_policy is not None
         policy = plan.execution_policy
@@ -619,7 +626,7 @@ def _plan_document(plan: ExecutionPlan) -> dict[str, Any]:
             "max_array_size": policy.max_array_size,
         }
         document["scheduling"] = scheduling
-        if plan.version in {5, 6, 7}:
+        if plan.version in {5, 6, 7, 8}:
             assert plan.worker_resources is not None
             scheduling.update(
                 {
@@ -756,6 +763,8 @@ def _result_format_version(value: object) -> int:
     if isinstance(value, TasksValue):
         return value.format_version
     if isinstance(value, DoctorValue):
+        return value.format_version
+    if isinstance(value, TargetsValue):
         return value.format_version
     if (
         isinstance(value, ValidationValue)
@@ -934,11 +943,20 @@ def _with_launch(rendered: str, launch: LaunchResolutionValue | None) -> str:
     return "\n".join(lines)
 
 
-def _target_document(target: Target) -> dict[str, Any]:
+def _target_document(
+    target: Target, *, include_capabilities: bool = False
+) -> dict[str, Any]:
     return {
         "name": target.name,
         "transport": _backend_document(target.transport.kind, target.transport.options),
-        "scheduler": _backend_document(target.scheduler.kind, target.scheduler.options),
+        "scheduler": (
+            {
+                **_backend_document(target.scheduler.kind, target.scheduler.options),
+                "capabilities": scheduler_capabilities_document(target.scheduler.kind),
+            }
+            if include_capabilities
+            else _backend_document(target.scheduler.kind, target.scheduler.options)
+        ),
         "staging": _backend_document(target.staging.kind, target.staging.options),
         "container": _backend_document(target.container.kind, target.container.options),
         "workspace": str(target.workspace),

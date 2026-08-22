@@ -65,7 +65,7 @@ def _run(*arguments: str) -> subprocess.CompletedProcess[str]:
                 "examples/minimal/targets.yaml",
                 "--json",
             ),
-            "targets-success-v1.json",
+            "targets-success-v2.json",
         ),
         (
             ("validate", "missing-experiment.yaml", "--json"),

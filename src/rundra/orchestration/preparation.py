@@ -177,6 +177,75 @@ def probe_local_offline_preparation(
     )
 
 
+def probe_remote_offline_preparation(
+    plan: PreparationPlan,
+    target: Target,
+    transport: Transport,
+    *,
+    cache_root: PurePath | None = None,
+    image_search_paths: tuple[PurePath, ...] = (),
+) -> OfflinePreparationProbe:
+    """Check immutable target cache inputs without acquisition or mutation."""
+    if not plan.offline:
+        raise ValueError("offline preparation probe requires an offline plan")
+    root = target.workspace / "cache" if cache_root is None else cache_root
+    source = plan.recipe.source
+    if plan.source_mode == "git":
+        repository = root / "git" / source_recipe_identity(source)
+        revision = getattr(source, "revision", "")
+        source_result = transport.run(
+            Command(
+                (
+                    "git",
+                    "--git-dir",
+                    str(repository),
+                    "cat-file",
+                    "-e",
+                    f"{revision}^{{commit}}",
+                )
+            )
+        )
+        if source_result.exit_code != 0:
+            return OfflinePreparationProbe(
+                False,
+                False,
+                "Pinned Git source is absent from the target offline cache",
+                "source unavailable",
+            )
+        source_message = f"pinned Git commit {revision} is available on target"
+    else:
+        source_message = "working-tree source is available from the client snapshot"
+    image = plan.recipe.image
+    if type(image) is PreparationImageDefinition:
+        return OfflinePreparationProbe(
+            True,
+            False,
+            source_message,
+            "Definition image target-cache probing requires a verified recipe index",
+        )
+    assert type(image) is PreparationImage
+    candidates = (
+        root / "images" / f"{image.sha256}.sif",
+        *(path / str(image.name) for path in image_search_paths),
+    )
+    for candidate in candidates:
+        result = transport.run(Command(("sha256sum", "--", str(candidate))))
+        fields = result.stdout.split(maxsplit=1)
+        if result.exit_code == 0 and fields and fields[0] == image.sha256:
+            return OfflinePreparationProbe(
+                True,
+                True,
+                source_message,
+                f"verified target image is available as sha256:{image.sha256}",
+            )
+    return OfflinePreparationProbe(
+        True,
+        False,
+        source_message,
+        f"Verified image sha256:{image.sha256} is unavailable on the target",
+    )
+
+
 def prepare_source_snapshot(
     plan: PreparationPlan,
     *,

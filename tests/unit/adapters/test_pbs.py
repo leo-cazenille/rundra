@@ -9,10 +9,14 @@ import pytest
 from rundra.adapters.pbs import OpenPBSScheduler, PBSSubmissionError, render_qsub_script
 from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import Command, ResourceRequest, TaskId
+from rundra.domain.scaling import SeedRange, TaskSpace
 from rundra.domain.states import ExecutionState
 from rundra.ports import (
     CapabilityCheck,
     CommandResult,
+    CompactArrayScheduler,
+    CompactDependencyScheduler,
+    CompactSchedulerArrayRequest,
     SchedulerArrayRequest,
     SchedulerGroup,
     SchedulerReference,
@@ -72,7 +76,6 @@ def test_submit_array_maps_openpbs_subjob_ids() -> None:
             ArrayTaskMapping(units[1].task_id, 1, 1),
         ),
         PurePosixPath("/work/array.sh"),
-        max_concurrent_jobs=1,
     )
 
     submission = scheduler.submit_array(request)
@@ -82,7 +85,61 @@ def test_submit_array_maps_openpbs_subjob_ids() -> None:
         units[0].task_id: "42[0].server",
         units[1].task_id: "42[1].server",
     }
-    assert "#PBS -J 0-1%1" in transport.commands[0].argv[5]
+    assert "#PBS -J 0-1%2" in transport.commands[0].argv[5]
+
+
+def test_submit_compact_array_maps_workers_and_runs_concurrent_lanes() -> None:
+    transport = FakeTransport([(0, "77[].server\n")])
+    scheduler = OpenPBSScheduler(transport, log_directory=PurePosixPath("/work/logs"))
+    assert isinstance(scheduler, CompactArrayScheduler)
+    assert isinstance(scheduler, CompactDependencyScheduler)
+    request = CompactSchedulerArrayRequest(
+        TaskSpace(1, SeedRange(0, 7)),
+        (Command(("simulate", "--seed", "{seed}")),),
+        ResourceRequest(memory_bytes=1024, walltime=timedelta(minutes=1)),
+        ResourceRequest(
+            tasks=2,
+            memory_bytes=2048,
+            walltime=timedelta(minutes=4),
+        ),
+        PurePosixPath("/work/metadata/tasks.sh"),
+        worker_count=4,
+        task_slots_per_worker=2,
+    )
+
+    submission = scheduler.submit_compact_array(request)
+
+    assert submission.reference.native_id == "77[].server"
+    assert submission.worker_native_ids == (
+        "77[0].server",
+        "77[1].server",
+        "77[2].server",
+        "77[3].server",
+    )
+    command = transport.commands[0]
+    assert "#PBS -J 0-3%4" in command.argv[6]
+    assert "export SLURM_PROCID=1" in command.argv[6]
+    assert "RUNDRA_TASK_EVENTS" in command.argv[5]
+
+
+def test_openpbs_compact_array_rejects_scheduler_requeue_policy() -> None:
+    transport = FakeTransport([])
+    scheduler = OpenPBSScheduler(transport, log_directory=PurePosixPath("/work/logs"))
+    request = CompactSchedulerArrayRequest(
+        TaskSpace(1, SeedRange(0, 1)),
+        (Command(("true",)),),
+        ResourceRequest(),
+        ResourceRequest(),
+        PurePosixPath("/work/metadata/tasks.sh"),
+        worker_count=1,
+        requeue_limit=1,
+    )
+
+    with pytest.raises(PBSSubmissionError, match="requeue_limit 0") as caught:
+        scheduler.submit_compact_array(request)
+
+    assert caught.value.outcome is SchedulerSubmissionOutcome.REJECTED
+    assert not transport.commands
 
 
 @pytest.mark.parametrize(

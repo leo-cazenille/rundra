@@ -13,7 +13,7 @@ END_MARKER = "<!-- rundra-agent:end -->"
 GUIDE_TOPICS = {
     "setup": "Run doctor --agent codex --json first. Grant only reported paths and network access, restart the agent sandbox when required, then rerun doctor until ready is true.",
     "launch": "Validate and plan before submit. Use explicit seeds, review task count/resources/concurrency, retain the returned Run ID and data directory, and submit only once.",
-    "large-runs": "Use worker-pool execution within target policy. Runs with at least 1,000 Tasks automatically use compact durable Task state; inspect individuals with paginated tasks JSON, use bounded wait calls without progress, retain archive retrieval, and pass an exact confirm-tasks value after plan review.",
+    "large-runs": "Use worker-pool execution only when plan.target.scheduler.capabilities.compact_worker_pool is true. Runs with at least 1,000 Tasks automatically use compact durable Task state; inspect individuals with paginated tasks JSON, use bounded wait calls without progress, retain archive retrieval, and pass an exact confirm-tasks value after plan review. OpenPBS worker targets require requeue_limit 0 because scheduler rerun recovery is not supported.",
     "lifecycle": "Use submit, bounded wait, status/tasks, fetch, then purge. Dependency-pending workers remain queued before journals exist; Rundra merges identical atomic journal fragments and rejects contradictory outcomes. ETA is omitted until at least 20 Tasks, 10% completion, and 60 seconds of evidence. Agents should use explicit Run IDs rather than --last.",
     "results": "Prefer fetch auto. Set project-v5 fetch_mode: copy when downstream analysis requires ordinary files instead of a shared reference manifest. Compact archive fetch verifies exact Task coverage; add --extract only when individual files are required. Keep derived outputs separate.",
     "preparation": "Pin acquired images. Definition projects v4+ declare an explicit context include list; Rundra hashes only that context plus the definition for image-cache identity. Scientific jobs use Rundra-owned afterok dependencies and must not be resubmitted while preparation runs.",
@@ -44,6 +44,9 @@ GUIDE = f"""{START_MARKER}
   preparation-cache, and image-search-path permissions before continuing.
 - Use explicit seeds for reproducibility. Above a target safety threshold, pass
   the exact requested `--confirm-tasks N` value only after reviewing the plan.
+- Read scheduler capabilities from structured `targets`, `doctor`, or `plan`
+  JSON. Do not infer arrays, dependencies, worker pools, or rerun recovery from
+  a scheduler name. OpenPBS worker pools require target `requeue_limit: 0`.
 - Use `rundr help` to discover available operations and the common workflow.
   Use `rundr help COMMAND` for command-specific arguments and options.
 - Use `rundr agent-guide --list-topics` and `rundr agent-guide --topic TOPIC`

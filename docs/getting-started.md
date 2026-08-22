@@ -141,6 +141,24 @@ connecting, creating a workspace or RunRecord, or submitting work. Live
 capability checks happen only on execution or through an explicit `doctor`
 connection or scheduler probe.
 
+Use `rundr targets --json` or inspect `plan.target.scheduler.capabilities` to
+discover portable scheduler features. Slurm and OpenPBS both support bounded
+worker pools. OpenPBS does not support Rundra's scheduler-driven worker rerun,
+so its target policy must set `worker_pool.requeue_limit: 0`. See the checked
+[scheduler capability matrix](scheduler-capabilities.md).
+
+For an offline prepared Run, audit the cache at the location that will perform
+preparation:
+
+```bash
+rundr doctor experiment.yaml --offline --prepare-location local --json
+rundr doctor experiment.yaml --offline --prepare-location target --connect --json
+```
+
+The target form performs exact, read-only Git and image identity probes over
+the configured transport. It never fetches source, pulls images, or submits a
+scheduler job.
+
 ## Launch defaults
 
 A project launch file can reduce a complete command to one experiment path:

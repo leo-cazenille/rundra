@@ -53,6 +53,20 @@ def _common(tmp_path: Path, config: str, destination: str) -> tuple[str, ...]:
     )
 
 
+def _plan_common(config: str) -> tuple[str, ...]:
+    return (
+        str(FIXTURE / "experiment.yaml"),
+        "--config",
+        str(FIXTURE / config),
+        "--target",
+        TARGET,
+        "--targets-file",
+        str(TARGETS),
+        "--source-root",
+        str(FIXTURE),
+    )
+
+
 def test_openpbs_array_success_retrieval_and_compute_placement(tmp_path: Path) -> None:
     _, payload = _rundr(
         "run", *_common(tmp_path, "config.yaml", "success"), "--seeds", "0:7"
@@ -70,6 +84,31 @@ def test_openpbs_array_success_retrieval_and_compute_placement(tmp_path: Path) -
     hosts = set(re.findall(r"compute[12]", texts))
     assert hosts
     assert hosts <= {"compute1", "compute2"}
+
+
+def test_openpbs_compact_worker_pool_is_bounded_and_retrievable(
+    tmp_path: Path,
+) -> None:
+    scale = ("--workers", "2", "--task-slots-per-worker", "2")
+    _, planned = _rundr("plan", *_plan_common("config.yaml"), "--seeds", "0:31", *scale)
+    assert planned["plan"]["strategy"] == "worker-pool"
+    assert planned["plan"]["scheduling"]["worker_count"] == 2
+    assert planned["plan"]["scheduling"]["task_slots_per_worker"] == 2
+    assert planned["plan"]["target"]["scheduler"]["capabilities"]["compact_worker_pool"]
+
+    _, payload = _rundr(
+        "run",
+        *_common(tmp_path, "config.yaml", "workers"),
+        "--seeds",
+        "0:31",
+        *scale,
+    )
+    run = payload["run"]
+    assert run["state"] == "SUCCEEDED"
+    assert run["retrieval_state"] == "SUCCEEDED"
+    assert run["tasks"] == 32
+    assert len(run["scheduler_job_ids"]) == 1
+    assert any(path.is_file() for path in (tmp_path / "workers").rglob("*"))
 
 
 def test_openpbs_array_partial_failure_retrieves_completed_outputs(

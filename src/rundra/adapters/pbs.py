@@ -8,10 +8,16 @@ from math import ceil
 from pathlib import PurePath
 
 from rundra.adapters._remote_shell import serialize_remote_command
+from rundra.adapters.slurm import (
+    render_slurm_bundle_manifest,
+    render_slurm_compact_bundle_manifest,
+)
 from rundra.domain.models import Command, NativeValue, ResourceRequest
 from rundra.domain.states import ExecutionState
 from rundra.ports import (
     CommandResult,
+    CompactSchedulerArrayRequest,
+    CompactSchedulerSubmission,
     SchedulerArrayRequest,
     SchedulerGroup,
     SchedulerObservation,
@@ -60,6 +66,30 @@ if [ "$dependency" = - ]; then
     "$qsub" "$path"
 else
     "$qsub" -W "depend=afterok:$dependency" "$path"
+fi
+"""
+_PERSIST_COMPACT_AND_SUBMIT_SCRIPT = """\
+set -eu
+manifest=$1
+manifest_payload=$2
+script_payload=$3
+qsub=$4
+dependency=$5
+directory=${manifest%/*}
+mkdir -p -- "$directory"
+[ ! -e "$manifest" ] || exit 73
+manifest_tmp="${manifest}.$$"
+script=$(mktemp "${TMPDIR:-/tmp}/rundra-pbs.XXXXXX")
+trap 'rm -f "$manifest_tmp" "$script"' EXIT HUP INT TERM
+printf '%s' "$manifest_payload" > "$manifest_tmp"
+chmod 500 "$manifest_tmp"
+mv -- "$manifest_tmp" "$manifest"
+printf '%s' "$script_payload" > "$script"
+chmod 500 "$script"
+if [ "$dependency" = - ]; then
+    "$qsub" "$script"
+else
+    "$qsub" -W "depend=afterok:$dependency" "$script"
 fi
 """
 
@@ -182,6 +212,17 @@ class OpenPBSScheduler:
             raise TypeError(
                 "OpenPBSScheduler.submit_array requires SchedulerArrayRequest"
             )
+        worker_limits = tuple(
+            limit
+            for limit in (request.max_concurrent_jobs, request.max_workers)
+            if limit is not None
+        )
+        if request.task_slots_per_worker > 1 or (
+            worker_limits and len(request.mapping) > min(worker_limits)
+        ):
+            return self._submit_bundled_array(
+                request, dependency=dependency, worker_limits=worker_limits
+            )
         script = render_qsub_array_script(request, log_directory=self._log_directory)
         command = Command(
             (
@@ -208,6 +249,285 @@ class OpenPBSScheduler:
                 item.task_id: f"{root}[{item.array_index}]{server}"
                 for item in request.mapping
             },
+        )
+
+    def _submit_bundled_array(
+        self,
+        request: SchedulerArrayRequest,
+        *,
+        dependency: str | None,
+        worker_limits: tuple[int, ...],
+    ) -> SchedulerSubmission:
+        if self._log_directory is None:
+            raise PBSSubmissionError(
+                "OpenPBS bundle submission requires a configured log directory",
+                outcome=SchedulerSubmissionOutcome.REJECTED,
+                phase="request_validation",
+            )
+        if not worker_limits:
+            raise PBSSubmissionError(
+                "OpenPBS bundle submission requires an explicit worker limit",
+                outcome=SchedulerSubmissionOutcome.REJECTED,
+                phase="request_validation",
+            )
+        task_slots = min(request.task_slots_per_worker, len(request.mapping))
+        worker_count = min(
+            *worker_limits,
+            (len(request.mapping) + task_slots - 1) // task_slots,
+        )
+        max_assignment = (len(request.mapping) + worker_count * task_slots - 1) // (
+            worker_count * task_slots
+        )
+        resources = request.group.units[0].resources
+        if any(unit.resources != resources for unit in request.group.units[1:]):
+            raise PBSScriptError("OpenPBS bundled Tasks must use uniform resources")
+        if task_slots > 1 and (
+            resources.nodes != 1 or resources.tasks != 1 or resources.gpus_per_task != 0
+        ):
+            raise PBSScriptError(
+                "Concurrent OpenPBS workers require one-node, one-task, CPU-only "
+                "logical resources"
+            )
+        derived_worker_resources = replace(
+            resources,
+            nodes=1,
+            tasks=task_slots,
+            gpus_per_task=0,
+            memory_bytes=(
+                resources.memory_bytes * task_slots
+                if resources.memory_bytes is not None
+                else None
+            ),
+            walltime=(
+                resources.walltime * max_assignment
+                if resources.walltime is not None
+                else None
+            ),
+        )
+        if (
+            request.worker_resources is not None
+            and request.worker_resources != derived_worker_resources
+        ):
+            raise PBSScriptError(
+                "Planned worker resources do not match logical Task resources"
+            )
+        worker_resources = request.worker_resources or derived_worker_resources
+        manifest_path = request.manifest_path.with_name(
+            f"{request.manifest_path.stem}.workers{request.manifest_path.suffix}"
+        )
+        status_root = request.manifest_path.parent / "bundle-status"
+        manifest_payload = render_slurm_bundle_manifest(
+            request,
+            worker_count=worker_count,
+            task_slots_per_worker=task_slots,
+            status_root=status_root,
+        )
+        quoted_manifest = shlex.quote(str(manifest_path))
+        quoted_status = shlex.quote(str(status_root))
+        lane_launches = tuple(
+            line
+            for lane in range(task_slots)
+            for line in (
+                "(",
+                f"  export SLURM_PROCID={lane}",
+                f'  /bin/sh {quoted_manifest} "$PBS_ARRAY_INDEX"',
+                ") &",
+                'pids="$pids $!"',
+            )
+        )
+        merge_lines = tuple(
+            line
+            for lane in range(task_slots)
+            for line in (
+                (
+                    f'lane="$status_root/${{SLURM_ARRAY_JOB_ID}}_'
+                    f'${{SLURM_ARRAY_TASK_ID}}.lane-{lane}.tsv"'
+                ),
+                '[ -f "$lane" ] || exit 74',
+                'cat -- "$lane" >> "$journal_tmp"',
+            )
+        )
+        body = (
+            "index=${PBS_ARRAY_INDEX:?missing PBS_ARRAY_INDEX}",
+            "export SLURM_ARRAY_JOB_ID=$PBS_JOBID",
+            "export SLURM_ARRAY_TASK_ID=$index",
+            "export SLURM_RESTART_COUNT=0",
+            f"status_root={quoted_status}",
+            'mkdir -p -- "$status_root"',
+            'journal="$status_root/${PBS_JOBID}.tsv"',
+            'journal_tmp="${journal}.$$"',
+            '[ ! -e "$journal" ] || exit 73',
+            ': > "$journal_tmp"',
+            "trap 'rm -f \"$journal_tmp\"' EXIT HUP INT TERM",
+            'pids=""',
+            *lane_launches,
+            'status=0; for pid in $pids; do wait "$pid" || status=$?; done',
+            '[ "$status" -eq 0 ] || exit "$status"',
+            *merge_lines,
+            'chmod 400 "$journal_tmp"',
+            'mv -- "$journal_tmp" "$journal"',
+            "trap - EXIT HUP INT TERM",
+        )
+        script = _script(
+            _directives(
+                worker_resources,
+                job_name="rundra-worker",
+                array_stop=worker_count - 1,
+                array_limit=worker_count,
+            ),
+            body,
+            self._log_directory,
+        )
+        command = Command(
+            (
+                "/bin/sh",
+                "-c",
+                _PERSIST_COMPACT_AND_SUBMIT_SCRIPT,
+                "rundra-pbs-worker-submit",
+                str(manifest_path),
+                manifest_payload,
+                script,
+                self._qsub,
+                dependency or "-",
+            )
+        )
+        result = self._run(command, PBSSubmissionError, "qsub worker submission")
+        submitted = _submitted_id(result)
+        match = _JOB_ID.fullmatch(submitted)
+        assert match is not None
+        root = match.group("number")
+        server = match.group("server") or ""
+        reference = SchedulerReference(submitted)
+        return SchedulerSubmission(
+            reference,
+            {
+                item.task_id: f"{root}[{ordinal % worker_count}]{server}"
+                for ordinal, item in enumerate(request.mapping)
+            },
+        )
+
+    def submit_compact_array(
+        self, request: CompactSchedulerArrayRequest
+    ) -> CompactSchedulerSubmission:
+        """Submit one constant-size OpenPBS worker array."""
+        return self._submit_compact_array(request, dependency=None)
+
+    def submit_compact_array_afterok(
+        self,
+        request: CompactSchedulerArrayRequest,
+        dependency: SchedulerReference,
+    ) -> CompactSchedulerSubmission:
+        """Submit compact workers after a framework-owned dependency."""
+        return self._submit_compact_array(request, dependency=_dependency(dependency))
+
+    def _submit_compact_array(
+        self,
+        request: CompactSchedulerArrayRequest,
+        *,
+        dependency: str | None,
+    ) -> CompactSchedulerSubmission:
+        if type(request) is not CompactSchedulerArrayRequest:
+            raise TypeError("OpenPBS compact submission requires a compact request")
+        if self._log_directory is None:
+            raise PBSSubmissionError(
+                "OpenPBS compact submission requires a configured log directory",
+                outcome=SchedulerSubmissionOutcome.REJECTED,
+                phase="request_validation",
+            )
+        if request.requeue_limit != 0:
+            raise PBSSubmissionError(
+                "OpenPBS compact workers require requeue_limit 0",
+                outcome=SchedulerSubmissionOutcome.REJECTED,
+                phase="request_validation",
+            )
+        manifest_path = request.manifest_path.with_name(
+            f"{request.manifest_path.stem}.compact-workers{request.manifest_path.suffix}"
+        )
+        status_root = request.manifest_path.parent / "bundle-status"
+        manifest = render_slurm_compact_bundle_manifest(
+            request, status_root=status_root
+        )
+        quoted_manifest = shlex.quote(str(manifest_path))
+        quoted_status = shlex.quote(str(status_root))
+        lane_launches = tuple(
+            line
+            for lane in range(request.task_slots_per_worker)
+            for line in (
+                "(",
+                f"  export SLURM_PROCID={lane}",
+                f'  /bin/sh {quoted_manifest} "$PBS_ARRAY_INDEX"',
+                ") &",
+                'pids="$pids $!"',
+            )
+        )
+        merge_lines = tuple(
+            line
+            for lane in range(request.task_slots_per_worker)
+            for line in (
+                (
+                    f'lane="$status_root/${{SLURM_ARRAY_JOB_ID}}_'
+                    f'${{SLURM_ARRAY_TASK_ID}}.lane-{lane}.attempt-0.tsv"'
+                ),
+                '[ -f "$lane" ] || exit 74',
+                'cat -- "$lane" >> "$journal_tmp"',
+            )
+        )
+        body = (
+            "index=${PBS_ARRAY_INDEX:?missing PBS_ARRAY_INDEX}",
+            "export SLURM_ARRAY_JOB_ID=$PBS_JOBID",
+            "export SLURM_ARRAY_TASK_ID=$index",
+            "export SLURM_RESTART_COUNT=0",
+            f"status_root={quoted_status}",
+            'mkdir -p -- "$status_root"',
+            'journal="$status_root/${PBS_JOBID}.tsv"',
+            'journal_tmp="${journal}.$$"',
+            '[ ! -e "$journal" ] || exit 73',
+            ': > "$journal_tmp"',
+            "trap 'rm -f \"$journal_tmp\"' EXIT HUP INT TERM",
+            'pids=""',
+            *lane_launches,
+            'status=0; for pid in $pids; do wait "$pid" || status=$?; done',
+            '[ "$status" -eq 0 ] || exit "$status"',
+            *merge_lines,
+            'chmod 400 "$journal_tmp"',
+            'mv -- "$journal_tmp" "$journal"',
+            "trap - EXIT HUP INT TERM",
+        )
+        script = _script(
+            _directives(
+                request.worker_resources,
+                job_name="rundra-worker",
+                array_stop=request.worker_count - 1,
+                array_limit=request.worker_count,
+            ),
+            body,
+            self._log_directory,
+        )
+        command = Command(
+            (
+                "/bin/sh",
+                "-c",
+                _PERSIST_COMPACT_AND_SUBMIT_SCRIPT,
+                "rundra-pbs-compact-submit",
+                str(manifest_path),
+                manifest,
+                script,
+                self._qsub,
+                dependency or "-",
+            )
+        )
+        result = self._run(
+            command, PBSSubmissionError, "qsub compact worker submission"
+        )
+        submitted = _submitted_id(result)
+        match = _JOB_ID.fullmatch(submitted)
+        assert match is not None
+        root = match.group("number")
+        server = match.group("server") or ""
+        return CompactSchedulerSubmission(
+            SchedulerReference(submitted),
+            request.task_space,
+            tuple(f"{root}[{index}]{server}" for index in range(request.worker_count)),
         )
 
     def query(
@@ -370,22 +690,41 @@ def render_qsub_array_script(
     limit = min(
         request.max_concurrent_jobs or len(request.mapping), len(request.mapping)
     )
+    status_root = request.manifest_path.parent / "bundle-status"
     branches: list[str] = []
     for unit, item in zip(request.group.units, request.mapping, strict=True):
         branches.extend(
             (
                 f"  {item.array_index})",
                 f"    # task_id={item.task_id} seed={item.seed}",
-                f"    {serialize_remote_command(unit.command)}",
+                f"    ( {serialize_remote_command(unit.command)} )",
                 "    ;;",
             )
         )
     body = (
         "index=${PBS_ARRAY_INDEX:?missing PBS_ARRAY_INDEX}",
+        "export SLURM_ARRAY_JOB_ID=$PBS_JOBID",
+        "export SLURM_ARRAY_TASK_ID=$index",
+        "export SLURM_RESTART_COUNT=0",
         'case "$index" in',
         *branches,
         "  *) exit 64 ;;",
         "esac",
+        f"status_root={shlex.quote(str(status_root))}",
+        'aggregate="$status_root/${PBS_JOBID}.tsv"',
+        'aggregate_tmp="${aggregate}.$$"',
+        ': > "$aggregate_tmp"',
+        "found=0",
+        (
+            'for path in "$status_root/${PBS_JOBID}_${index}".lane-*.tsv '
+            '"$status_root/${PBS_JOBID}_${index}".lane-*.tsv.*; do'
+        ),
+        '  if [ -f "$path" ]; then cat -- "$path" >> "$aggregate_tmp"; found=1; fi',
+        "done",
+        (
+            'if [ "$found" -eq 1 ]; then chmod 400 "$aggregate_tmp"; '
+            'mv -- "$aggregate_tmp" "$aggregate"; else rm -f "$aggregate_tmp"; fi'
+        ),
     )
     return _script(
         _directives(

@@ -23,14 +23,13 @@ from rundra.domain.sweeps import ExpandedConfig
 from rundra.orchestration.models import (
     MULTI_ARRAY,
     ONE_UNIT_PER_TASK,
-    SCHEDULER_ARRAY,
-    SLURM_ARRAY,
     WORKER_POOL,
     ExecutionGroup,
     ExecutionPlan,
     ExecutionUnit,
     PlanningError,
 )
+from rundra.scheduler_registry import scheduler_capabilities
 from rundra.schema_versions import PLAN_SCHEMA
 
 _PLACEHOLDER_PATTERN = re.compile(r"\{[^{}]+\}")
@@ -192,10 +191,21 @@ def create_scalable_plan(
             code="EXECUTION_SCALE_REQUIRES_WORKER_POOL",
             message="worker scale options require worker-pool execution",
         )
-    if selected == WORKER_POOL and target.scheduler.kind != "slurm":
+    capabilities = scheduler_capabilities(target.scheduler.kind)
+    if selected == WORKER_POOL and not capabilities.compact_worker_pool:
         raise PlanningError(
             code="UNSUPPORTED_EXECUTION_STRATEGY",
-            message="worker-pool execution requires a Slurm target",
+            message="worker-pool execution is unsupported by the selected scheduler",
+        )
+    if (
+        selected == WORKER_POOL
+        and policy.worker_pool.requeue_limit > 0
+        and not capabilities.scheduler_requeue_recovery
+    ):
+        raise PlanningError(
+            code="UNSUPPORTED_SCHEDULER_RECOVERY",
+            message=("selected scheduler worker pools require target requeue_limit 0"),
+            details={"requeue_limit": policy.worker_pool.requeue_limit},
         )
     preview = task_space.page(offset=0, limit=min(task_space.task_count, 10))
     units = tuple(
@@ -406,7 +416,8 @@ def create_plan(
         )
         for index, seed in enumerate(normalized_seeds)
     )
-    uses_array = target.scheduler.kind in {"pbs", "slurm"} and len(units) > 1
+    capabilities = scheduler_capabilities(target.scheduler.kind)
+    uses_array = capabilities.arrays and len(units) > 1
     return ExecutionPlan(
         version=2 if preparation is not None else 1,
         experiment_name=spec.name,
@@ -421,11 +432,7 @@ def create_plan(
             if uses_array
             else ()
         ),
-        strategy=(
-            SCHEDULER_ARRAY
-            if uses_array and target.scheduler.kind == "pbs"
-            else (SLURM_ARRAY if uses_array else ONE_UNIT_PER_TASK)
-        ),
+        strategy=(capabilities.array_strategy if uses_array else ONE_UNIT_PER_TASK),
         preparation=preparation,
     )
 
@@ -460,7 +467,8 @@ def create_sweep_plan(
             itertools.product(expanded, normalized_seeds)
         )
     )
-    uses_array = target.scheduler.kind in {"pbs", "slurm"} and len(units) > 1
+    capabilities = scheduler_capabilities(target.scheduler.kind)
+    uses_array = capabilities.arrays and len(units) > 1
     return ExecutionPlan(
         version=3,
         experiment_name=spec.name,
@@ -475,11 +483,7 @@ def create_sweep_plan(
             if uses_array
             else ()
         ),
-        strategy=(
-            SCHEDULER_ARRAY
-            if uses_array and target.scheduler.kind == "pbs"
-            else (SLURM_ARRAY if uses_array else ONE_UNIT_PER_TASK)
-        ),
+        strategy=(capabilities.array_strategy if uses_array else ONE_UNIT_PER_TASK),
         preparation=preparation,
     )
 
@@ -527,7 +531,7 @@ def _validate_seed_set(seeds: Sequence[object]) -> tuple[int, ...]:
 def _execution_groups(
     target: Target, units: tuple[ExecutionUnit, ...]
 ) -> tuple[ExecutionGroup, ...]:
-    if target.scheduler.kind in {"pbs", "slurm"} and len(units) > 1:
+    if scheduler_capabilities(target.scheduler.kind).arrays and len(units) > 1:
         return (ExecutionGroup(tuple(unit.task_id for unit in units)),)
     return tuple(ExecutionGroup((unit.task_id,)) for unit in units)
 

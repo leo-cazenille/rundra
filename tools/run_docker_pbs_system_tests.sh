@@ -113,7 +113,7 @@ chmod 0600 "$temporary/ssh_config" "$RUNDRA_DOCKER_PBS_STATE/id_ed25519"
 
 export RUNDRA_DOCKER_PBS_TARGETS_FILE="$temporary/targets.yaml"
 cat >"$RUNDRA_DOCKER_PBS_TARGETS_FILE" <<EOF
-version: 1
+version: 8
 targets:
   docker-pbs:
     transport:
@@ -125,6 +125,24 @@ targets:
     staging: {type: rsync}
     container: {type: apptainer}
     workspace: /workspace
+    execution:
+      hard_task_limit: 10000
+      confirmation_threshold: 10000
+      max_active_tasks: 4
+      max_concurrent_jobs: 4
+      max_array_size: 1000
+      output_shard_tasks: 16
+      automatic_retrieval_threshold: 10000
+      max_memory_per_worker: 1GiB
+      worker_pool:
+        activation_threshold: 16
+        default_workers: 2
+        max_workers: 2
+        default_task_slots_per_worker: 1
+        max_task_slots_per_worker: 2
+        tasks_per_lease: 16
+        infrastructure_retry_limit: 1
+        requeue_limit: 0
 EOF
 
 uv run pytest tests/system/test_docker_pbs.py --run-docker-pbs-system-tests

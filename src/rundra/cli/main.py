@@ -162,6 +162,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="verify that immutable preparation inputs are already cached",
     )
+    doctor.add_argument(
+        "--prepare-location",
+        choices=("auto", "local", "target"),
+        default="auto",
+    )
     doctor.add_argument("--agent", choices=("generic", "codex"), default="generic")
     _add_json_option(doctor)
 
@@ -691,6 +696,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 profile=arguments.profile,
                 operation="doctor",
                 offline=arguments.offline,
+                prepare_location=arguments.prepare_location,
             )
             if not resolved_doctor.ok:
                 result = resolved_doctor

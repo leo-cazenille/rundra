@@ -21,12 +21,12 @@ instead. Use the fields, not object-key order or human output, as the interface.
 
 | Operation or document | Checked example | Primary payload |
 |---|---|---|
-| CLI surface | [`cli-surface-v20.json`](cli-surface-v20.json) | current program, commands, positionals, options |
+| CLI surface | [`cli-surface-v21.json`](cli-surface-v21.json) | current program, commands, positionals, options |
 | MCP launcher surface | [`rundr-mcp-surface-v1.json`](rundr-mcp-surface-v1.json) | stdio and authenticated Streamable HTTP options |
 | `validate` | [`validate-success-v1.json`](validate-success-v1.json) | `experiment` |
 | `plan` | [`plan-success-v1.json`](plan-success-v1.json) | `plan`, plus launch resolution |
 | parameterized `plan` | [`plan-success-v3.json`](plan-success-v3.json) | Task parameter sets and effective-config hashes |
-| `targets` | [`targets-success-v1.json`](targets-success-v1.json) | `targets` |
+| `targets` | [`targets-success-v2.json`](targets-success-v2.json) | `targets` |
 | `run` | [`run-success-v1.json`](run-success-v1.json) | terminal `run`, plus launch resolution |
 | `submit` | [`submit-success-v1.json`](submit-success-v1.json) | submitted `run` |
 | `status` | [`status-success-v1.json`](status-success-v1.json) | aggregate and Task status |
@@ -160,3 +160,9 @@ additive fields such as `task_array_mapping`; loading supplies the version-1
 empty/default meaning described above.
 The version-20 CLI surface adds the cache-only `--offline` audit to `doctor`.
 Version 19 remains available as the preceding public surface contract.
+
+The version-21 CLI surface adds `doctor --prepare-location`; plan v8, doctor
+v3, and targets v2 expose derived scheduler capabilities.
+
+Scheduler capability fields are added only to those new versions. Older plan,
+doctor, and target-list documents retain their previous shapes.
