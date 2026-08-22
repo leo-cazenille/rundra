@@ -1065,6 +1065,9 @@ packaging failures preserve loose outputs and fail the worker. Run scheduler
 metadata records the shard root. Fetches select the lane archives rather than
 requesting files that were compacted, reducing a 20,000-Task Run with 320 lanes
 to roughly 640 result files including checksums.
+Rsync shard retrieval traverses only pattern ancestors such as
+`.rundra-shards/`; it does not scan loose Task directories that workers may be
+removing after shard publication.
 
 Compact archive fetch verifies each archive checksum and index and
 transactionally validates complete Task coverage against durable exit codes.

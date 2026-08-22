@@ -512,7 +512,15 @@ def test_rsync_fetch_is_idempotent_and_returns_result_log_metadata_artifacts(
 
     monkeypatch.setattr(subprocess, "run", run)
     destination = tmp_path / "retrieved"
-    request = FetchRequest(_workspace(), ("results/**",), destination)
+    request = FetchRequest(
+        _workspace(),
+        (
+            "results/**",
+            ".rundra-shards/*.tar",
+            ".rundra-shards/*.sha256",
+        ),
+        destination,
+    )
     stager = RsyncStager(RecordingTransport(deque()), host="cluster-alias")
 
     first = stager.fetch(request)
@@ -533,7 +541,19 @@ def test_rsync_fetch_is_idempotent_and_returns_result_log_metadata_artifacts(
         f"cluster-alias:{workspace.outputs}/",
         f"{destination.resolve()}/output/",
     )
-    assert filter_contents == ["+ */\n+ results/**\n- *\n"] * 2
+    assert (
+        filter_contents
+        == [
+            "+ results/\n"
+            "+ results/**\n"
+            "+ .rundra-shards/\n"
+            "+ .rundra-shards/*.tar\n"
+            "+ .rundra-shards/*.sha256\n"
+            "- *\n"
+        ]
+        * 2
+    )
+    assert all("+ */\n" not in content for content in filter_contents)
     assert calls[1:3] == [
         (
             "rsync",

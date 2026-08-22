@@ -432,13 +432,7 @@ class RsyncStager:
         with tempfile.TemporaryDirectory(prefix="rundra-rsync-filters-") as temporary:
             filters = Path(temporary) / "filters"
             filters.write_text(
-                "".join(
-                    (
-                        "+ */\n",
-                        *(f"+ {pattern}\n" for pattern in request.patterns),
-                        "- *\n",
-                    )
-                ),
+                "".join((*_fetch_filter_rules(request.patterns), "- *\n")),
                 encoding="utf-8",
             )
             output_argv = (
@@ -628,6 +622,25 @@ def _validated_exclusions(patterns: tuple[str, ...]) -> tuple[str, ...]:
             )
         normalized.append(value)
     return with_default_sync_excludes(normalized)
+
+
+def _fetch_filter_rules(patterns: tuple[str, ...]) -> tuple[str, ...]:
+    """Include requested paths and only the directories needed to reach them."""
+    rules: list[str] = []
+    seen: set[str] = set()
+    for pattern in patterns:
+        parts = PurePosixPath(pattern).parts
+        for length in range(1, len(parts)):
+            ancestor = "/".join(parts[:length]) + "/"
+            rule = f"+ {ancestor}\n"
+            if rule not in seen:
+                seen.add(rule)
+                rules.append(rule)
+        rule = f"+ {pattern}\n"
+        if rule not in seen:
+            seen.add(rule)
+            rules.append(rule)
+    return tuple(rules)
 
 
 def _target_host(options: Mapping[str, NativeValue]) -> str:
