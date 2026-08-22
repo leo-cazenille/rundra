@@ -90,7 +90,9 @@ def test_openpbs_compact_worker_pool_is_bounded_and_retrievable(
     tmp_path: Path,
 ) -> None:
     scale = ("--workers", "2", "--task-slots-per-worker", "2")
-    _, planned = _rundr("plan", *_plan_common("config.yaml"), "--seeds", "0:31", *scale)
+    _, planned = _rundr(
+        "plan", *_plan_common("config.yaml"), "--seeds", "0:999", *scale
+    )
     assert planned["plan"]["strategy"] == "worker-pool"
     assert planned["plan"]["scheduling"]["worker_count"] == 2
     assert planned["plan"]["scheduling"]["task_slots_per_worker"] == 2
@@ -100,13 +102,15 @@ def test_openpbs_compact_worker_pool_is_bounded_and_retrievable(
         "run",
         *_common(tmp_path, "config.yaml", "workers"),
         "--seeds",
-        "0:31",
+        "0:999",
+        "--confirm-tasks",
+        "1000",
         *scale,
     )
     run = payload["run"]
     assert run["state"] == "SUCCEEDED"
     assert run["retrieval_state"] == "SUCCEEDED"
-    assert run["tasks"] == 32
+    assert run["tasks"] == {"total": 1_000, "details_included": False}
     assert len(run["scheduler_job_ids"]) == 1
     assert any(path.is_file() for path in (tmp_path / "workers").rglob("*"))
 

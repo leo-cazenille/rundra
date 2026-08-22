@@ -1000,6 +1000,28 @@ def _duration_seconds(value: timedelta | None) -> int | None:
 
 def _run_value_document(value: RunValue) -> dict[str, Any]:
     record = value.record
+    if record.task_space is not None:
+        task_space = record.task_space
+        return {
+            "run_id": str(record.run.id),
+            "experiment": record.run.experiment_name,
+            "target": record.run.target.name,
+            "state": record.run.state.value,
+            "retrieval_state": record.run.retrieval_state.value,
+            "task_space": {
+                "task_count": task_space.task_count,
+                "parameter_set_count": task_space.parameter_set_count,
+                "seeds": {
+                    "start": task_space.seeds.start,
+                    "stop": task_space.seeds.stop,
+                    "step": task_space.seeds.step,
+                },
+            },
+            "tasks": {"total": task_space.task_count, "details_included": False},
+            "scheduler_job_ids": list(record.scheduler_job_ids),
+            "scheduler": record.run.target.scheduler.kind,
+            "artifacts": [_artifact_document(item) for item in record.artifacts],
+        }
     if len(record.run.tasks) >= 1000:
         seeds = tuple(dict.fromkeys(task.seed for task in record.run.tasks))
         parameters = tuple(

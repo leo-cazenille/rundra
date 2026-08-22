@@ -1394,19 +1394,20 @@ class OrchestrationService:
                 raise ValueError(
                     "Scheduler submission did not map every planned Task exactly"
                 )
+            scheduler_job_ids = tuple(
+                reference.native_id for reference in submission_references
+            )
+            if request.compact_plan is not None:
+                assert self._task_store is not None
+                assert compact_submission is not None
+                self._task_store.initialize_compact_submission(
+                    run_id,
+                    compact_submission.worker_native_ids,
+                    scheduler_job_ids=scheduler_job_ids,
+                )
             if pending_receipt is not None:
                 assert submission_receipts is not None
-                scheduler_job_ids = tuple(
-                    reference.native_id for reference in submission_references
-                )
                 if request.compact_plan is not None:
-                    assert self._task_store is not None
-                    assert compact_submission is not None
-                    self._task_store.initialize_compact_submission(
-                        run_id,
-                        compact_submission.worker_native_ids,
-                        scheduler_job_ids=scheduler_job_ids,
-                    )
                     submission_receipts.complete_compact(
                         pending_receipt, scheduler_job_ids, self._clock()
                     )
@@ -2096,6 +2097,20 @@ def _compact_observed_record(
     execution_state = aggregate_execution_state(
         tuple(state.execution_state for state in updated_states)
     )
+    worker_states = tuple(observation.state for observation in scheduler_observations)
+    workers_terminal = all(state in _TERMINAL_STATES for state in worker_states)
+    if not workers_terminal and execution_state in _TERMINAL_STATES:
+        # FINISH is emitted before the worker seals and publishes its result
+        # shard. Keep the Run active until the scheduler confirms that every
+        # worker has crossed that publication barrier.
+        execution_state = ExecutionState.RUNNING
+    elif ExecutionState.FAILED in worker_states:
+        execution_state = ExecutionState.FAILED
+    elif (
+        ExecutionState.CANCELLED in worker_states
+        and execution_state is ExecutionState.SUCCEEDED
+    ):
+        execution_state = ExecutionState.CANCELLED
     scheduler_metadata = dict(record.scheduler_metadata)
     scheduler_metadata["running_tasks"] = sum(
         state.execution_state is ExecutionState.RUNNING for state in updated_states
@@ -2137,6 +2152,11 @@ def _compact_observed_record(
             for value in {item.native_state for item in updated_states}
         }
     )
+    if any(
+        state in {ExecutionState.FAILED, ExecutionState.CANCELLED}
+        for state in worker_states
+    ):
+        task_native_state = ""
     terminal = execution_state in _TERMINAL_STATES
     return replace(
         record,

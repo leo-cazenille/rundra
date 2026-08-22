@@ -687,6 +687,20 @@ def test_terminal_rsync_fetch_preserves_auto_for_visibility_probe(
     assert stager.requests[0].mode == "auto"
 
 
+def test_compact_run_value_reports_persisted_task_space_total() -> None:
+    task_space = TaskSpace(1, SeedRange(0, 999))
+    record = replace(_v4_record(), task_space=task_space)
+
+    document = result_document(OperationResult.success("run", RunValue(record)))["run"]
+
+    assert document["task_space"] == {
+        "task_count": 1_000,
+        "parameter_set_count": 1,
+        "seeds": {"start": 0, "stop": 999, "step": 1},
+    }
+    assert document["tasks"] == {"total": 1_000, "details_included": False}
+
+
 def test_failed_partial_fetch_is_retryable_without_losing_other_task_state(
     tmp_path: Path,
 ) -> None:

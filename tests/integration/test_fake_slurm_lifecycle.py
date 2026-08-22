@@ -605,6 +605,20 @@ def test_large_worker_pool_persists_and_reconciles_compact_task_state(
             *(f"task_{ordinal:06d}\t0" for ordinal in range(1, 1_000)),
         )
     )
+    running_workers = "42_0|RUNNING|None|node01\n42_1|RUNNING|None|node02\n"
+    transport.outcomes.extend(((0, running_workers, ""), (0, journals, "")))
+    finalizing = SchedulerLifecycleService(
+        store=store,
+        scheduler=service._scheduler,
+        transport=transport,
+        clock=lambda: _NOW,
+        task_store=task_store,
+    ).refresh(pending_record)
+
+    assert finalizing.run.state is ExecutionState.RUNNING
+    assert finalizing.completed_at is None
+    assert task_store.counts(_RUN_ID).execution[ExecutionState.SUCCEEDED] == 1_000
+
     transport.outcomes.extend(((0, "", ""), (0, accounting, ""), (0, journals, "")))
 
     refreshed = SchedulerLifecycleService(
@@ -613,7 +627,7 @@ def test_large_worker_pool_persists_and_reconciles_compact_task_state(
         transport=transport,
         clock=lambda: _NOW,
         task_store=task_store,
-    ).refresh(pending_record)
+    ).refresh(finalizing)
 
     assert refreshed.run.state is ExecutionState.SUCCEEDED
     assert refreshed.native_state == "BUNDLED_TASK_SUCCEEDED"
@@ -631,6 +645,41 @@ def test_large_worker_pool_persists_and_reconciles_compact_task_state(
     )._repair_aggregate_state(stale)
     assert repaired.run.state is ExecutionState.SUCCEEDED
     assert repaired.native_state == "BUNDLED_TASK_SUCCEEDED"
+
+
+def test_synchronous_compact_submission_initializes_task_state_without_receipts(
+    tmp_path: Path,
+) -> None:
+    task_store = SqliteTaskStore(tmp_path / "records")
+    service, _, _ = _service(
+        tmp_path,
+        deque(
+            [
+                (0, "MaxArraySize = 1001\n", ""),
+                (0, "", ""),
+                (0, "", ""),
+                (0, "42\n", ""),
+            ]
+        ),
+        task_store=task_store,
+    )
+    request = _request(tmp_path, seeds=tuple(range(1_000)))
+    compact_plan = _compact_plan(request)
+    request = replace(
+        request,
+        plan=compact_plan,
+        max_concurrent_jobs=2,
+        max_workers=2,
+        compact_plan=compact_plan,
+        compact_configs=(ExpandedConfig(request.plan.units[0].config),),
+        worker_resources=compact_plan.worker_resources,
+    )
+
+    submitted = service.submit_one(request).record
+
+    assert submitted.run.state is ExecutionState.SUBMITTED
+    assert task_store.counts(_RUN_ID).execution[ExecutionState.SUBMITTED] == 1_000
+    assert task_store.submission_job_ids(_RUN_ID) == ("42",)
 
 
 def test_progress_estimate_requires_representative_nonterminal_sample() -> None:

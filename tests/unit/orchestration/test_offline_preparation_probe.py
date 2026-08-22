@@ -57,7 +57,19 @@ def test_remote_offline_probe_verifies_commit_and_image_digest() -> None:
 
     assert probe.source_ready and probe.image_ready
     assert transport.commands[0].argv[-2:] == ("-e", f"{'a' * 40}^{{commit}}")
-    assert transport.commands[1].argv[0] == "sha256sum"
+    assert transport.commands[1].argv[0] == "sh"
+    assert 'test ! -L "$candidate"' in transport.commands[1].argv[2]
+
+
+def test_remote_offline_probe_requires_regular_non_symlink_image() -> None:
+    transport = ProbeTransport([(0, ""), (1, "")])
+
+    probe = probe_remote_offline_preparation(_plan(), _target(), transport)
+
+    assert probe.source_ready
+    assert not probe.image_ready
+    assert 'test -f "$candidate"' in transport.commands[1].argv[2]
+    assert 'test ! -L "$candidate"' in transport.commands[1].argv[2]
 
 
 def test_remote_offline_probe_reports_cold_source_without_image_probe() -> None:

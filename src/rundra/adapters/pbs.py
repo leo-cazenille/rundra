@@ -690,7 +690,6 @@ def render_qsub_array_script(
     limit = min(
         request.max_concurrent_jobs or len(request.mapping), len(request.mapping)
     )
-    status_root = request.manifest_path.parent / "bundle-status"
     branches: list[str] = []
     for unit, item in zip(request.group.units, request.mapping, strict=True):
         branches.extend(
@@ -710,21 +709,6 @@ def render_qsub_array_script(
         *branches,
         "  *) exit 64 ;;",
         "esac",
-        f"status_root={shlex.quote(str(status_root))}",
-        'aggregate="$status_root/${PBS_JOBID}.tsv"',
-        'aggregate_tmp="${aggregate}.$$"',
-        ': > "$aggregate_tmp"',
-        "found=0",
-        (
-            'for path in "$status_root/${PBS_JOBID}_${index}".lane-*.tsv '
-            '"$status_root/${PBS_JOBID}_${index}".lane-*.tsv.*; do'
-        ),
-        '  if [ -f "$path" ]; then cat -- "$path" >> "$aggregate_tmp"; found=1; fi',
-        "done",
-        (
-            'if [ "$found" -eq 1 ]; then chmod 400 "$aggregate_tmp"; '
-            'mv -- "$aggregate_tmp" "$aggregate"; else rm -f "$aggregate_tmp"; fi'
-        ),
     )
     return _script(
         _directives(

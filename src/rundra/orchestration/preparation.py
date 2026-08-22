@@ -125,7 +125,7 @@ class OfflinePreparationProbe:
     """Cache-only readiness of immutable local preparation inputs."""
 
     source_ready: bool
-    image_ready: bool
+    image_ready: bool | None
     source_message: str
     image_message: str
 
@@ -219,9 +219,10 @@ def probe_remote_offline_preparation(
     if type(image) is PreparationImageDefinition:
         return OfflinePreparationProbe(
             True,
-            False,
+            None,
             source_message,
-            "Definition image target-cache probing requires a verified recipe index",
+            "Definition image target-cache readiness cannot be verified without "
+            "an exact recipe identity",
         )
     assert type(image) is PreparationImage
     candidates = (
@@ -229,7 +230,18 @@ def probe_remote_offline_preparation(
         *(path / str(image.name) for path in image_search_paths),
     )
     for candidate in candidates:
-        result = transport.run(Command(("sha256sum", "--", str(candidate))))
+        result = transport.run(
+            Command(
+                (
+                    "sh",
+                    "-c",
+                    'candidate=$1; test -f "$candidate" && '
+                    'test ! -L "$candidate" && sha256sum -- "$candidate"',
+                    "rundra-image-probe",
+                    str(candidate),
+                )
+            )
+        )
         fields = result.stdout.split(maxsplit=1)
         if result.exit_code == 0 and fields and fields[0] == image.sha256:
             return OfflinePreparationProbe(

@@ -32,6 +32,7 @@ from rundra.domain.states import ExecutionState
 from rundra.orchestration.preparation import (
     probe_local_offline_preparation,
     probe_remote_offline_preparation,
+    select_remote_preparation_location,
 )
 from rundra.ports import Scheduler, SchedulerGroup, SchedulerReference, SchedulerUnit
 from rundra.results import OperationError, OperationResult
@@ -222,8 +223,14 @@ def doctor_operation(
             if scheduler_probe and connected:
                 checks.append(_scheduler_probe(target, probe_timeout))
             if offline and preparation is not None and experiment_source is not None:
-                location = preparation.requested_location
-                use_local = target.transport.kind == "local" or location == "local"
+                location = (
+                    "local"
+                    if target.transport.kind == "local"
+                    else select_remote_preparation_location(
+                        preparation, preparation_storage.definition_build
+                    )
+                )
+                use_local = location == "local"
                 if use_local:
                     try:
                         experiment = load_experiment(experiment_source)
@@ -250,7 +257,13 @@ def doctor_operation(
                                 ),
                                 DoctorCheck(
                                     "offline_image_cache",
-                                    "pass" if probe.image_ready else "fail",
+                                    (
+                                        "warning"
+                                        if probe.image_ready is None
+                                        else "pass"
+                                        if probe.image_ready
+                                        else "fail"
+                                    ),
                                     probe.image_message,
                                 ),
                             )
@@ -281,7 +294,13 @@ def doctor_operation(
                             ),
                             DoctorCheck(
                                 "offline_image_cache",
-                                "pass" if probe.image_ready else "fail",
+                                (
+                                    "warning"
+                                    if probe.image_ready is None
+                                    else "pass"
+                                    if probe.image_ready
+                                    else "fail"
+                                ),
                                 probe.image_message,
                             ),
                         )

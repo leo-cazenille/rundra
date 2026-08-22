@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 
 import pytest
 
-from rundra.adapters.pbs import OpenPBSScheduler, PBSSubmissionError, render_qsub_script
+from rundra.adapters.pbs import (
+    OpenPBSScheduler,
+    PBSSubmissionError,
+    render_qsub_array_script,
+    render_qsub_script,
+)
 from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import Command, ResourceRequest, TaskId
 from rundra.domain.scaling import SeedRange, TaskSpace
@@ -86,6 +93,30 @@ def test_submit_array_maps_openpbs_subjob_ids() -> None:
         units[1].task_id: "42[1].server",
     }
     assert "#PBS -J 0-1%2" in transport.commands[0].argv[5]
+
+
+def test_unbundled_qsub_array_does_not_finalize_bundle_metadata() -> None:
+    units = (_unit(0), _unit(1))
+    request = SchedulerArrayRequest(
+        SchedulerGroup(units),
+        (
+            ArrayTaskMapping(units[0].task_id, 0, 0),
+            ArrayTaskMapping(units[1].task_id, 1, 1),
+        ),
+        PurePosixPath("/work/array.sh"),
+    )
+
+    script = render_qsub_array_script(request)
+    completed = subprocess.run(
+        ("bash", "-c", script),
+        env={**os.environ, "PBS_ARRAY_INDEX": "0", "PBS_JOBID": "42[].server"},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "bundle-status" not in script
 
 
 def test_submit_compact_array_maps_workers_and_runs_concurrent_lanes() -> None:
