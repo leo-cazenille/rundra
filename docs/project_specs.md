@@ -3896,3 +3896,13 @@ Throughput and ETA are absent until at least 20 Tasks and 10 percent of the Run
 have completed over at least 60 seconds. Estimates are removed when the sample
 becomes inapplicable or the Run is terminal and remain advisory for
 heterogeneous workloads.
+
+## M21 offline preparation diagnostics
+
+`doctor --offline` extends the capability audit with cache-only resolution of
+the selected project's immutable preparation source and image. For local
+targets it uses the same pinned Git, exclusion, digest, image-candidate, and
+definition-cache rules as execution. It performs no network acquisition,
+container build, application compilation, or scheduler submission. Missing
+inputs make the audit not ready and expose stable source/image remediation
+codes. Ordinary `doctor` retains its access-oriented meaning.

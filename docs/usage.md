@@ -295,3 +295,6 @@ Normal `uv run pytest` never contacts Shoal. The concrete environment variables,
 resource-specific switches, bounded requests, expected evidence, and cleanup
 rules are documented in [Shoal system testing](shoal.md). Each submitting test
 requires both the general opt-in and its own CPU, GPU, failure, or array opt-in.
+is intended for warm caches, not as a default safety flag. Before an offline
+local run, use `rundr doctor EXPERIMENT --offline --json`; ordinary `doctor`
+checks access but does not claim that immutable preparation inputs are cached.

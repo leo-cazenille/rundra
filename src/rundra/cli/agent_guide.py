@@ -34,6 +34,10 @@ GUIDE = f"""{START_MARKER}
   EXPERIMENT` before consuming cluster resources. Use the explicit
   `--scheduler-probe` only when a bounded no-op scheduler submission is wanted.
   Review task count, seeds, resources, concurrency, and retrieval strategy.
+- Do not add `--offline` to a first preparation run. Use `rundr doctor
+  EXPERIMENT --offline --json` only when execution must avoid Git fetches and
+  image pulls; `ready` then proves the immutable local preparation inputs are
+  already cached. Warm a missing cache by running once without `--offline`.
 - When the client mounts target storage directly, or before cluster system
   tests that use target-resident files, add `--local-target-access`. Shared
   staging enables this audit automatically. Apply the reported workspace,

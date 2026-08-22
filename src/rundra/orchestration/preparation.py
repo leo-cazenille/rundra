@@ -120,6 +120,63 @@ class RemotePreparationCacheHit:
     record: PreparationRecord
 
 
+@dataclass(frozen=True, slots=True)
+class OfflinePreparationProbe:
+    """Cache-only readiness of immutable local preparation inputs."""
+
+    source_ready: bool
+    image_ready: bool
+    source_message: str
+    image_message: str
+
+
+def probe_local_offline_preparation(
+    plan: PreparationPlan,
+    experiment: ExperimentSpec,
+    target: Target,
+    *,
+    source_root: Path,
+    cache_root: Path,
+    image_search_paths: tuple[PurePath, ...] = (),
+    definition_build: DefinitionBuildPolicy | None = None,
+) -> OfflinePreparationProbe:
+    """Resolve immutable inputs with acquisition and image builds prohibited."""
+    if not plan.offline:
+        raise ValueError("offline preparation probe requires an offline plan")
+    try:
+        snapshot, source_digest, _ = _resolve_source(
+            plan,
+            source_root=source_root,
+            cache_root=cache_root,
+            excludes=experiment.sync_excludes,
+        )
+    except PreparationError as error:
+        return OfflinePreparationProbe(False, False, str(error), "source unavailable")
+    source_message = f"pinned source is available as sha256:{source_digest}"
+    try:
+        image = _resolve_image(
+            plan,
+            snapshot=snapshot,
+            source_digest=source_digest,
+            project_root=source_root,
+            cache_root=cache_root,
+            target=target,
+            apptainer_executable=str(
+                target.container.options.get("executable", "apptainer")
+            ),
+            image_search_paths=tuple(Path(path) for path in image_search_paths),
+            definition_build=definition_build,
+        )
+    except PreparationError as error:
+        return OfflinePreparationProbe(True, False, source_message, str(error))
+    return OfflinePreparationProbe(
+        True,
+        True,
+        source_message,
+        f"verified image is available as sha256:{image.sha256}",
+    )
+
+
 def prepare_source_snapshot(
     plan: PreparationPlan,
     *,

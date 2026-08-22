@@ -21,7 +21,7 @@ instead. Use the fields, not object-key order or human output, as the interface.
 
 | Operation or document | Checked example | Primary payload |
 |---|---|---|
-| CLI surface | [`cli-surface-v19.json`](cli-surface-v19.json) | current program, commands, positionals, options |
+| CLI surface | [`cli-surface-v20.json`](cli-surface-v20.json) | current program, commands, positionals, options |
 | MCP launcher surface | [`rundr-mcp-surface-v1.json`](rundr-mcp-surface-v1.json) | stdio and authenticated Streamable HTTP options |
 | `validate` | [`validate-success-v1.json`](validate-success-v1.json) | `experiment` |
 | `plan` | [`plan-success-v1.json`](plan-success-v1.json) | `plan`, plus launch resolution |
@@ -158,3 +158,5 @@ credential-bearing field names, and unsupported format versions rather than
 silently reinterpreting them. Older version-1 records may omit documented
 additive fields such as `task_array_mapping`; loading supplies the version-1
 empty/default meaning described above.
+The version-20 CLI surface adds the cache-only `--offline` audit to `doctor`.
+Version 19 remains available as the preceding public surface contract.

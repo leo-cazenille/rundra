@@ -6,6 +6,9 @@ All notable user-visible changes are recorded here.
 
 ### Fixed
 
+- Added `doctor --offline` cache-readiness checks so cold pinned Git or image
+  caches fail before Run creation with actionable remediation codes.
+
 - Worker status tolerates dependency-pending Runs without journals and merges
   identical events visible through overlapping atomic journal fragments.
 - Run aggregates self-heal from durable Task state, compact retries supersede

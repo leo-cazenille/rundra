@@ -157,6 +157,11 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--probe-timeout", type=int, default=120)
     doctor.add_argument("--no-write-probe", action="store_true")
     doctor.add_argument("--local-target-access", action="store_true")
+    doctor.add_argument(
+        "--offline",
+        action="store_true",
+        help="verify that immutable preparation inputs are already cached",
+    )
     doctor.add_argument("--agent", choices=("generic", "codex"), default="generic")
     _add_json_option(doctor)
 
@@ -671,6 +676,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 source_root=arguments.source_root,
                 local_target_access=arguments.local_target_access,
                 agent=arguments.agent,
+                offline=arguments.offline,
             )
         else:
             resolved_doctor = resolve_run_inputs_operation(
@@ -684,6 +690,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 project_file=arguments.project_file,
                 profile=arguments.profile,
                 operation="doctor",
+                offline=arguments.offline,
             )
             if not resolved_doctor.ok:
                 result = resolved_doctor
@@ -708,6 +715,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                             str(resolved_doctor.value.preparation_storage.cache_root)
                         )
                     ),
+                    preparation=resolved_doctor.value.preparation_plan,
+                    preparation_storage=resolved_doctor.value.preparation_storage,
+                    offline=arguments.offline,
                     local_target_access=arguments.local_target_access,
                     agent=arguments.agent,
                 )

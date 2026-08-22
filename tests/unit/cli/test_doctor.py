@@ -1,9 +1,19 @@
 from __future__ import annotations
 
+import hashlib
+import subprocess
 from pathlib import Path
 
 from rundra.cli.capability_doctor import doctor_operation
 from rundra.cli.render import render_json
+from rundra.domain.preparation import (
+    PreparationConfig,
+    PreparationImage,
+    PreparationPlan,
+    PreparationSourceGit,
+    PreparationStorageConfig,
+    source_recipe_identity,
+)
 
 
 def test_doctor_accepts_a_writable_local_target(tmp_path: Path) -> None:
@@ -193,3 +203,150 @@ targets:
     assert str(workspace / "prepared") in result.value.agent_config
     assert str(image_search) in result.value.agent_config
     assert not workspace.exists()
+
+
+def test_offline_doctor_reports_missing_pinned_source_and_image(tmp_path: Path) -> None:
+    targets = _local_targets(tmp_path)
+    experiment = tmp_path / "experiment.yaml"
+    experiment.write_text(_minimal_experiment(), encoding="utf-8")
+    plan, storage = _offline_plan(tmp_path, b"image")
+
+    result = doctor_operation(
+        targets,
+        "local",
+        experiment_source=experiment,
+        source_root=tmp_path,
+        cache_root=tmp_path / "cache",
+        preparation=plan,
+        preparation_storage=storage,
+        offline=True,
+    )
+
+    assert result.ok and result.value is not None
+    assert not result.value.ready
+    checks = {check.name: check.status for check in result.value.checks}
+    assert checks["offline_source_cache"] == "fail"
+    assert checks["offline_image_cache"] == "fail"
+    assert {action.code for action in result.value.actions} >= {
+        "OFFLINE_SOURCE_CACHE_MISS",
+        "OFFLINE_IMAGE_CACHE_MISS",
+    }
+
+
+def test_offline_doctor_accepts_exact_pinned_source_and_image(tmp_path: Path) -> None:
+    targets = _local_targets(tmp_path)
+    experiment = tmp_path / "experiment.yaml"
+    experiment.write_text(_minimal_experiment(), encoding="utf-8")
+    image_bytes = b"verified image"
+    plan, storage = _offline_plan(tmp_path, image_bytes, populate=True)
+
+    result = doctor_operation(
+        targets,
+        "local",
+        experiment_source=experiment,
+        source_root=tmp_path,
+        cache_root=tmp_path / "cache",
+        preparation=plan,
+        preparation_storage=storage,
+        offline=True,
+    )
+
+    assert result.ok and result.value is not None
+    assert result.value.ready
+    checks = {check.name: check.status for check in result.value.checks}
+    assert checks["offline_source_cache"] == "pass"
+    assert checks["offline_image_cache"] == "pass"
+
+
+def _local_targets(root: Path) -> Path:
+    targets = root / "targets.yaml"
+    targets.write_text(
+        f"""version: 1
+targets:
+  local:
+    transport: {{type: local}}
+    scheduler: {{type: local}}
+    staging: {{type: local}}
+    container: {{type: native}}
+    workspace: {root / "workspace"}
+""",
+        encoding="utf-8",
+    )
+    return targets
+
+
+def _minimal_experiment() -> str:
+    return """version: 1
+experiment:
+  name: offline-doctor
+command:
+  argv: ["true"]
+container:
+  image: image.sif
+  gpu: false
+resources:
+  nodes: 1
+  tasks: 1
+  cpus_per_task: 1
+  gpus_per_task: 0
+  memory: 1MiB
+  walltime: "00:01:00"
+outputs:
+  include: [result.txt]
+"""
+
+
+def _offline_plan(
+    root: Path, image_bytes: bytes, *, populate: bool = False
+) -> tuple[PreparationPlan, PreparationStorageConfig]:
+    source = root / "origin"
+    source.mkdir()
+    subprocess.run(("git", "init", "-q", str(source)), check=True)
+    (source / "main.py").write_text("print('ready')\n", encoding="utf-8")
+    subprocess.run(("git", "-C", str(source), "add", "main.py"), check=True)
+    subprocess.run(
+        (
+            "git",
+            "-C",
+            str(source),
+            "-c",
+            "user.name=Rundra Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "fixture",
+        ),
+        check=True,
+    )
+    revision = subprocess.run(
+        ("git", "-C", str(source), "rev-parse", "HEAD"),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    digest = hashlib.sha256(image_bytes).hexdigest()
+    cache = root / "cache"
+    if populate:
+        repository = (
+            cache
+            / "git"
+            / source_recipe_identity(PreparationSourceGit(source.as_uri(), revision))
+        )
+        repository.parent.mkdir(parents=True)
+        subprocess.run(
+            ("git", "clone", "-q", "--bare", str(source), str(repository)), check=True
+        )
+        image = cache / "images" / f"{digest}.sif"
+        image.parent.mkdir(parents=True)
+        image.write_bytes(image_bytes)
+    recipe = PreparationConfig(
+        PreparationSourceGit(source.as_uri(), revision),
+        PreparationImage(Path("image.sif"), "library://example/image:1", digest),
+        None,
+    )
+    return (
+        PreparationPlan(recipe, "git", None, offline=True),
+        PreparationStorageConfig(cache_root=cache),
+    )

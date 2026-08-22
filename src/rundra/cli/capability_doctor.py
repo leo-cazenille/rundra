@@ -19,6 +19,7 @@ from rundra.adapters.ssh import SSHTransport
 from rundra.cli.doctor import DoctorCheck
 from rundra.cli.doctor import doctor_operation as target_doctor_operation
 from rundra.config.errors import ConfigError
+from rundra.config.experiments import load_experiment
 from rundra.config.targets import TargetsConfig, load_targets_config
 from rundra.domain.models import (
     Command,
@@ -26,8 +27,9 @@ from rundra.domain.models import (
     Target,
     TaskId,
 )
-from rundra.domain.preparation import PreparationStorageConfig
+from rundra.domain.preparation import PreparationPlan, PreparationStorageConfig
 from rundra.domain.states import ExecutionState
+from rundra.orchestration.preparation import probe_local_offline_preparation
 from rundra.ports import Scheduler, SchedulerGroup, SchedulerReference, SchedulerUnit
 from rundra.results import OperationError, OperationResult
 
@@ -89,6 +91,9 @@ def doctor_operation(
     experiment_source: Path | None = None,
     config_source: Path | None = None,
     cache_root: Path | None = None,
+    preparation: PreparationPlan | None = None,
+    preparation_storage: PreparationStorageConfig | None = None,
+    offline: bool = False,
     local_target_access: bool = False,
     agent: str = "generic",
 ) -> OperationResult[DoctorValue]:
@@ -99,7 +104,10 @@ def doctor_operation(
         return _usage("--scheduler-probe requires local write probes")
     if local_target_access and target_name is None:
         return _usage("--local-target-access requires a selected target")
+    if offline and experiment_source is None:
+        return _usage("--offline requires an experiment")
     connect = connect or scheduler_probe
+    preparation_storage = preparation_storage or PreparationStorageConfig()
     source = targets_file.expanduser().resolve()
     mode = (
         "experiment" if experiment_source else "target" if target_name else "bootstrap"
@@ -210,13 +218,74 @@ def doctor_operation(
                 )
             if scheduler_probe and connected:
                 checks.append(_scheduler_probe(target, probe_timeout))
+            if offline and preparation is not None and experiment_source is not None:
+                if target.transport.kind != "local":
+                    checks.append(
+                        DoctorCheck(
+                            "offline_preparation_cache",
+                            "fail",
+                            "offline preparation cache probing currently requires a local target",
+                        )
+                    )
+                else:
+                    try:
+                        experiment = load_experiment(experiment_source)
+                        local_cache = (
+                            Path(preparation_storage.cache_root)
+                            if preparation_storage.cache_root is not None
+                            else (cache_root or Path("~/.cache/rundra")).expanduser()
+                        )
+                        probe = probe_local_offline_preparation(
+                            preparation,
+                            experiment,
+                            target,
+                            source_root=source_root or experiment_source.parent,
+                            cache_root=local_cache.resolve(),
+                            image_search_paths=preparation_storage.image_search_paths,
+                            definition_build=preparation_storage.definition_build,
+                        )
+                        checks.extend(
+                            (
+                                DoctorCheck(
+                                    "offline_source_cache",
+                                    "pass" if probe.source_ready else "fail",
+                                    probe.source_message,
+                                ),
+                                DoctorCheck(
+                                    "offline_image_cache",
+                                    "pass" if probe.image_ready else "fail",
+                                    probe.image_message,
+                                ),
+                            )
+                        )
+                    except ConfigError as error:
+                        checks.append(
+                            DoctorCheck(
+                                "offline_preparation_cache", "fail", error.message
+                            )
+                        )
         else:
             assert legacy.error is not None
             checks.append(DoctorCheck("selected_target", "fail", legacy.error.message))
     elif mode != "bootstrap":
         checks.append(DoctorCheck("selected_target", "fail", "no target was selected"))
 
-    actions = _actions(checks, connected, scheduler_probe)
+    actions = list(_actions(checks, connected, scheduler_probe))
+    statuses = {check.name: check.status for check in checks}
+    if statuses.get("offline_source_cache") == "fail":
+        actions.append(
+            DoctorAction(
+                "OFFLINE_SOURCE_CACHE_MISS",
+                "rerun the preparation once without --offline to cache the pinned Git source",
+            )
+        )
+    if statuses.get("offline_image_cache") == "fail":
+        actions.append(
+            DoctorAction(
+                "OFFLINE_IMAGE_CACHE_MISS",
+                "rerun the preparation once without --offline to cache the verified image",
+            )
+        )
     config = _codex_config(requirements) if agent == "codex" else None
     return OperationResult.success(
         "doctor",
@@ -226,7 +295,7 @@ def doctor_operation(
             mode,
             tuple(checks),
             tuple(requirements),
-            actions,
+            tuple(actions),
             connected,
             scheduler_probe,
             agent,

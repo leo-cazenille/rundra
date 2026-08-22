@@ -241,3 +241,9 @@ returns plan format 6 with requested and effective scale, policy ceilings,
 worker resources, and scheduler-controlled placement. Operators must configure
 limits and defaults from known site policy; Rundra does not infer cores,
 exclusive placement, or memory overcommit.
+
+`rundr doctor EXPERIMENT --offline` performs an additional cache-only audit for
+local preparation. It verifies the exact pinned Git commit and the verified
+prebuilt or definition-built image. A cold cache sets `ready` to false and
+returns `OFFLINE_SOURCE_CACHE_MISS` or `OFFLINE_IMAGE_CACHE_MISS`; warm the
+cache with one preparation run that omits `--offline`.
