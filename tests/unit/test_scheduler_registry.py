@@ -5,6 +5,8 @@ import pytest
 from rundra.scheduler_registry import (
     scheduler_capabilities,
     scheduler_capabilities_document,
+    scheduler_kinds,
+    scheduler_required_tools,
 )
 
 
@@ -21,6 +23,22 @@ def test_builtin_scheduler_capabilities_are_explicit() -> None:
         "scheduler_probe": True,
         "scheduler_requeue_recovery": False,
     }
+    assert scheduler_capabilities_document("htcondor") == {
+        "arrays": True,
+        "compact_worker_pool": False,
+        "dependencies": False,
+        "detached_submission": True,
+        "scheduler_probe": True,
+        "scheduler_requeue_recovery": False,
+    }
+    assert scheduler_kinds() == frozenset({"local", "slurm", "pbs", "htcondor"})
+    assert scheduler_required_tools("htcondor") == (
+        "condor_submit",
+        "condor_q",
+        "condor_history",
+        "condor_rm",
+        "condor_version",
+    )
 
 
 def test_unknown_scheduler_has_no_implicit_fallback() -> None:

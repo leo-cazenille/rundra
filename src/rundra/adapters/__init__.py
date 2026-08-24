@@ -7,6 +7,17 @@ from rundra.adapters.apptainer import (
     ApptainerUnavailableError,
     RemoteApptainerRuntime,
 )
+from rundra.adapters.htcondor import (
+    HTCondorCancellationError,
+    HTCondorQueryError,
+    HTCondorScheduler,
+    HTCondorSchedulerError,
+    HTCondorScriptError,
+    HTCondorSubmissionError,
+    render_condor_array_submit,
+    render_condor_submit,
+    validate_htcondor_resources,
+)
 from rundra.adapters.local import (
     LocalScheduler,
     LocalSchedulerError,
@@ -70,6 +81,12 @@ __all__ = [
     "ApptainerRuntimeError",
     "ApptainerUnavailableError",
     "LocalScheduler",
+    "HTCondorCancellationError",
+    "HTCondorQueryError",
+    "HTCondorScheduler",
+    "HTCondorSchedulerError",
+    "HTCondorScriptError",
+    "HTCondorSubmissionError",
     "LocalSchedulerError",
     "LocalStager",
     "LocalStagerError",
@@ -117,5 +134,8 @@ __all__ = [
     "render_qsub_array_script",
     "render_qsub_script",
     "validate_pbs_resources",
+    "render_condor_array_submit",
+    "render_condor_submit",
+    "validate_htcondor_resources",
     "validate_slurm_resources",
 ]

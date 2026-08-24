@@ -12,6 +12,7 @@ from rundra.config.errors import ConfigError
 from rundra.config.targets import load_targets
 from rundra.domain.models import Command, Target
 from rundra.results import OperationError, OperationResult
+from rundra.scheduler_registry import scheduler_required_tools
 
 _STATUSES = frozenset({"pass", "warning", "fail"})
 
@@ -214,11 +215,7 @@ def _ssh_configuration_checks(
 def _ssh_connect_check(
     host: str, executable: str, config_file: Path | None, scheduler: str
 ) -> DoctorCheck:
-    scheduler_tools = (
-        ("qsub", "qstat", "qdel")
-        if scheduler == "pbs"
-        else ("sbatch", "squeue", "scancel", "scontrol")
-    )
+    scheduler_tools = scheduler_required_tools(scheduler)
     tools = (
         "rsync",
         *scheduler_tools,

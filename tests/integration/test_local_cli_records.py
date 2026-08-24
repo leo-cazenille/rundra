@@ -114,7 +114,7 @@ def test_submit_and_invalid_run_id_are_structured_cli_failures(tmp_path: Path) -
     assert unavailable.returncode == 1
     unavailable_error = json.loads(unavailable.stdout)["error"]
     assert unavailable_error["code"] == "ASYNC_UNAVAILABLE"
-    assert "Slurm or OpenPBS" in unavailable_error["message"]
+    assert "detached scheduler" in unavailable_error["message"]
     assert invalid.returncode == 1
     assert json.loads(invalid.stdout)["error"]["code"] == "INVALID_RUN_ID"
 

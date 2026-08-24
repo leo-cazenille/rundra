@@ -42,16 +42,41 @@ class SchedulerCapabilities:
             raise ValueError("Scheduler array strategy is unsupported")
 
 
-_CAPABILITIES: Final = MappingProxyType(
+@dataclass(frozen=True, slots=True)
+class SchedulerBackendDescriptor:
+    capabilities: SchedulerCapabilities
+    required_tools: tuple[str, ...]
+
+
+_BACKENDS: Final = MappingProxyType(
     {
-        "local": SchedulerCapabilities(
-            False, False, False, False, False, False, "one_unit_per_task"
+        "local": SchedulerBackendDescriptor(
+            SchedulerCapabilities(
+                False, False, False, False, False, False, "one_unit_per_task"
+            ),
+            (),
         ),
-        "slurm": SchedulerCapabilities(
-            True, True, True, True, True, True, "slurm_array"
+        "slurm": SchedulerBackendDescriptor(
+            SchedulerCapabilities(True, True, True, True, True, True, "slurm_array"),
+            ("sbatch", "squeue", "scancel", "scontrol"),
         ),
-        "pbs": SchedulerCapabilities(
-            True, True, True, True, False, True, "scheduler_array"
+        "pbs": SchedulerBackendDescriptor(
+            SchedulerCapabilities(
+                True, True, True, True, False, True, "scheduler_array"
+            ),
+            ("qsub", "qstat", "qdel"),
+        ),
+        "htcondor": SchedulerBackendDescriptor(
+            SchedulerCapabilities(
+                True, True, False, False, False, True, "scheduler_array"
+            ),
+            (
+                "condor_submit",
+                "condor_q",
+                "condor_history",
+                "condor_rm",
+                "condor_version",
+            ),
         ),
     }
 )
@@ -60,9 +85,45 @@ _CAPABILITIES: Final = MappingProxyType(
 def scheduler_capabilities(kind: str) -> SchedulerCapabilities:
     """Return immutable built-in capabilities or reject an unknown backend."""
     try:
-        return _CAPABILITIES[kind]
+        return _BACKENDS[kind].capabilities
     except KeyError as error:
         raise ValueError(f"Unsupported scheduler backend: {kind}") from error
+
+
+def scheduler_kinds() -> frozenset[str]:
+    return frozenset(_BACKENDS)
+
+
+def remote_scheduler_kinds() -> frozenset[str]:
+    return scheduler_kinds() - {"local"}
+
+
+def scheduler_required_tools(kind: str) -> tuple[str, ...]:
+    try:
+        return _BACKENDS[kind].required_tools
+    except KeyError as error:
+        raise ValueError(f"Unsupported scheduler backend: {kind}") from error
+
+
+def validate_scheduler_resources(kind: str, resources: object) -> None:
+    if kind == "local":
+        return
+    if kind == "pbs":
+        from rundra.adapters.pbs import validate_pbs_resources
+
+        validate_pbs_resources(resources)  # type: ignore[arg-type]
+        return
+    if kind == "slurm":
+        from rundra.adapters.slurm import validate_slurm_resources
+
+        validate_slurm_resources(resources)  # type: ignore[arg-type]
+        return
+    if kind == "htcondor":
+        from rundra.adapters.htcondor import validate_htcondor_resources
+
+        validate_htcondor_resources(resources)  # type: ignore[arg-type]
+        return
+    raise ValueError(f"Unsupported scheduler backend: {kind}")
 
 
 def scheduler_for_target(
@@ -84,6 +145,10 @@ def scheduler_for_target(
         from rundra.adapters.slurm import SlurmScheduler
 
         return SlurmScheduler(transport, log_directory=log_directory)
+    if target.scheduler.kind == "htcondor":
+        from rundra.adapters.htcondor import HTCondorScheduler
+
+        return HTCondorScheduler(transport, log_directory=log_directory)
     raise ValueError(f"Unsupported scheduler backend: {target.scheduler.kind}")
 
 

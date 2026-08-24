@@ -48,6 +48,74 @@ targets:
         targets["other"] = targets["local"]
 
 
+def test_version_nine_accepts_explicit_shared_workspace_htcondor(
+    tmp_path: Path,
+) -> None:
+    from rundra.config.targets import load_targets_config
+
+    source = tmp_path / "targets.yaml"
+    source.write_text(
+        """\
+version: 9
+targets:
+  condor:
+    transport: {type: ssh, host: condor-access}
+    scheduler: {type: htcondor, shared_workspace: true}
+    staging: {type: rsync}
+    container: {type: apptainer}
+    workspace: /shared/rundra
+    execution:
+      hard_task_limit: 10000
+      confirmation_threshold: 1000
+      max_active_tasks: 100
+      max_concurrent_jobs: 100
+      max_array_size: 10000
+      output_shard_tasks: 1000
+      automatic_retrieval_threshold: 1000
+      max_memory_per_worker: 4GiB
+      worker_pool:
+        activation_threshold: 1000
+        max_workers: 100
+        tasks_per_lease: 1
+        infrastructure_retry_limit: 0
+        requeue_limit: 0
+        default_workers: 1
+        default_task_slots_per_worker: 1
+        max_task_slots_per_worker: 1
+""",
+        encoding="utf-8",
+    )
+
+    target = load_targets_config(source).targets["condor"]
+
+    assert target.scheduler.kind == "htcondor"
+    assert target.scheduler.options == {"shared_workspace": True}
+
+
+def test_htcondor_requires_explicit_shared_workspace_contract(tmp_path: Path) -> None:
+    from rundra.config.errors import ConfigError
+    from rundra.config.targets import load_targets_config
+
+    source = tmp_path / "targets.yaml"
+    source.write_text(
+        """\
+version: 9
+targets:
+  condor:
+    transport: {type: ssh, host: condor-access}
+    scheduler: {type: htcondor}
+    staging: {type: rsync}
+    container: {type: apptainer}
+    workspace: /shared/rundra
+    execution: {}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="shared_workspace"):
+        load_targets_config(source)
+
+
 def test_version_two_target_preparation_storage_is_separate_and_strict(
     tmp_path: Path,
 ) -> None:
@@ -235,7 +303,7 @@ targets:
 @pytest.mark.parametrize(
     "content, code, path",
     [
-        ("version: 9\ntargets: {}\n", "UNSUPPORTED_VERSION", ("version",)),
+        ("version: 10\ntargets: {}\n", "UNSUPPORTED_VERSION", ("version",)),
         ("version: 1\n", "MISSING_FIELD", ("targets",)),
         (
             "version: 1\ntargets: []\n",

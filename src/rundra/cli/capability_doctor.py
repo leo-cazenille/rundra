@@ -12,9 +12,7 @@ from datetime import timedelta
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path, PurePath
 
-from rundra.adapters.local import LocalScheduler, LocalTransport
-from rundra.adapters.pbs import OpenPBSScheduler
-from rundra.adapters.slurm import SlurmScheduler
+from rundra.adapters.local import LocalTransport
 from rundra.adapters.ssh import SSHTransport
 from rundra.cli.doctor import DoctorCheck
 from rundra.cli.doctor import doctor_operation as target_doctor_operation
@@ -36,6 +34,7 @@ from rundra.orchestration.preparation import (
 )
 from rundra.ports import Scheduler, SchedulerGroup, SchedulerReference, SchedulerUnit
 from rundra.results import OperationError, OperationResult
+from rundra.scheduler_registry import scheduler_for_target
 
 _TERMINAL = frozenset(
     {ExecutionState.SUCCEEDED, ExecutionState.FAILED, ExecutionState.CANCELLED}
@@ -678,12 +677,7 @@ def _scheduler_probe(target: Target, timeout: int) -> DoctorCheck:
             ).exit_code
         ):
             raise RuntimeError("workspace unavailable")
-        if target.scheduler.kind == "slurm":
-            scheduler = SlurmScheduler(transport, log_directory=root)
-        elif target.scheduler.kind == "pbs":
-            scheduler = OpenPBSScheduler(transport, log_directory=root)
-        else:
-            scheduler = LocalScheduler(transport)
+        scheduler = scheduler_for_target(target, transport, log_directory=root)
         script = 'printf "%s" "$1" > "$2"; hostname > "$3"'
         unit = SchedulerUnit(
             TaskId("task_000000"),

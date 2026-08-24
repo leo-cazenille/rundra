@@ -2389,7 +2389,10 @@ def _observed_records(
     if not observations or not set(observations).issubset(expected_task_ids):
         raise ValueError("Scheduler observations contain no known Run Tasks")
     tasks = tuple(
-        replace(task, state=observations[task.id].state)
+        replace(
+            task,
+            state=_monotonic_observed_state(task.state, observations[task.id].state),
+        )
         if task.id in observations
         else task
         for task in record.run.tasks
@@ -2467,6 +2470,20 @@ def _observed_records(
         task_exit_codes=exit_codes,
         artifacts=tuple(artifacts),
     )
+
+
+def _monotonic_observed_state(
+    current: ExecutionState,
+    observed: ExecutionState,
+) -> ExecutionState:
+    if current is ExecutionState.RUNNING and observed in {
+        ExecutionState.SUBMITTED,
+        ExecutionState.QUEUED,
+    }:
+        return current
+    if current is ExecutionState.QUEUED and observed is ExecutionState.SUBMITTED:
+        return current
+    return observed
 
 
 def _apply_bundle_journals(

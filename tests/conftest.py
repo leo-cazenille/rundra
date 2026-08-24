@@ -5,6 +5,12 @@ import pytest
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
+        "--run-docker-htcondor-system-tests",
+        action="store_true",
+        default=False,
+        help="enable the Docker Compose HTCondor system tests",
+    )
+    parser.addoption(
         "--run-docker-pbs-system-tests",
         action="store_true",
         default=False,
@@ -82,6 +88,7 @@ def pytest_collection_modifyitems(
     config: pytest.Config,
     items: Sequence[pytest.Item],
 ) -> None:
+    run_docker_htcondor = bool(config.getoption("--run-docker-htcondor-system-tests"))
     run_docker_pbs = bool(config.getoption("--run-docker-pbs-system-tests"))
     run_docker_slurm = bool(config.getoption("--run-docker-slurm-system-tests"))
     run_system = bool(config.getoption("--run-shoal-system-tests"))
@@ -104,6 +111,9 @@ def pytest_collection_modifyitems(
     )
     skip_docker_pbs = pytest.mark.skip(
         reason="requires the explicit --run-docker-pbs-system-tests opt-in"
+    )
+    skip_docker_htcondor = pytest.mark.skip(
+        reason="requires the explicit --run-docker-htcondor-system-tests opt-in"
     )
     skip_cpu = pytest.mark.skip(
         reason="requires both Shoal system and CPU submission opt-ins"
@@ -133,7 +143,9 @@ def pytest_collection_modifyitems(
         reason="requires both Shoal system and prepared-submission opt-ins"
     )
     for item in items:
-        if "docker_pbs" in item.keywords and not run_docker_pbs:
+        if "docker_htcondor" in item.keywords and not run_docker_htcondor:
+            item.add_marker(skip_docker_htcondor)
+        elif "docker_pbs" in item.keywords and not run_docker_pbs:
             item.add_marker(skip_docker_pbs)
         elif "docker_slurm" in item.keywords and not run_docker_slurm:
             item.add_marker(skip_docker_slurm)

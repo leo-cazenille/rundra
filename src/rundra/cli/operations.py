@@ -16,17 +16,13 @@ from rundra.adapters import (
     LocalStager,
     LocalTransport,
     NativeRuntime,
-    PBSScriptError,
     PurgeError,
     RemoteApptainerRuntime,
     RsyncStager,
     RsyncUploadError,
     SharedStager,
-    SlurmScriptError,
     SSHPurger,
     SSHTransport,
-    validate_pbs_resources,
-    validate_slurm_resources,
 )
 from rundra.config.errors import ConfigError
 from rundra.config.experiments import load_experiment
@@ -129,7 +125,12 @@ from rundra.ports import (
 )
 from rundra.provenance import GitProvenanceCapture
 from rundra.results import OperationError, OperationResult
-from rundra.scheduler_registry import scheduler_for_target
+from rundra.scheduler_registry import (
+    remote_scheduler_kinds,
+    scheduler_capabilities,
+    scheduler_for_target,
+    validate_scheduler_resources,
+)
 from rundra.schema_versions import RUN_LIST_SCHEMA, STATUS_SCHEMA, TASKS_SCHEMA
 
 _DEFAULT_PREPARATION_STORAGE = PreparationStorageConfig()
@@ -362,7 +363,6 @@ class WaitValue:
 
 
 @dataclass(frozen=True, slots=True)
-@dataclass(frozen=True, slots=True)
 class AwaitRunsValue:
     statuses: tuple[StatusValue, ...]
     until: str
@@ -398,6 +398,7 @@ class AwaitRunsValue:
         return 0
 
 
+@dataclass(frozen=True, slots=True)
 class CancelValue:
     status: StatusValue
 
@@ -1992,10 +1993,11 @@ def submit_operation(
         remote_source_root = None
         transport, stager, runtime, scheduler = _execution_adapters(target)
         if preparation is not None:
-            if target.transport.kind != "ssh" or target.scheduler.kind not in {
-                "pbs",
-                "slurm",
-            }:
+            if (
+                target.transport.kind != "ssh"
+                or target.scheduler.kind not in remote_scheduler_kinds()
+                or not scheduler_capabilities(target.scheduler.kind).dependencies
+            ):
                 return OperationResult.failure(
                     "submit",
                     OperationError(
@@ -2323,10 +2325,9 @@ def status_operation(
     if error is not None:
         return OperationResult.failure("status", error)
     assert record is not None
-    if record.run.target.scheduler.kind in {
-        "pbs",
-        "slurm",
-    } and record.run.state not in {
+    if scheduler_capabilities(
+        record.run.target.scheduler.kind
+    ).detached_submission and record.run.state not in {
         ExecutionState.SUCCEEDED,
         ExecutionState.FAILED,
         ExecutionState.CANCELLED,
@@ -2464,7 +2465,6 @@ def wait_operation(
         sleeper(delay)
 
 
-def cancel_operation(
 def await_runs_operation(
     run_ids: Sequence[str],
     store: RunStore,
@@ -2578,6 +2578,7 @@ def await_runs_operation(
         sleeper(delay)
 
 
+def cancel_operation(
     run_id: str,
     store: RunStore,
     *,
@@ -2588,7 +2589,7 @@ def await_runs_operation(
     if error is not None:
         return OperationResult.failure("cancel", error)
     assert record is not None
-    if record.run.target.scheduler.kind not in {"pbs", "slurm"}:
+    if not scheduler_capabilities(record.run.target.scheduler.kind).detached_submission:
         return OperationResult.failure(
             "cancel",
             OperationError(
@@ -2722,11 +2723,17 @@ def purge_operation(
             return OperationResult.failure(
                 "purge", _run_store_operation_error(store_error, record.run.id)
             )
-        if record.run.state not in {
-            ExecutionState.SUCCEEDED,
-            ExecutionState.FAILED,
-            ExecutionState.CANCELLED,
-        } and record.run.target.scheduler.kind in {"pbs", "slurm"}:
+        if (
+            record.run.state
+            not in {
+                ExecutionState.SUCCEEDED,
+                ExecutionState.FAILED,
+                ExecutionState.CANCELLED,
+            }
+            and scheduler_capabilities(
+                record.run.target.scheduler.kind
+            ).detached_submission
+        ):
             try:
                 active_scheduler = scheduler or _record_scheduler(record)
                 record = SchedulerLifecycleService(
@@ -2999,11 +3006,7 @@ def logs_operation(
     assert record is not None
     if (
         not preparation
-        and record.run.target.scheduler.kind
-        in {
-            "pbs",
-            "slurm",
-        }
+        and record.run.target.scheduler.kind != "local"
         and record.run.state
         not in {
             ExecutionState.SUCCEEDED,
@@ -4150,7 +4153,7 @@ def _unsupported_execution_target(
             return OperationError(
                 "ASYNC_UNAVAILABLE",
                 (
-                    "Asynchronous submit requires SSH with Slurm or OpenPBS, "
+                    "Asynchronous submit requires SSH with a detached scheduler, "
                     "rsync or shared staging, and Apptainer"
                 ),
                 {"target": target.name},
@@ -4172,6 +4175,8 @@ def _unsupported_execution_target(
         ("ssh", "slurm", "shared", "apptainer"),
         ("ssh", "pbs", "rsync", "apptainer"),
         ("ssh", "pbs", "shared", "apptainer"),
+        ("ssh", "htcondor", "rsync", "apptainer"),
+        ("ssh", "htcondor", "shared", "apptainer"),
     }:
         if experiment.container is None:
             return OperationError(
@@ -4193,23 +4198,14 @@ def _unsupported_execution_target(
             "Local execution does not accept backend-native resource options",
             {"target": target.name},
         )
-    if target.scheduler.kind == "slurm":
+    if target.scheduler.kind != "local":
         try:
-            validate_slurm_resources(resources)
-        except SlurmScriptError as error:
+            validate_scheduler_resources(target.scheduler.kind, resources)
+        except (TypeError, ValueError, RuntimeError) as error:
             return OperationError(
                 "NATIVE_OPTIONS_UNSUPPORTED",
                 str(error),
-                {"target": target.name, "scheduler": "slurm"},
-            )
-    if target.scheduler.kind == "pbs":
-        try:
-            validate_pbs_resources(resources)
-        except PBSScriptError as error:
-            return OperationError(
-                "NATIVE_OPTIONS_UNSUPPORTED",
-                str(error),
-                {"target": target.name, "scheduler": "pbs"},
+                {"target": target.name, "scheduler": target.scheduler.kind},
             )
 
     container_gpu = (

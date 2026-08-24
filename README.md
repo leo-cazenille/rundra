@@ -89,8 +89,8 @@ M1E adds strict project launch profiles, optional user defaults, deterministic
 resolution precedence, concise `run`/`plan` commands, and generated seeds that
 are displayed and durably recorded before execution.
 
-Local execution is synchronous and local `submit` remains unavailable. Slurm
-and OpenPBS targets support durable asynchronous `submit`, new-process
+Local execution is synchronous and local `submit` remains unavailable. Slurm,
+OpenPBS, and HTCondor targets support durable asynchronous `submit`, new-process
 `status`/`logs`, and idempotent `cancel`. An explicit `native` runtime supports
 only an all-local target and an experiment without a container request; remote
 experiments use the `apptainer` runtime.

@@ -3925,3 +3925,33 @@ codes. Ordinary `doctor` retains its access-oriented meaning.
 Scheduler behavior is described by immutable adapter-owned capabilities for detached submission, arrays, dependencies, compact worker pools, scheduler rerun recovery, and scheduler probes. Target files select a backend but cannot claim capabilities. Planning and adapter construction use the central registry rather than implicit fallbacks.
 
 Slurm and OpenPBS implement compact worker arrays over the same TaskSpace and journal contracts. OpenPBS supports preparation dependencies, concurrent lanes, compact state, cancellation, failure propagation, and retrieval. OpenPBS does not promise scheduler-driven rerun recovery, so its worker policies require `requeue_limit: 0`.
+
+## M29 scheduler registry and HTCondor reliable core
+
+Scheduler behavior is selected through one immutable built-in descriptor
+registry. Each descriptor owns portable capability flags, required client
+tools, adapter construction, and backend resource validation. Target files may
+select a descriptor but cannot override its capabilities. This registry is an
+internal extension boundary, not a third-party plugin API.
+
+Target schema version 9 adds `scheduler.type: htcondor`. It is valid only with
+SSH transport, rsync or shared staging, Apptainer execution, and the literal
+operator acknowledgement `shared_workspace: true`. The access point and every
+execute node must see the Run workspace at the same absolute path. Rundra does
+not scan for or infer shared storage.
+
+The HTCondor adapter submits vanilla-universe jobs with scheduler file transfer
+disabled. It persists an argument-vector wrapper and submit description,
+records one `ClusterId.ProcId` per logical Task, queries machine-readable
+`condor_q` followed by `condor_history`, and cancels exact recorded identities.
+Portable resources and framework log paths remain Rundra-owned. Backend-native
+options are restricted to validated accounting group, requirements, rank,
+priority, disk, and concurrency-limit fields; arbitrary submit directives and
+credential material are forbidden.
+
+HTCondor's initial capability descriptor supports detached submission, arrays,
+and scheduler probes. Dependencies, target-side preparation, compact worker
+pools, scheduler rerun recovery, scheduler file transfer, DAGMan, and pool
+selection are explicitly unsupported. Agents must inspect capability metadata
+and choose another backend or local preparation rather than assuming these
+features from the scheduler name.

@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ ${1:-} == --version || ${1:-} == version ]]; then
+  printf 'apptainer version 1.0.0-rundra-test\n'
+  exit 0
+fi
+[[ ${1:-} == exec ]] || exit 64
+shift
+declare -a sources=() destinations=()
+working_directory=
+while (($#)); do
+  case $1 in
+    --bind)
+      source=${2%%:*}; remainder=${2#*:}; destination=${remainder%%:*}
+      sources+=("$source"); destinations+=("$destination"); shift 2 ;;
+    --cwd|--pwd) working_directory=$2; shift 2 ;;
+    --env) export "$2"; shift 2 ;;
+    --cleanenv|--containall|--no-eval|--nv) shift ;;
+    --*) printf 'unsupported apptainer option: %s\n' "$1" >&2; exit 64 ;;
+    *) image=$1; shift; break ;;
+  esac
+done
+[[ -n ${image:-} && $# -gt 0 ]] || exit 64
+translate() {
+  local value=$1 index
+  for index in "${!sources[@]}"; do
+    value=${value//${destinations[$index]}/${sources[$index]}}
+  done
+  printf '%s' "$value"
+}
+declare -a command=()
+for argument in "$@"; do command+=("$(translate "$argument")"); done
+if [[ -n $working_directory ]]; then cd "$(translate "$working_directory")"; fi
+exec "${command[@]}"

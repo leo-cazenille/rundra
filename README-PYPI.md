@@ -36,9 +36,12 @@ rundr fetch --last
 ```
 
 `rundr run` performs submission, waiting, and retrieval synchronously. Remote
-targets can combine SSH transport, a Slurm or OpenPBS scheduler, rsync or shared
-staging, and an Apptainer container runtime. Site connection, account, queue,
-workspace, and authentication policy remain explicit operator configuration.
+targets can combine SSH transport, a Slurm, OpenPBS, or HTCondor scheduler,
+rsync or shared staging, and an Apptainer container runtime. HTCondor currently
+requires an explicitly shared workspace and supports reliable vanilla Task
+clusters without dependencies or compact workers. Site connection, account,
+queue, workspace, and authentication policy remain explicit operator
+configuration.
 
 If an asynchronous submission is interrupted, `rundr resume RUN_ID` recovers
 its durable scheduler outcome without creating a duplicate Run. `rundr list`

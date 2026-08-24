@@ -1,0 +1,39 @@
+services:
+  manager:
+    image: htcondor/cm@sha256:b025796d6ef2cad5bf2be83eaec520d92038692f17fcdd96849d7ba40c8a4b04
+    hostname: manager
+    environment: {CONDOR_HOST: manager, USE_POOL_PASSWORD: "yes"}
+    networks: [pool]
+    volumes:
+      - ${RUNDRA_DOCKER_HTCONDOR_STATE:?state required}:/root/secrets:ro
+  access:
+    build: {context: ., dockerfile: Dockerfile.submit}
+    hostname: access
+    environment: {CONDOR_HOST: manager, USE_POOL_PASSWORD: "yes"}
+    depends_on: [manager]
+    ports: ["127.0.0.1::22"]
+    volumes:
+      - workspace:/workspace
+      - ${RUNDRA_DOCKER_HTCONDOR_STATE:?state required}:/state:ro
+      - ${RUNDRA_DOCKER_HTCONDOR_STATE:?state required}:/root/secrets:ro
+    networks: [pool]
+  execute1:
+    build: {context: ., dockerfile: Dockerfile.execute}
+    hostname: execute1
+    environment: {CONDOR_HOST: manager, USE_POOL_PASSWORD: "yes"}
+    depends_on: [manager]
+    volumes:
+      - workspace:/workspace
+      - ${RUNDRA_DOCKER_HTCONDOR_STATE:?state required}:/root/secrets:ro
+    networks: [pool]
+  execute2:
+    build: {context: ., dockerfile: Dockerfile.execute}
+    hostname: execute2
+    environment: {CONDOR_HOST: manager, USE_POOL_PASSWORD: "yes"}
+    depends_on: [manager]
+    volumes:
+      - workspace:/workspace
+      - ${RUNDRA_DOCKER_HTCONDOR_STATE:?state required}:/root/secrets:ro
+    networks: [pool]
+volumes: {workspace: {}}
+networks: {pool: {}}

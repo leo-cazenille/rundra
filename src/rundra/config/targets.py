@@ -24,6 +24,7 @@ from rundra.domain.scaling import (
     ExecutionPolicy,
     WorkerPoolPolicy,
 )
+from rundra.scheduler_registry import scheduler_kinds
 from rundra.schema_versions import TARGET_CONFIG_SCHEMA
 from rundra.security import is_credential_field, is_safe_ssh_destination
 
@@ -37,6 +38,7 @@ _TARGET_V5_FIELDS = _TARGET_V4_FIELDS
 _TARGET_V6_FIELDS = _TARGET_V5_FIELDS
 _TARGET_V7_FIELDS = _TARGET_V6_FIELDS
 _TARGET_V8_FIELDS = _TARGET_V7_FIELDS
+_TARGET_V9_FIELDS = _TARGET_V8_FIELDS
 _MEMORY_PATTERN = re.compile(r"([1-9][0-9]*)(B|KiB|MiB|GiB|TiB)\Z")
 _WALLTIME_PATTERN = re.compile(r"([0-9]{2,}):([0-5][0-9]):([0-5][0-9])\Z")
 _MEMORY_FACTORS = {
@@ -48,7 +50,7 @@ _MEMORY_FACTORS = {
 }
 _BACKENDS_BY_ROLE = {
     "transport": frozenset({"local", "ssh"}),
-    "scheduler": frozenset({"local", "pbs", "slurm"}),
+    "scheduler": scheduler_kinds(),
     "staging": frozenset({"local", "rsync", "shared"}),
     "container": frozenset({"apptainer", "native"}),
 }
@@ -60,6 +62,8 @@ _SUPPORTED_BACKEND_STACKS = frozenset(
         ("ssh", "slurm", "shared", "apptainer"),
         ("ssh", "pbs", "rsync", "apptainer"),
         ("ssh", "pbs", "shared", "apptainer"),
+        ("ssh", "htcondor", "rsync", "apptainer"),
+        ("ssh", "htcondor", "shared", "apptainer"),
     }
 )
 
@@ -73,7 +77,7 @@ class TargetsConfig:
 
     def __post_init__(self) -> None:
         if self.version not in TARGET_CONFIG_SCHEMA.supported:
-            raise ValueError("TargetsConfig version must be 1 through 8")
+            raise ValueError("TargetsConfig version must be 1 through 9")
         object.__setattr__(self, "targets", MappingProxyType(dict(self.targets)))
         object.__setattr__(
             self, "preparation", MappingProxyType(dict(self.preparation))
@@ -104,7 +108,7 @@ def load_targets_config(source: Path) -> TargetsConfig:
             source=source,
             path=("version",),
             code="UNSUPPORTED_VERSION",
-            message=("Unsupported targets version; supported versions are 1 through 8"),
+            message=("Unsupported targets version; supported versions are 1 through 9"),
         )
     raw_targets = expect_mapping(document["targets"], source=source, path=("targets",))
     targets: dict[str, Target] = {}
@@ -137,7 +141,11 @@ def load_targets_config(source: Path) -> TargetsConfig:
                                     else (
                                         _TARGET_V7_FIELDS
                                         if version == 7
-                                        else _TARGET_V8_FIELDS
+                                        else (
+                                            _TARGET_V8_FIELDS
+                                            if version == 8
+                                            else _TARGET_V9_FIELDS
+                                        )
                                     )
                                 )
                             )
@@ -570,7 +578,11 @@ def _backend_config(
             else (
                 frozenset({"type", "root"})
                 if role == "staging" and version >= 5
-                else frozenset({"type"})
+                else (
+                    frozenset({"type", "shared_workspace"})
+                    if role == "scheduler" and version >= 9
+                    else frozenset({"type"})
+                )
             )
         ),
         required=frozenset({"type"}),
@@ -594,7 +606,24 @@ def _backend_config(
             code="UNKNOWN_BACKEND",
             message="Shared staging requires targets version 5",
         )
+    if role == "scheduler" and kind == "htcondor":
+        if version < 9:
+            fail(
+                source=source,
+                path=(*path, "type"),
+                code="UNKNOWN_BACKEND",
+                message="HTCondor requires targets version 9",
+            )
+        if section.get("shared_workspace") is not True:
+            fail(
+                source=source,
+                path=(*path, "shared_workspace"),
+                code="INVALID_VALUE",
+                message="HTCondor requires explicit shared_workspace: true",
+            )
     options: dict[str, NativeValue] = {}
+    if role == "scheduler" and kind == "htcondor":
+        options["shared_workspace"] = True
     if role == "transport" and kind == "ssh":
         if "host" not in section:
             fail(
@@ -674,12 +703,19 @@ def _backend_config(
                 message="Shared root must be an absolute non-root path",
             )
         options["root"] = root
-    elif any(
-        field in section for field in ("host", "executable", "config_file", "root")
+    elif not (role == "scheduler" and kind == "htcondor") and any(
+        field in section
+        for field in ("host", "executable", "config_file", "root", "shared_workspace")
     ):
         field = next(
             field
-            for field in ("host", "executable", "config_file", "root")
+            for field in (
+                "host",
+                "executable",
+                "config_file",
+                "root",
+                "shared_workspace",
+            )
             if field in section
         )
         fail(

@@ -1,0 +1,14 @@
+FROM htcondor/execute@sha256:73f4e5c805b86e867420b16a950894b0bd486e0782a8ebbc4bc6729f014bde51
+USER root
+RUN dnf install -y shadow-utils hostname && dnf clean all && \
+    useradd --uid 4001 --create-home rundra
+COPY apptainer-shim /usr/bin/apptainer
+RUN chmod 0755 /usr/bin/apptainer
+RUN printf '%s\n' \
+    'FILESYSTEM_DOMAIN = rundra.test' \
+    'UID_DOMAIN = rundra.test' \
+    'TRUST_UID_DOMAIN = True' \
+    'STARTER_ALLOW_RUNAS_OWNER = True' \
+    > /etc/condor/config.d/02-rundra-shared-fs.conf
+RUN rm -f /etc/condor/config.d/01-slotusers.conf
+CMD ["/bin/bash", "-x", "/start.sh"]

@@ -1,0 +1,16 @@
+FROM htcondor/submit@sha256:d68be980711682a8a1defa4f00187a331d69418033a1d8d6b68a4b498f5ae70d
+USER root
+RUN dnf install -y openssh-server rsync shadow-utils hostname && dnf clean all && \
+    useradd --uid 4001 --create-home --shell /bin/bash rundra && usermod --password '' rundra && \
+    ssh-keygen -A && \
+    install -d -m 0700 -o rundra -g rundra /home/rundra/.ssh /workspace
+COPY apptainer-shim /usr/bin/apptainer
+COPY submit-entrypoint.sh /usr/local/bin/rundra-submit-entrypoint
+RUN chmod 0755 /usr/bin/apptainer /usr/local/bin/rundra-submit-entrypoint
+RUN printf '%s\n' \
+    'FILESYSTEM_DOMAIN = rundra.test' \
+    'UID_DOMAIN = rundra.test' \
+    'TRUST_UID_DOMAIN = True' \
+    > /etc/condor/config.d/02-rundra-shared-fs.conf
+EXPOSE 22
+CMD ["/usr/local/bin/rundra-submit-entrypoint"]

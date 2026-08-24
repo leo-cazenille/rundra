@@ -322,7 +322,9 @@ def test_run_record_rejects_array_mapping_identity_mismatches() -> None:
     record = _record()
     mapping = ArrayTaskMapping(record.run.tasks[0].id, 999, 0)
 
-    with pytest.raises(ValueError, match="requires a Slurm target"):
+    with pytest.raises(
+        ValueError, match="task_array_mapping must match Task order and seeds"
+    ):
         replace(record, task_array_mapping=(mapping,))
 
     slurm = replace(

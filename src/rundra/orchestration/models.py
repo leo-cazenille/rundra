@@ -279,8 +279,10 @@ class ExecutionPlan:
             if any(unit.resources != units[0].resources for unit in units[1:]):
                 raise ValueError("slurm_array strategy requires uniform Task resources")
         if self.version < 4 and self.strategy == SCHEDULER_ARRAY:
-            if self.target.scheduler.kind != "pbs":
-                raise ValueError("scheduler_array strategy requires a PBS target")
+            if self.target.scheduler.kind not in {"pbs", "htcondor"}:
+                raise ValueError(
+                    "scheduler_array strategy requires a scheduler-array target"
+                )
             if len(units) < 2 or len(groups) != 1:
                 raise ValueError(
                     "scheduler_array strategy requires one multi-Task execution group"
