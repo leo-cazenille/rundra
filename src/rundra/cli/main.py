@@ -13,11 +13,13 @@ from rundra.cli.agent_guide import (
     agent_guide_operation,
 )
 from rundra.cli.capability_doctor import DoctorValue, doctor_operation
-from rundra.cli.notification import write_wait_notification
+from rundra.cli.notification import write_await_notification, write_wait_notification
 from rundra.cli.operations import (
     LAST_RUN_SELECTOR,
+    AwaitRunsValue,
     RunValue,
     WaitValue,
+    await_runs_operation,
     cancel_operation,
     fetch_operation,
     inspect_operation,
@@ -60,6 +62,7 @@ _COMMANDS = (
     "resume",
     "resolve-submission",
     "wait",
+    "await",
     "status",
     "tasks",
     "list",
@@ -249,6 +252,18 @@ def build_parser() -> argparse.ArgumentParser:
     _add_feedback_arguments(wait)
     _add_store_option(wait)
     _add_json_option(wait)
+
+    await_runs = subparsers.add_parser(
+        "await", help="wait silently for one or more Runs"
+    )
+    await_runs.add_argument("run_ids", nargs="+")
+    await_runs.add_argument("--until", choices=("all", "any"), default="all")
+    await_runs.add_argument("--timeout", type=float)
+    await_runs.add_argument("--poll-interval", type=float, default=15.0)
+    await_runs.add_argument("--fail-on-run-failure", action="store_true")
+    await_runs.add_argument("--notify-file", type=Path, metavar="PATH")
+    _add_store_option(await_runs)
+    _add_json_option(await_runs)
 
     status = subparsers.add_parser("status", help="show persisted Run status")
     _add_run_selector(status)
@@ -846,6 +861,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             task_store=SqliteTaskStore(arguments.data_dir),
             progress=progress,
         )
+    elif arguments.command == "await":
+        result = await_runs_operation(
+            arguments.run_ids,
+            JsonRunStore(arguments.data_dir),
+            until=arguments.until,
+            timeout=arguments.timeout,
+            poll_interval=arguments.poll_interval,
+            fail_on_run_failure=arguments.fail_on_run_failure,
+            task_store=SqliteTaskStore(arguments.data_dir),
+        )
     elif arguments.command == "status":
         result = status_operation(
             arguments.run_id,
@@ -942,12 +967,36 @@ def main(argv: Sequence[str] | None = None) -> int:
                     {"run_id": str(result.value.status.run_id)},
                 ),
             )
+    if (
+        arguments.command == "await"
+        and arguments.notify_file is not None
+        and result.ok
+        and isinstance(result.value, AwaitRunsValue)
+        and result.value.condition_met
+    ):
+        try:
+            write_await_notification(arguments.notify_file, result.value)
+        except (OSError, ValueError) as error:
+            result = OperationResult.failure(
+                "await",
+                OperationError(
+                    "NOTIFICATION_FAILED",
+                    str(error),
+                    {
+                        "run_ids": tuple(
+                            str(item.run_id) for item in result.value.statuses
+                        )
+                    },
+                ),
+            )
     output = render_json(result) if arguments.json else render_human(result)
     stream = sys.stdout if arguments.json or result.ok else sys.stderr
     print(output, file=stream)
     if not result.ok:
         return 1
     if isinstance(result.value, RunValue):
+        return result.value.exit_code
+    if isinstance(result.value, AwaitRunsValue):
         return result.value.exit_code
     if isinstance(result.value, DoctorValue) and not result.value.ready:
         return 1

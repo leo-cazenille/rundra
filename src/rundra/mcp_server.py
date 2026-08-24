@@ -21,6 +21,7 @@ from pydantic import AnyHttpUrl
 from rundra.cli.agent_guide import GUIDE, GUIDE_TOPICS
 from rundra.cli.doctor import doctor_operation
 from rundra.cli.operations import (
+    await_runs_operation,
     cancel_operation,
     fetch_operation,
     inspect_operation,
@@ -469,6 +470,27 @@ def build_server(
             store(),
             timeout=timeout_seconds,
             poll_interval=poll_interval,
+            task_store=task_store(),
+        )
+        return document(result)
+
+    @server.tool()
+    async def await_runs(
+        run_ids: list[str],
+        until: str = "all",
+        timeout_seconds: float | None = None,
+        poll_interval: float = 15,
+        fail_on_run_failure: bool = False,
+    ) -> dict[str, Any]:
+        """Wait silently until all or any of several Runs terminate."""
+        result = await asyncio.to_thread(
+            await_runs_operation,
+            run_ids,
+            store(),
+            until=until,
+            timeout=timeout_seconds,
+            poll_interval=poll_interval,
+            fail_on_run_failure=fail_on_run_failure,
             task_store=task_store(),
         )
         return document(result)

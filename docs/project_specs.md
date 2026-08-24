@@ -1595,6 +1595,15 @@ intermediate observations and atomically publishes one mode-0600 JSON document
 only after terminal reconciliation. Existing symlinks and files identifying a
 different Run are rejected.
 
+`await RUN_ID...` is the aggregate harness counterpart. It accepts explicit,
+unique Run IDs and waits silently until all Runs are terminal, or until the first
+terminal Run with `--until any`. It emits one compact final document without Task
+details. Timeout is an observed nonterminal result, while operational failures remain
+errors; `--fail-on-run-failure` makes observed scientific failure exit with status 2.
+The equivalent MCP `await_runs` request allows a client harness to remain blocked and
+resume a model only after the aggregate condition or timeout. This foreground operation
+adds no daemon, callback endpoint, scheduler-native parsing, or credential storage.
+
 For synchronous arrays, progress contains six lifecycle units plus one unit per
 planned Task. Terminal Task observations advance the bar and its detail reports
 terminal/total, running, queued, failed, and distinct allocated-node counts.
@@ -2097,9 +2106,10 @@ HTTP transport requires an environment-sourced static bearer token and
 DNS-rebinding host policy; TLS terminates at an operator-managed reverse proxy.
 The process is launched by the user and is not a persistent Rundra daemon.
 
-Long Runs use renewable waiting. `wait` reconciles durable state until terminal
-or timeout and never fetches implicitly. MCP waits are bounded so an agent host
-can renew them; no Rundra daemon is required.
+Long Runs use foreground waiting. `wait` reconciles one durable Run until terminal or
+timeout, while `await` and MCP `await_runs` reconcile an aggregate all/any condition
+without intermediate output. Neither operation fetches implicitly, and no Rundra daemon
+is required.
 
 MCP asynchronous submission uses the same durable submission receipts as the
 CLI. Agents can call `resume_submission` after a disconnected or interrupted

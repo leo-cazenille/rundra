@@ -17,6 +17,7 @@ def test_help_lists_common_workflow_and_registered_commands(
     assert "cancel active scheduler work for a Run" in output
     assert "fetch" in output
     assert "version" in output
+    assert "await" in output
     assert "Run 'rundr help COMMAND'" in output
 
 
@@ -42,6 +43,31 @@ def test_lifecycle_command_accepts_explicit_run_id() -> None:
     arguments = build_parser().parse_args(("wait", run_id))
 
     assert arguments.run_id == run_id
+
+
+def test_await_accepts_aggregate_wait_options() -> None:
+    arguments = build_parser().parse_args(
+        (
+            "await",
+            "run_11111111111111111111111111111111",
+            "run_22222222222222222222222222222222",
+            "--until",
+            "any",
+            "--timeout",
+            "30",
+            "--poll-interval",
+            "5",
+            "--fail-on-run-failure",
+            "--notify-file",
+            "/tmp/rundra-await.json",
+        )
+    )
+
+    assert len(arguments.run_ids) == 2
+    assert arguments.until == "any"
+    assert arguments.timeout == 30
+    assert arguments.poll_interval == 5
+    assert arguments.fail_on_run_failure is True
 
 
 def test_wait_accepts_agent_efficient_feedback_options() -> None:

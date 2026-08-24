@@ -14,7 +14,7 @@ GUIDE_TOPICS = {
     "setup": "Run doctor --agent codex --json first. Grant only reported paths and network access, restart the agent sandbox when required, then rerun doctor until ready is true.",
     "launch": "Validate and plan before submit. Use explicit seeds, review task count/resources/concurrency, retain the returned Run ID and data directory, and submit only once.",
     "large-runs": "Use worker-pool execution only when plan.target.scheduler.capabilities.compact_worker_pool is true. Runs with at least 1,000 Tasks automatically use compact durable Task state; inspect individuals with paginated tasks JSON, use bounded wait calls without progress, retain archive retrieval, and pass an exact confirm-tasks value after plan review. OpenPBS worker targets require requeue_limit 0 because scheduler rerun recovery is not supported.",
-    "lifecycle": "Use submit, bounded wait, status/tasks, fetch, then purge. Dependency-pending workers remain queued before journals exist; Rundra merges identical atomic journal fragments and rejects contradictory outcomes. ETA is omitted until at least 20 Tasks, 10% completion, and 60 seconds of evidence. Agents should use explicit Run IDs rather than --last.",
+    "lifecycle": "Use submit, await for one or several long Runs, status/tasks, fetch, then purge. Await emits one final compact result and supports all/any aggregate conditions, avoiding model-driven polling. Dependency-pending workers remain queued before journals exist; Rundra merges identical atomic journal fragments and rejects contradictory outcomes. ETA is omitted until at least 20 Tasks, 10% completion, and 60 seconds of evidence. Agents should use explicit Run IDs rather than --last.",
     "results": "Prefer fetch auto. Set project-v5 fetch_mode: copy when downstream analysis requires ordinary files instead of a shared reference manifest. Compact archive fetch verifies exact Task coverage; add --extract only when individual files are required. Keep derived outputs separate.",
     "preparation": "Pin acquired images. Definition projects v4+ declare an explicit context include list; Rundra hashes only that context plus the definition for image-cache identity. Scientific jobs use Rundra-owned afterok dependencies and must not be resubmitted while preparation runs.",
     "provenance": "Inspect the Run record after submission. Prepared Runs record the verified image digest; actual launches record container_runtime and container_runtime_version when available. Plan and doctor intentionally do not claim execution-time runtime identity.",
@@ -61,11 +61,12 @@ GUIDE = f"""{START_MARKER}
   persisted by submit; use `--destination PATH` only to override it, such as on
   another workstation. Use `rundr run` only when keeping the client attached
   is appropriate.
-- For agents, use `rundr wait RUN_ID --json` without `--progress`: blocking wait
-  emits only the final JSON document. When a tool-call deadline is shorter than
-  the Run, renew bounded calls such as `--timeout 300 --json`. Reserve
-  `--progress` for interactive humans because captured TQDM redraws can consume
-  transcript tokens. `--notify` adds one terminal alert but no polling output.
+- For unattended agents, use `rundr await RUN_ID... --json`: it emits one final
+  compact document when all Runs finish. Use `--until any` only for intentional
+  first-completion workflows and `--timeout` when the harness imposes a deadline.
+  The harness should block on this process rather than wake the model to poll.
+  Reserve `--progress` for interactive humans because captured TQDM redraws can
+  consume transcript tokens. `--notify-file PATH` adds an atomic aggregate signal.
 - Workers waiting on preparation remain `QUEUED` before their status journals
   exist. Rundra merges identical events that overlap during atomic journal
   publication and reports contradictory outcomes as corruption. Do not bypass

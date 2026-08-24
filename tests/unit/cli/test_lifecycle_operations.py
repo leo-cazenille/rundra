@@ -9,8 +9,10 @@ from threading import Barrier
 import pytest
 
 import rundra.cli.operations as operations
+from rundra.cli.notification import write_await_notification
 from rundra.cli.operations import (
     LAST_RUN_SELECTOR,
+    AwaitRunsValue,
     FetchValue,
     InspectValue,
     ListRunsValue,
@@ -20,6 +22,7 @@ from rundra.cli.operations import (
     RunValue,
     StatusValue,
     WaitValue,
+    await_runs_operation,
     fetch_operation,
     inspect_operation,
     list_runs_operation,
@@ -283,6 +286,107 @@ def test_wait_timeout_is_a_successful_renewable_result(tmp_path: Path) -> None:
     assert waited.ok and isinstance(waited.value, WaitValue)
     assert waited.value.terminal is False
     assert waited.value.timed_out is True
+
+
+def test_await_runs_waits_for_all_and_omits_task_details(tmp_path: Path) -> None:
+    store, run_id = _stored_record(tmp_path)
+    original = store.load(RunId(run_id))
+    second_id = RunId("run_11111111111111111111111111111111")
+    second = replace(
+        original,
+        run=replace(
+            original.run,
+            id=second_id,
+            tasks=tuple(replace(task, run_id=second_id) for task in original.run.tasks),
+        ),
+    )
+    store.create(second)
+
+    waited = await_runs_operation((run_id, str(second_id)), store)
+
+    assert waited.ok and isinstance(waited.value, AwaitRunsValue)
+    assert waited.value.condition_met is True
+    assert waited.value.timed_out is False
+    assert all(not item.task_details for item in waited.value.statuses)
+    document = result_document(waited)["await"]
+    assert document["counts"]["terminal"] == 2
+    assert all("task_details" not in item for item in document["runs"])
+
+
+def test_await_runs_rejects_duplicates_and_last(tmp_path: Path) -> None:
+    store, run_id = _stored_record(tmp_path)
+
+    duplicate = await_runs_operation((run_id, run_id), store)
+    last = await_runs_operation((LAST_RUN_SELECTOR,), store)
+
+    assert duplicate.error is not None and duplicate.error.code == "DUPLICATE_RUN_ID"
+    assert last.error is not None and last.error.code == "EXPLICIT_RUN_IDS_REQUIRED"
+
+
+def test_await_runs_supports_any_and_all_timeout(tmp_path: Path) -> None:
+    store, run_id = _stored_record(tmp_path)
+    original = store.load(RunId(run_id))
+    second_id = RunId("run_22222222222222222222222222222222")
+    active_task = replace(
+        original.run.tasks[0],
+        run_id=second_id,
+        state=ExecutionState.RUNNING,
+    )
+    active = replace(
+        original,
+        run=replace(
+            original.run,
+            id=second_id,
+            tasks=(active_task,),
+            state=ExecutionState.RUNNING,
+            retrieval_state=RetrievalState.NOT_REQUESTED,
+        ),
+        completed_at=None,
+        task_retrieval_states={active_task.id: RetrievalState.NOT_REQUESTED},
+    )
+    store.create(active)
+
+    first = await_runs_operation((run_id, str(second_id)), store, until="any")
+    all_runs = await_runs_operation(
+        (run_id, str(second_id)), store, until="all", timeout=0
+    )
+
+    assert first.value is not None and first.value.condition_met is True
+    assert first.value.timed_out is False
+    assert all_runs.value is not None and all_runs.value.condition_met is False
+    assert all_runs.value.timed_out is True
+
+
+def test_await_runs_writes_private_aggregate_notification(tmp_path: Path) -> None:
+    store, run_id = _stored_record(tmp_path / "records")
+    waited = await_runs_operation((run_id,), store)
+    assert waited.value is not None
+    path = tmp_path / "await.json"
+
+    write_await_notification(path, waited.value)
+
+    document = json.loads(path.read_text(encoding="utf-8"))
+    assert document["run_ids"] == [run_id]
+    assert document["condition_met"] is True
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_await_runs_scientific_failure_exit_is_opt_in(tmp_path: Path) -> None:
+    store, run_id = _stored_record(tmp_path)
+    record = store.load(RunId(run_id))
+    task = replace(record.run.tasks[0], state=ExecutionState.FAILED)
+    failed = replace(
+        record,
+        run=replace(record.run, state=ExecutionState.FAILED, tasks=(task,)),
+    )
+    failed_store = JsonRunStore(tmp_path / "failed")
+    failed_store.create(failed)
+
+    default = await_runs_operation((run_id,), failed_store)
+    strict = await_runs_operation((run_id,), failed_store, fail_on_run_failure=True)
+
+    assert default.value is not None and default.value.exit_code == 0
+    assert strict.value is not None and strict.value.exit_code == 2
 
 
 def test_purge_outputs_requires_confirmation_and_preserves_record(

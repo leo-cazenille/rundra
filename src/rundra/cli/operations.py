@@ -362,6 +362,42 @@ class WaitValue:
 
 
 @dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True)
+class AwaitRunsValue:
+    statuses: tuple[StatusValue, ...]
+    until: str
+    condition_met: bool
+    timed_out: bool
+    elapsed_seconds: float
+    fail_on_run_failure: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.statuses:
+            raise ValueError("AwaitRunsValue statuses must not be empty")
+        run_ids = tuple(str(status.run_id) for status in self.statuses)
+        if len(set(run_ids)) != len(run_ids):
+            raise ValueError("AwaitRunsValue statuses must have unique Run IDs")
+        if self.until not in {"all", "any"}:
+            raise ValueError("AwaitRunsValue until must be 'all' or 'any'")
+        if type(self.condition_met) is not bool or type(self.timed_out) is not bool:
+            raise TypeError("AwaitRunsValue flags must be booleans")
+        if self.condition_met and self.timed_out:
+            raise ValueError("AwaitRunsValue cannot be complete and timed out")
+        if type(self.elapsed_seconds) is not float or self.elapsed_seconds < 0:
+            raise ValueError("AwaitRunsValue elapsed_seconds must be non-negative")
+        if type(self.fail_on_run_failure) is not bool:
+            raise TypeError("AwaitRunsValue fail_on_run_failure must be a boolean")
+
+    @property
+    def exit_code(self) -> int:
+        failed_states = {ExecutionState.FAILED, ExecutionState.CANCELLED}
+        if self.fail_on_run_failure and any(
+            status.state in failed_states for status in self.statuses
+        ):
+            return 2
+        return 0
+
+
 class CancelValue:
     status: StatusValue
 
@@ -2429,6 +2465,119 @@ def wait_operation(
 
 
 def cancel_operation(
+def await_runs_operation(
+    run_ids: Sequence[str],
+    store: RunStore,
+    *,
+    until: str = "all",
+    timeout: float | None = None,
+    poll_interval: float = 15.0,
+    fail_on_run_failure: bool = False,
+    scheduler: Scheduler | None = None,
+    transport: Transport | None = None,
+    task_store: SqliteTaskStore | None = None,
+    sleeper: Callable[[float], None] = sleep,
+    monotonic_clock: Callable[[], float] = monotonic,
+) -> OperationResult[AwaitRunsValue]:
+    if isinstance(run_ids, (str, bytes)) or not isinstance(run_ids, Sequence):
+        return OperationResult.failure(
+            "await",
+            OperationError("INVALID_RUN_IDS", "Run IDs must be a sequence of strings"),
+        )
+    selected = tuple(run_ids)
+    if not selected:
+        return OperationResult.failure(
+            "await",
+            OperationError("RUN_IDS_REQUIRED", "At least one Run ID is required"),
+        )
+    if any(not isinstance(run_id, str) for run_id in selected):
+        return OperationResult.failure(
+            "await", OperationError("INVALID_RUN_IDS", "Every Run ID must be a string")
+        )
+    if LAST_RUN_SELECTOR in selected:
+        return OperationResult.failure(
+            "await",
+            OperationError(
+                "EXPLICIT_RUN_IDS_REQUIRED",
+                "Aggregate waiting requires explicit Run IDs; --last is not supported",
+            ),
+        )
+    if len(set(selected)) != len(selected):
+        return OperationResult.failure(
+            "await", OperationError("DUPLICATE_RUN_ID", "Run IDs must be unique")
+        )
+    if until not in {"all", "any"}:
+        return OperationResult.failure(
+            "await",
+            OperationError("INVALID_AWAIT_CONDITION", "--until must be 'all' or 'any'"),
+        )
+    if timeout is not None and (type(timeout) not in (int, float) or timeout < 0):
+        return OperationResult.failure(
+            "await",
+            OperationError("INVALID_TIMEOUT", "Await timeout must be non-negative"),
+        )
+    if type(poll_interval) not in (int, float) or poll_interval <= 0:
+        return OperationResult.failure(
+            "await",
+            OperationError(
+                "INVALID_POLL_INTERVAL", "Await poll interval must be positive"
+            ),
+        )
+
+    for run_id in selected:
+        _, error = _load_record(run_id, store)
+        if error is not None:
+            return OperationResult.failure("await", error)
+
+    started = monotonic_clock()
+    terminal_states = {
+        ExecutionState.SUCCEEDED,
+        ExecutionState.FAILED,
+        ExecutionState.CANCELLED,
+    }
+    while True:
+        statuses: list[StatusValue] = []
+        retry_snapshot = False
+        for run_id in selected:
+            status = status_operation(
+                run_id,
+                store,
+                scheduler=scheduler,
+                transport=transport,
+                task_store=task_store,
+            )
+            if not status.ok:
+                assert status.error is not None
+                if status.error.code == "RUN_STORE_CONFLICT":
+                    retry_snapshot = True
+                    break
+                return OperationResult.failure("await", status.error)
+            assert status.value is not None
+            statuses.append(replace(status.value, task_details=()))
+        if retry_snapshot:
+            continue
+
+        elapsed = max(0.0, monotonic_clock() - started)
+        terminal = tuple(status.state in terminal_states for status in statuses)
+        condition_met = all(terminal) if until == "all" else any(terminal)
+        value = AwaitRunsValue(
+            tuple(statuses),
+            until,
+            condition_met,
+            False,
+            float(elapsed),
+            fail_on_run_failure,
+        )
+        if condition_met:
+            return OperationResult.success("await", value)
+        if timeout is not None and elapsed >= float(timeout):
+            return OperationResult.success("await", replace(value, timed_out=True))
+        delay = float(poll_interval)
+        if timeout is not None:
+            delay = min(delay, max(0.0, float(timeout) - elapsed))
+        sleeper(delay)
+
+
     run_id: str,
     store: RunStore,
     *,

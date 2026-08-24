@@ -10,6 +10,7 @@ from typing import Any
 from rundra.cli.agent_guide import AgentGuideValue
 from rundra.cli.capability_doctor import DoctorValue
 from rundra.cli.operations import (
+    AwaitRunsValue,
     CancelValue,
     FetchValue,
     InspectValue,
@@ -155,6 +156,42 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
             "timed_out": value.timed_out,
             "elapsed_seconds": value.elapsed_seconds,
             "status": _status_document(value.status),
+        }
+    elif isinstance(value, AwaitRunsValue):
+        statuses = []
+        for status in value.statuses:
+            item = _status_document(status)
+            item.pop("task_details", None)
+            statuses.append(item)
+        terminal_states = {
+            ExecutionState.SUCCEEDED,
+            ExecutionState.FAILED,
+            ExecutionState.CANCELLED,
+        }
+        document["await"] = {
+            "condition_met": value.condition_met,
+            "counts": {
+                "active": sum(
+                    item.state not in terminal_states for item in value.statuses
+                ),
+                "cancelled": sum(
+                    item.state is ExecutionState.CANCELLED for item in value.statuses
+                ),
+                "failed": sum(
+                    item.state is ExecutionState.FAILED for item in value.statuses
+                ),
+                "succeeded": sum(
+                    item.state is ExecutionState.SUCCEEDED for item in value.statuses
+                ),
+                "terminal": sum(
+                    item.state in terminal_states for item in value.statuses
+                ),
+                "total": len(value.statuses),
+            },
+            "elapsed_seconds": value.elapsed_seconds,
+            "runs": statuses,
+            "timed_out": value.timed_out,
+            "until": value.until,
         }
     elif isinstance(value, CancelValue):
         document["cancel"] = _status_document(value.status)
@@ -467,6 +504,23 @@ def render_human(result: OperationResult[Any]) -> str:
         elif status.retrieval_state is not RetrievalState.SUCCEEDED:
             rendered += f"\nNext: rundr fetch {shlex.quote(str(status.run_id))}"
         return rendered
+    if isinstance(value, AwaitRunsValue):
+        terminal_states = {
+            ExecutionState.SUCCEEDED,
+            ExecutionState.FAILED,
+            ExecutionState.CANCELLED,
+        }
+        terminal = sum(item.state in terminal_states for item in value.statuses)
+        lines = [
+            f"Runs: {len(value.statuses)}",
+            f"Condition: {value.until}",
+            f"Terminal: {terminal}/{len(value.statuses)}",
+            f"Condition met: {'yes' if value.condition_met else 'no'}",
+            f"Timed out: {'yes' if value.timed_out else 'no'}",
+            f"Waited: {value.elapsed_seconds:.1f}s",
+        ]
+        lines.extend(f"  {item.run_id}: {item.state.value}" for item in value.statuses)
+        return "\n".join(lines)
     if isinstance(value, CancelValue):
         status = value.status
         return f"Run: {status.run_id}\nState after cancellation: {status.state.value}"
@@ -750,6 +804,8 @@ def _result_format_version(value: object) -> int:
         return (
             5 if len(value.status.task_details) >= 1000 else value.status.format_version
         )
+    if isinstance(value, AwaitRunsValue):
+        return 1
     if isinstance(value, CancelValue) and value.status.preparation is not None:
         return value.status.format_version
     if isinstance(value, CancelValue):

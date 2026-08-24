@@ -20,6 +20,9 @@
   `rundr fetch RUN_ID` for long Runs. Use `--destination PATH` only to override
   the configuration-based default. Use `rundr run` only when keeping the client
   attached is appropriate.
+- For one or several unattended Runs, launch `rundr await RUN_ID... --json` once
+  and let the harness block on it. It emits one compact final document without
+  progress redraws. Do not wake the model every few minutes to poll status.
 - Definition-image preparation is submitted with a framework-owned dependency;
   do not keep a separate scheduler watch or resubmit while preparation runs.
   Recover an interrupted client with `rundr resume RUN_ID` or bounded `wait`.

@@ -13,6 +13,7 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 | `doctor` | optional `EXPERIMENT` | launch path overrides, `--connect`, `--local-target-access`, `--prepare-location`, `--scheduler-probe`, `--probe-timeout`, `--no-write-probe`, `--agent`, `--json` | Audit installation, sandbox paths, target access, reversible staging, preparation caches, and an optional bounded scheduler submission. |
 | `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--workers`, `--task-slots-per-worker`, `--verbose`, `--progress`, `--progress-interval`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
 | `wait` | `RUN_ID` or `--last` | `--timeout`, `--poll-interval`, `--notify`, `--notify-file PATH`, `--data-dir`, `--verbose`, `--progress`, `--progress-interval`, `--json` | Reconcile until terminal or a renewable timeout; optionally emit an alert or atomic terminal JSON file. |
+| `await` | one or more `RUN_ID` values | `--until all`/`any`, `--timeout`, `--poll-interval`, `--fail-on-run-failure`, `--notify-file PATH`, `--data-dir`, `--json` | Wait silently for an aggregate terminal condition and emit one compact final result. |
 | `agent-guide` | none | `--write PATH`, `--check PATH`, `--topic TOPIC`, `--list-topics`, `--json` | Print, install, check, or select bounded portable agent instructions. |
 | `help` | optional `COMMAND` | none | List commands and the common workflow, or show one command's detailed arguments and options. |
 | `submit` | `EXPERIMENT` | same as `run` | Submit asynchronously when the selected scheduler supports it. |
@@ -23,11 +24,13 @@ human or JSON result on stdout.
 Progress redraws are deduplicated and throttled to `--progress-interval`
 seconds (10 by default), except for phase and terminal updates. Captured
 `--json --progress` emits a warning because terminal redraws may inflate agent
-transcripts. Agents should use blocking `wait --json`, or renew `wait --timeout
-300 --json` when their tool-call deadline is bounded.
+transcripts. Agent harnesses should use `await RUN_ID... --json` and block on the
+single foreground process rather than wake a model to poll.
 `wait --notify-file PATH` writes nothing until a terminal observation, then
 atomically replaces a mode-0600 JSON document containing the Run ID, state, and
 observation time. A path already owned by another Run and symlinks are rejected.
+`await --notify-file PATH` provides the equivalent aggregate signal only after
+the selected all/any condition is satisfied.
 Worker-pool Tasks remain `QUEUED` while an `afterok` preparation dependency is
 pending, even though no bundle journals exist yet. Journal reconciliation is
 idempotent across identical canonical and temporary fragments and fails only

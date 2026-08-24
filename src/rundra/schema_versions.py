@@ -34,9 +34,11 @@ PROJECT_CONFIG_SCHEMA = SchemaVersions(5, frozenset({1, 2, 3, 4, 5}))
 USER_CONFIG_SCHEMA = SchemaVersions(2, frozenset({1, 2}))
 TARGET_CONFIG_SCHEMA = SchemaVersions(8, frozenset({1, 2, 3, 4, 5, 6, 7, 8}))
 REFERENCE_MANIFEST_SCHEMA = SchemaVersions(1, frozenset({1}))
+AWAIT_SCHEMA = SchemaVersions(1, frozenset({1}))
 
 PUBLIC_SCHEMA_VERSIONS: Final = MappingProxyType(
     {
+        "await": AWAIT_SCHEMA,
         "inspect": INSPECT_SCHEMA,
         "logs": LOGS_SCHEMA,
         "plan": PLAN_SCHEMA,
