@@ -11,6 +11,7 @@ import pytest
 pytestmark = pytest.mark.docker_slurm
 _ROOT = Path(__file__).parents[2]
 _SOURCE = Path(__file__).with_name("docker_slurm")
+_PREPARED = _SOURCE / "prepared"
 
 
 def _rundr(
@@ -143,6 +144,69 @@ def test_docker_slurm_bounded_array_preserves_partial_failure(
     assert len(run["scheduler_job_ids"]) == 1
     results = sorted(destination.glob("output/task_*/results/result.json"))
     assert len(results) == 8
+
+
+def test_docker_slurm_builds_image_and_application_in_allocation_scratch(
+    tmp_path: Path,
+    docker_slurm_targets_source: Path,
+    docker_slurm_target_name: str,
+) -> None:
+    data_dir = tmp_path / "records"
+    submitted = _rundr(
+        "submit",
+        str(_PREPARED / "experiment.yaml"),
+        "--project-file",
+        str(_PREPARED / "rundra.yaml"),
+        "--config",
+        str(_PREPARED / "config.yaml"),
+        "--seed",
+        "41",
+        "--target",
+        docker_slurm_target_name,
+        "--targets-file",
+        str(docker_slurm_targets_source),
+        "--source-root",
+        str(_PREPARED),
+        "--data-dir",
+        str(data_dir),
+    )
+    run = submitted["run"]
+    assert isinstance(run, dict)
+    run_id = str(run["run_id"])
+
+    waited = _rundr("wait", run_id, "--timeout", "600", "--data-dir", str(data_dir))
+    wait = waited["wait"]
+    assert isinstance(wait, dict) and wait["terminal"] is True
+    status = wait["status"]
+    assert isinstance(status, dict) and status["state"] == "SUCCEEDED"
+
+    inspected = _rundr("inspect", run_id, "--data-dir", str(data_dir))
+    record = inspected["record"]
+    assert isinstance(record, dict)
+    preparation = record["preparation"]
+    assert isinstance(preparation, dict)
+    assert preparation["image_action"] == "build_definition_image"
+    assert preparation["build_action"] == "build_and_publish"
+    assert preparation["builder_scheduler_id"] is not None
+
+    destination = tmp_path / "prepared-retrieved"
+    fetched = _rundr(
+        "fetch",
+        run_id,
+        "--destination",
+        str(destination),
+        "--extract",
+        "--data-dir",
+        str(data_dir),
+    )
+    fetch = fetched["fetch"]
+    assert isinstance(fetch, dict) and fetch["retrieval_state"] == "SUCCEEDED"
+    result = json.loads(
+        (destination / "output/task_000000/results/result.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert result == {"seed": 41, "scratch": "/scratch"}
 
 
 def test_docker_slurm_cancels_bounded_array(

@@ -96,6 +96,14 @@ targets:
     staging: {type: rsync}
     container: {type: apptainer}
     workspace: /workspace
+    preparation:
+      definition_build:
+        allowed_locations: [target]
+        mode: unprivileged
+        max_resources:
+          cpus_per_task: 2
+          memory: 1GiB
+          walltime: "00:10:00"
     execution_storage:
       type: slurm_scratch
       cpu_environment: SLURM_TMPDIR

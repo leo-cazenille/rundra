@@ -1,0 +1,5 @@
+Bootstrap: localimage
+From: /cluster/rundra-test.sif
+
+%labels
+    org.rundra.test allocation-scratch

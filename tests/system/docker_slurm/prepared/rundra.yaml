@@ -1,0 +1,25 @@
+version: 4
+
+preparation:
+  source:
+    working_tree: {}
+  image:
+    name: scratch-prepared.sif
+    definition:
+      path: scratch-prepared.def
+      context:
+        include: []
+      resources:
+        cpus_per_task: 1
+        memory: 512MiB
+        walltime: "00:05:00"
+  build:
+    argv: [sh, -c, "mkdir -p bin && cp model.sh bin/model && chmod 0755 bin/model"]
+    outputs:
+      - path: bin/model
+        executable: true
+    cache_scope: target
+    resources:
+      cpus_per_task: 1
+      memory: 64MiB
+      walltime: "00:02:00"
