@@ -11,6 +11,7 @@ from types import MappingProxyType
 from uuid import uuid4
 
 from rundra.domain.parameters import ParameterSet
+from rundra.domain.scheduling import SlurmPartitionPolicy
 from rundra.domain.states import ExecutionState, RetrievalState
 from rundra.domain.storage import SlurmScratchPolicy
 
@@ -252,6 +253,7 @@ class Target:
     container: BackendConfig
     workspace: PurePath
     execution_storage: SlurmScratchPolicy | None = None
+    partition_policy: SlurmPartitionPolicy | None = None
 
     def __post_init__(self) -> None:
         if type(self.name) is not str:
@@ -269,6 +271,13 @@ class Target:
         ):
             raise TypeError(
                 "Target execution_storage must be a SlurmScratchPolicy or None"
+            )
+        if (
+            self.partition_policy is not None
+            and type(self.partition_policy) is not SlurmPartitionPolicy
+        ):
+            raise TypeError(
+                "Target partition_policy must be a SlurmPartitionPolicy or None"
             )
 
 

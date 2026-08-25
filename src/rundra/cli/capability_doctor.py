@@ -32,6 +32,7 @@ from rundra.orchestration.preparation import (
     probe_remote_offline_preparation,
     select_remote_preparation_location,
 )
+from rundra.orchestration.routing import route_scheduler_resources
 from rundra.ports import Scheduler, SchedulerGroup, SchedulerReference, SchedulerUnit
 from rundra.results import OperationError, OperationResult
 from rundra.scheduler_registry import scheduler_for_target
@@ -715,14 +716,18 @@ hostname > "$hostname_path"
                 str(hostname),
                 target.execution_storage.cpu_environment,
             )
-        unit = SchedulerUnit(
-            TaskId("task_000000"),
-            Command(("sh", "-c", script, "rundr-doctor", *command_arguments)),
+        probe_resources, _ = route_scheduler_resources(
             ResourceRequest(
                 cpus_per_task=1,
                 memory_bytes=256 * 1024 * 1024,
                 walltime=timedelta(seconds=60),
             ),
+            target,
+        )
+        unit = SchedulerUnit(
+            TaskId("task_000000"),
+            Command(("sh", "-c", script, "rundr-doctor", *command_arguments)),
+            probe_resources,
         )
         reference = scheduler.submit(SchedulerGroup((unit,))).reference
         deadline = time.monotonic() + timeout

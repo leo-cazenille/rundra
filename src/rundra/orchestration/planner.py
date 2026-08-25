@@ -29,6 +29,7 @@ from rundra.orchestration.models import (
     ExecutionUnit,
     PlanningError,
 )
+from rundra.orchestration.routing import route_scheduler_resources
 from rundra.scheduler_registry import scheduler_capabilities
 from rundra.schema_versions import PLAN_SCHEMA
 
@@ -130,7 +131,7 @@ def create_scalable_plan(
     if type(policy) is not ExecutionPolicy:
         raise TypeError("create_scalable_plan policy must be an ExecutionPolicy")
     if version not in PLAN_SCHEMA.supported or version < 4:
-        raise ValueError("create_scalable_plan version must be 4, 5, 6, or 7")
+        raise ValueError("create_scalable_plan version must be from 4 through 9")
     for name, value in (
         ("workers", workers),
         ("task_slots_per_worker", task_slots_per_worker),
@@ -151,6 +152,7 @@ def create_scalable_plan(
             message="retrieval policy must be all, manifest, or none",
         )
     _validate_placeholders(spec.command)
+    effective_resources, _ = route_scheduler_resources(spec.resources, target)
     task_space = TaskSpace(len(expanded), seeds)
     if task_space.task_count > policy.hard_task_limit:
         raise PlanningError(
@@ -218,7 +220,7 @@ def create_scalable_plan(
                 expanded[item.parameter_set_ordinal].config,
                 item.seed,
             ),
-            resources=spec.resources,
+            resources=effective_resources,
             parameter_set=expanded[item.parameter_set_ordinal].parameter_set,
         )
         for item in preview
@@ -286,7 +288,7 @@ def create_scalable_plan(
     concurrent_task_capacity = (worker_count or 1) * task_slots_per_worker
     max_lane_depth = ceil(task_space.task_count / concurrent_task_capacity)
     worker_resources = _worker_resources(
-        spec.resources,
+        effective_resources,
         task_slots_per_worker,
         max_lane_depth,
     )
@@ -406,13 +408,14 @@ def create_plan(
     """Create a deterministic plan without creating a Run or calling adapters."""
     normalized_seeds = _validate_seed_set(seeds)
     _validate_placeholders(spec.command)
+    effective_resources, _ = route_scheduler_resources(spec.resources, target)
     units = tuple(
         ExecutionUnit(
             task_id=TaskId.from_ordinal(index),
             seed=seed,
             config=config,
             command=_render_command(spec.command, config, seed),
-            resources=spec.resources,
+            resources=effective_resources,
         )
         for index, seed in enumerate(normalized_seeds)
     )

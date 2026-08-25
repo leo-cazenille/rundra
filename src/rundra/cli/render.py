@@ -393,6 +393,24 @@ def render_human(result: OperationResult[Any]) -> str:
                 f"offline={preparation.offline}, rebuild={preparation.rebuild}, "
                 f"rebuild_image={preparation.rebuild_image}"
             )
+        if plan.target.partition_policy is not None:
+            partition = plan.units[0].resources.native.get("slurm", {}).get(
+                "partition"
+            )
+            route = next(
+                (
+                    item
+                    for item in plan.target.partition_policy.routes
+                    if item.partition == partition
+                ),
+                None,
+            )
+            if route is not None:
+                rendered += (
+                    "\nPartition route: "
+                    f"{route.name} ({route.resource_class}, {route.partition}, "
+                    f"limit={int(route.max_walltime.total_seconds())}s)"
+                )
         if plan.target.execution_storage is not None:
             storage = plan.target.execution_storage
             rendered += (
@@ -1034,6 +1052,16 @@ def _target_document(
             "stage_image": policy.stage_image,
             "copy_back": policy.copy_back,
         }
+    if target.partition_policy is not None:
+        document["partition_routes"] = [
+            {
+                "name": route.name,
+                "partition": route.partition,
+                "resource_class": route.resource_class,
+                "max_walltime_seconds": int(route.max_walltime.total_seconds()),
+            }
+            for route in target.partition_policy.routes
+        ]
     return document
 
 

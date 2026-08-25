@@ -49,6 +49,7 @@ from rundra.orchestration.preparation import (
     read_remote_preparation_result,
 )
 from rundra.orchestration.progress import ProgressEvent, ProgressObserver, ProgressPhase
+from rundra.orchestration.routing import route_scheduler_resources
 from rundra.orchestration.shards import read_verified_shard_index
 from rundra.persistence.base import CompactRunStore, RunStore
 from rundra.persistence.errors import RunStoreError
@@ -1126,6 +1127,7 @@ class OrchestrationService:
                     message="Remote preparation requires an explicit build resource request",
                     run_id=run_id,
                 )
+            resources, _ = route_scheduler_resources(resources, request.plan.target)
             try:
                 preparation_submission = self._scheduler.submit(
                     SchedulerGroup(
@@ -1840,7 +1842,7 @@ class OrchestrationService:
                 created_at=self._clock(),
             )
             return RunRecord(
-                format_version=6,
+                format_version=(7 if request.plan.target.partition_policy else 6),
                 framework_version=self._framework_version,
                 run=compact_run,
                 experiment=request.experiment,
@@ -1885,7 +1887,7 @@ class OrchestrationService:
             created_at=self._clock(),
         )
         return RunRecord(
-            format_version=6,
+            format_version=(7 if request.plan.target.partition_policy else 6),
             framework_version=self._framework_version,
             run=run,
             experiment=request.experiment,

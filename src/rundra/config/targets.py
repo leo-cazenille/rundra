@@ -25,6 +25,7 @@ from rundra.domain.scaling import (
     ExecutionPolicy,
     WorkerPoolPolicy,
 )
+from rundra.domain.scheduling import SlurmPartitionPolicy, SlurmPartitionRoute
 from rundra.domain.storage import SlurmScratchPolicy
 from rundra.scheduler_registry import scheduler_kinds
 from rundra.schema_versions import TARGET_CONFIG_SCHEMA
@@ -42,6 +43,7 @@ _TARGET_V7_FIELDS = _TARGET_V6_FIELDS
 _TARGET_V8_FIELDS = _TARGET_V7_FIELDS
 _TARGET_V9_FIELDS = _TARGET_V8_FIELDS
 _TARGET_V10_FIELDS = _TARGET_V9_FIELDS | {"execution_storage"}
+_TARGET_V11_FIELDS = _TARGET_V10_FIELDS
 _MEMORY_PATTERN = re.compile(r"([1-9][0-9]*)(B|KiB|MiB|GiB|TiB)\Z")
 _WALLTIME_PATTERN = re.compile(r"([0-9]{2,}):([0-5][0-9]):([0-5][0-9])\Z")
 _MEMORY_FACTORS = {
@@ -152,7 +154,11 @@ def load_targets_config(source: Path) -> TargetsConfig:
                                             else (
                                                 _TARGET_V9_FIELDS
                                                 if version == 9
-                                                else _TARGET_V10_FIELDS
+                                                else (
+                                                    _TARGET_V10_FIELDS
+                                                    if version == 10
+                                                    else _TARGET_V11_FIELDS
+                                                )
                                             )
                                         )
                                     )
@@ -175,6 +181,18 @@ def load_targets_config(source: Path) -> TargetsConfig:
                 path=(*path, "workspace"),
                 nonblank=True,
             )
+        )
+        scheduler_section = expect_mapping(
+            section["scheduler"], source=source, path=(*path, "scheduler")
+        )
+        partition_policy = (
+            _partition_policy(
+                scheduler_section["partition_routes"],
+                source,
+                (*path, "scheduler", "partition_routes"),
+            )
+            if "partition_routes" in scheduler_section
+            else None
         )
         target = Target(
             name=name,
@@ -200,6 +218,7 @@ def load_targets_config(source: Path) -> TargetsConfig:
                 if "execution_storage" in section
                 else None
             ),
+            partition_policy=partition_policy,
         )
         backend_stack = (
             target.transport.kind,
@@ -225,6 +244,13 @@ def load_targets_config(source: Path) -> TargetsConfig:
                 code="INVALID_EXECUTION_STORAGE",
                 message="Slurm scratch execution requires scheduler.type: slurm",
             )
+        if target.partition_policy is not None and target.scheduler.kind != "slurm":
+            fail(
+                source=source,
+                path=(*path, "scheduler", "partition_routes"),
+                code="INVALID_PARTITION_POLICY",
+                message="Partition routes require scheduler.type: slurm",
+            )
         if target.transport.kind == "ssh" and (
             not target.workspace.is_absolute() or target.workspace == PurePath("/")
         ):
@@ -247,6 +273,75 @@ def load_targets_config(source: Path) -> TargetsConfig:
                 section["execution"], source, (*path, "execution"), version=version
             )
     return TargetsConfig(version, targets, preparation, execution)
+
+
+def _partition_policy(
+    value: object,
+    source: Path,
+    path: tuple[str | int, ...],
+) -> SlurmPartitionPolicy:
+    if not isinstance(value, list) or not value:
+        fail(
+            source=source,
+            path=path,
+            code="INVALID_PARTITION_POLICY",
+            message="partition_routes must be a nonempty list",
+        )
+    routes: list[SlurmPartitionRoute] = []
+    for index, raw_route in enumerate(value):
+        route_path = (*path, index)
+        route = expect_mapping(raw_route, source=source, path=route_path)
+        check_fields(
+            route,
+            allowed=frozenset(
+                {"name", "partition", "resource_class", "max_walltime"}
+            ),
+            required=frozenset(
+                {"name", "partition", "resource_class", "max_walltime"}
+            ),
+            source=source,
+            path=route_path,
+        )
+        values = {
+            name: expect_string(
+                route[name], source=source, path=(*route_path, name), nonblank=True
+            )
+            for name in ("name", "partition", "resource_class", "max_walltime")
+        }
+        match = _WALLTIME_PATTERN.fullmatch(values["max_walltime"])
+        if match is None:
+            fail(
+                source=source,
+                path=(*route_path, "max_walltime"),
+                code="INVALID_PARTITION_POLICY",
+                message="max_walltime must use HH:MM:SS",
+            )
+        hours, minutes, seconds = (int(part) for part in match.groups())
+        try:
+            routes.append(
+                SlurmPartitionRoute(
+                    values["name"],
+                    values["partition"],
+                    values["resource_class"],
+                    timedelta(hours=hours, minutes=minutes, seconds=seconds),
+                )
+            )
+        except (TypeError, ValueError) as error:
+            fail(
+                source=source,
+                path=route_path,
+                code="INVALID_PARTITION_POLICY",
+                message=str(error),
+            )
+    try:
+        return SlurmPartitionPolicy(tuple(routes))
+    except (TypeError, ValueError) as error:
+        fail(
+            source=source,
+            path=path,
+            code="INVALID_PARTITION_POLICY",
+            message=str(error),
+        )
 
 
 def _execution_storage(
@@ -667,7 +762,13 @@ def _backend_config(
                 frozenset({"type", "root"})
                 if role == "staging" and version >= 5
                 else (
-                    frozenset({"type", "shared_workspace"})
+                    frozenset(
+                        {
+                            "type",
+                            "shared_workspace",
+                            *(('partition_routes',) if version >= 11 else ()),
+                        }
+                    )
                     if role == "scheduler" and version >= 9
                     else frozenset({"type"})
                 )

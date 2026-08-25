@@ -567,7 +567,7 @@ def _target_to_dict(target: Target, *, version: int) -> JsonObject:
         "workspace": str(target.workspace),
     }
     if target.execution_storage is not None:
-        if version != 6:
+        if version not in {6, 7}:
             raise RunRecordFormatError(
                 "RunRecord v1-v5 cannot contain target execution_storage"
             )
@@ -578,6 +578,25 @@ def _target_to_dict(target: Target, *, version: int) -> JsonObject:
             "gpu_environment": policy.gpu_environment,
             "stage_image": policy.stage_image,
             "copy_back": policy.copy_back,
+        }
+    if target.partition_policy is not None:
+        if version != 7:
+            raise RunRecordFormatError(
+                "RunRecord v1-v6 cannot contain target partition_policy"
+            )
+        document["partition_policy"] = {
+            "type": "slurm_partition_routes",
+            "routes": [
+                {
+                    "name": route.name,
+                    "partition": route.partition,
+                    "resource_class": route.resource_class,
+                    "max_walltime_microseconds": int(
+                        route.max_walltime.total_seconds() * 1_000_000
+                    ),
+                }
+                for route in target.partition_policy.routes
+            ],
         }
     return document
 
@@ -596,7 +615,7 @@ def _task_to_dict(task: Task, *, version: int) -> JsonObject:
         "resources": _resources_to_dict(task.resources),
         "state": task.state.value,
     }
-    if version in {3, 5, 6}:
+    if version in {3, 5, 6, 7}:
         document["parameter_set"] = (
             {
                 "id": task.parameter_set.id,
@@ -762,7 +781,8 @@ def _parse_backend(value: object, *, path: str) -> BackendConfig:
 
 def _parse_target(value: object, *, path: str, version: int) -> Target:
     document = _object(value, path=path)
-    storage_present = version == 6 and "execution_storage" in document
+    storage_present = version in {6, 7} and "execution_storage" in document
+    partition_policy_present = version == 7 and "partition_policy" in document
     _exact_fields(
         document,
         frozenset(
@@ -774,6 +794,7 @@ def _parse_target(value: object, *, path: str, version: int) -> Target:
                 "container",
                 "workspace",
                 *(("execution_storage",) if storage_present else ()),
+                *(("partition_policy",) if partition_policy_present else ()),
             }
         ),
         path=path,
@@ -820,6 +841,55 @@ def _parse_target(value: object, *, path: str, version: int) -> Target:
             )
         except (TypeError, ValueError) as error:
             _invalid(storage_path, error)
+    partition_policy = None
+    if partition_policy_present:
+        from rundra.domain.scheduling import SlurmPartitionPolicy, SlurmPartitionRoute
+
+        policy_path = f"{path}.partition_policy"
+        policy_document = _object(document["partition_policy"], path=policy_path)
+        _exact_fields(policy_document, frozenset({"type", "routes"}), path=policy_path)
+        if _string(policy_document["type"], path=f"{policy_path}.type") != (
+            "slurm_partition_routes"
+        ):
+            raise RunRecordFormatError(
+                f"{policy_path}.type must be slurm_partition_routes"
+            )
+        raw_routes = policy_document["routes"]
+        if not isinstance(raw_routes, list) or not raw_routes:
+            raise RunRecordFormatError(f"{policy_path}.routes must be nonempty")
+        parsed_routes = []
+        for index, raw_route in enumerate(raw_routes):
+            route_path = f"{policy_path}.routes[{index}]"
+            route = _object(raw_route, path=route_path)
+            _exact_fields(
+                route,
+                frozenset(
+                    {
+                        "name",
+                        "partition",
+                        "resource_class",
+                        "max_walltime_microseconds",
+                    }
+                ),
+                path=route_path,
+            )
+            parsed_routes.append(
+                SlurmPartitionRoute(
+                    _string(route["name"], path=f"{route_path}.name"),
+                    _string(route["partition"], path=f"{route_path}.partition"),
+                    _string(
+                        route["resource_class"],
+                        path=f"{route_path}.resource_class",
+                    ),
+                    timedelta(
+                        microseconds=_integer(
+                            route["max_walltime_microseconds"],
+                            path=f"{route_path}.max_walltime_microseconds",
+                        )
+                    ),
+                )
+            )
+        partition_policy = SlurmPartitionPolicy(tuple(parsed_routes))
     try:
         return Target(
             name=_string(document["name"], path=f"{path}.name"),
@@ -829,6 +899,7 @@ def _parse_target(value: object, *, path: str, version: int) -> Target:
             container=_parse_backend(document["container"], path=f"{path}.container"),
             workspace=_path(document["workspace"], path=f"{path}.workspace"),
             execution_storage=storage,
+            partition_policy=partition_policy,
         )
     except RunRecordFormatError:
         raise

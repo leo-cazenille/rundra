@@ -1,3 +1,4 @@
+from datetime import timedelta
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -143,6 +144,89 @@ targets:
     assert policy.gpu_environment == "SLURM_GPUTMPDIR"
     assert policy.stage_image is True
     assert policy.copy_back == "task"
+
+
+def test_version_eleven_loads_ordered_slurm_partition_routes(tmp_path: Path) -> None:
+    from rundra.config.targets import load_targets_config
+
+    source = tmp_path / "targets.yaml"
+    source.write_text(
+        """\
+version: 11
+targets:
+  cluster:
+    transport: {type: ssh, host: cluster}
+    scheduler:
+      type: slurm
+      partition_routes:
+        - name: cpu_short
+          partition: cpu-short
+          resource_class: cpu
+          max_walltime: "01:00:00"
+        - name: gpu_day
+          partition: gpu-day
+          resource_class: gpu
+          max_walltime: "24:00:00"
+    staging: {type: rsync}
+    container: {type: apptainer}
+    workspace: /home/tester/.rundra
+    execution:
+      hard_task_limit: 100
+      confirmation_threshold: 100
+      max_active_tasks: 4
+      max_concurrent_jobs: 2
+      max_array_size: 100
+      output_shard_tasks: 10
+      automatic_retrieval_threshold: 100
+      max_memory_per_worker: 1GiB
+      worker_pool:
+        activation_threshold: 10
+        default_workers: 1
+        max_workers: 2
+        default_task_slots_per_worker: 1
+        max_task_slots_per_worker: 2
+        tasks_per_lease: 10
+        infrastructure_retry_limit: 1
+        requeue_limit: 1
+""",
+        encoding="utf-8",
+    )
+
+    config = load_targets_config(source)
+    policy = config.targets["cluster"].partition_policy
+
+    assert config.version == 11
+    assert policy is not None
+    assert tuple(route.name for route in policy.routes) == ("cpu_short", "gpu_day")
+    assert policy.routes[0].max_walltime == timedelta(hours=1)
+
+
+def test_version_eleven_rejects_duplicate_partitions(tmp_path: Path) -> None:
+    from rundra.config.errors import ConfigError
+    from rundra.config.targets import load_targets_config
+
+    source = tmp_path / "targets.yaml"
+    source.write_text(
+        """\
+version: 11
+targets:
+  cluster:
+    transport: {type: ssh, host: cluster}
+    scheduler:
+      type: slurm
+      partition_routes:
+        - {name: first, partition: cpu, resource_class: cpu, max_walltime: "01:00:00"}
+        - {name: second, partition: cpu, resource_class: cpu, max_walltime: "02:00:00"}
+    staging: {type: rsync}
+    container: {type: apptainer}
+    workspace: /home/tester/.rundra
+    execution: {}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="partition names must be unique"):
+        load_targets_config(source)
 
 
 @pytest.mark.parametrize(
@@ -402,7 +486,7 @@ targets:
 @pytest.mark.parametrize(
     "content, code, path",
     [
-        ("version: 11\ntargets: {}\n", "UNSUPPORTED_VERSION", ("version",)),
+        ("version: 12\ntargets: {}\n", "UNSUPPORTED_VERSION", ("version",)),
         ("version: 1\n", "MISSING_FIELD", ("targets",)),
         (
             "version: 1\ntargets: []\n",

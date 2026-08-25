@@ -23,16 +23,18 @@ class SchemaVersions:
             raise ValueError("Current schema version must be supported")
 
 
-RUN_RECORD_SCHEMA = SchemaVersions(6, frozenset({1, 2, 3, 4, 5, 6}))
+RUN_RECORD_SCHEMA = SchemaVersions(7, frozenset({1, 2, 3, 4, 5, 6, 7}))
 STATUS_SCHEMA = SchemaVersions(6, RUN_RECORD_SCHEMA.supported)
 TASKS_SCHEMA = SchemaVersions(6, RUN_RECORD_SCHEMA.supported)
 LOGS_SCHEMA = SchemaVersions(6, RUN_RECORD_SCHEMA.supported)
 INSPECT_SCHEMA = SchemaVersions(6, RUN_RECORD_SCHEMA.supported)
 RUN_LIST_SCHEMA = SchemaVersions(2, frozenset({2}))
-PLAN_SCHEMA = SchemaVersions(8, frozenset({1, 2, 3, 4, 5, 6, 7, 8}))
+PLAN_SCHEMA = SchemaVersions(9, frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9}))
 PROJECT_CONFIG_SCHEMA = SchemaVersions(5, frozenset({1, 2, 3, 4, 5}))
 USER_CONFIG_SCHEMA = SchemaVersions(2, frozenset({1, 2}))
-TARGET_CONFIG_SCHEMA = SchemaVersions(10, frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9, 10}))
+TARGET_CONFIG_SCHEMA = SchemaVersions(
+    11, frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11})
+)
 REFERENCE_MANIFEST_SCHEMA = SchemaVersions(1, frozenset({1}))
 AWAIT_SCHEMA = SchemaVersions(1, frozenset({1}))
 
