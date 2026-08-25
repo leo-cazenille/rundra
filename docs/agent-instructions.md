@@ -8,7 +8,7 @@
   Apptainer directly except while diagnosing an explicit Rundra error.
 - Run `rundr doctor EXPERIMENT --connect --agent codex --json` and `rundr plan
   EXPERIMENT` before consuming cluster resources. Use the explicit
-  `--scheduler-probe` only when a bounded no-op scheduler submission is wanted.
+  `--scheduler-probe` only when a bounded scheduler submission is wanted.
   Review task count, seeds, resources, concurrency, and retrieval strategy.
 - Use explicit seeds for reproducibility. Above a target safety threshold, pass
   the exact requested `--confirm-tasks N` value only after reviewing the plan.
@@ -32,6 +32,9 @@
 - Use `--json` or Rundra MCP tools. Never parse scheduler-native output.
 - Run scientific and analysis workloads on the configured execution target or
   an approved workstation, never on a login/controller host.
+- For target-v10 allocation scratch, review `plan` storage effects and use
+  `doctor --scheduler-probe` once when onboarding the target. Never substitute
+  a guessed scratch path or treat the scheduler-provided root as durable data.
 - Keep raw retrieved results separate from derived analysis outputs.
 - Use project-v5 `fetch_mode: copy` when analysis requires a materialized file
   tree; otherwise retain the shared-storage-efficient `auto` default.

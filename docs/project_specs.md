@@ -748,10 +748,73 @@ the same `B`, `KiB`, `MiB`, `GiB`, or `TiB` syntax as experiment resources.
 Planning rejects aggregate worker memory above this ceiling before staging or
 scheduler contact. Older target versions retain their existing behavior.
 
+Version 8 adds an operator-owned policy for building Apptainer definitions.
+Version 9 adds the explicit shared-workspace contract required by HTCondor.
+Version 10 adds an optional, strict allocation-local storage policy for Slurm:
+
+```yaml
+version: 10
+targets:
+  shared-slurm:
+    transport: {type: ssh, host: login.cluster.example}
+    scheduler: {type: slurm}
+    staging: {type: rsync}
+    container: {type: apptainer}
+    workspace: /home/USER/.rundra
+    execution_storage:
+      type: slurm_scratch
+      cpu_environment: SLURM_TMPDIR
+      gpu_environment: SLURM_GPUTMPDIR
+      stage_image: true
+      copy_back: task
+    execution:
+      # Required site-owned limits and worker-pool policy.
+      # ...
+```
+
+The variable names are exact scheduler contracts, not arbitrary shell
+expressions. The policy is Slurm-only. Version 10 requires image staging and
+per-Task copy-back; these values are explicit so later schemas can add other
+safe strategies without silently changing current behavior.
+
 The shared root must be absolute and non-root. Rundra resolves staged source,
 workspace, and retrieval destinations beneath it and rejects symlink escapes.
 Scheduling and container commands still use the configured SSH and Slurm
 adapters; only file movement is performed directly through the shared mount.
+
+### 10.3 Allocation-local Slurm execution storage
+
+For a target with `execution_storage.type: slurm_scratch`, every scientific
+allocation validates the appropriate scheduler variable: the CPU variable for
+CPU Tasks and the GPU variable for GPU Tasks. The resolved directory must be
+absolute, non-root, non-symlink, existing, and writable. Rundra creates only a
+uniquely named child and never recursively removes the scheduler-owned root.
+
+Source, effective configuration, and the verified SIF are copied into the
+allocation-local child before execution. SIF staging is followed by SHA-256
+verification. Arrays and worker pools stage immutable inputs once per
+allocation or array element, create isolated Task output directories, and copy
+each Task's output back to durable workspace storage before recording success.
+Copy-back uses temporary and previous paths so an incomplete replacement is not
+published as a successful Task result. Cleanup traps remove only paths created
+by Rundra.
+
+Target-side definition builds, image pulls, and application builds use the same
+CPU scratch contract inside their bounded preparation job. Verified image and
+prepared-source caches are published to durable target storage only after the
+scratch work succeeds. A scratch validation, staging, digest, build, or
+copy-back failure fails the preparation or scientific Task explicitly.
+
+Pure `plan` reports the policy and possible staging effects without reading the
+variable or contacting the target. `doctor --scheduler-probe` uses one bounded
+allocation to perform a reversible scratch write, shared-workspace copy-back,
+and cleanup probe. New RunRecords preserve the policy and selected variable in
+flat `execution_storage.*` scheduler metadata. Scheduler-provided concrete
+scratch paths are intentionally not persisted.
+
+M31 does not implement target budgets, automatic target choice, campaign
+placement, or post-retrieval retention cleanup. Those remain separate policy
+milestones.
 
 Large parameter/seed products use an inclusive arithmetic seed range and a
 constant-size TaskSpace. Ordinals are parameter-major and seed-minor; the Task
@@ -1373,8 +1436,9 @@ agents. Bare `rundr doctor` exercises the effective local Run store and
 preparation cache with private temporary files. Experiment mode additionally
 reports the exact source, config, destination, target, SSH, network, and socket
 requirements. `--connect` performs a reversible staging round trip; the
-separate `--scheduler-probe` opt-in submits one bounded no-op job and guarantees
-best-effort cancellation and exact-path cleanup. `ready` means that no known
+separate `--scheduler-probe` opt-in submits one bounded probe job and guarantees
+best-effort cancellation and exact-path cleanup. Scratch-enabled targets also
+exercise allocation-local write, copy-back, and cleanup. `ready` means that no known
 requirement failed, while `complete` means every requested check passed. The
 audit may generate agent-specific configuration text but never applies it,
 reads credential contents into output, fetches sources, pulls images, builds

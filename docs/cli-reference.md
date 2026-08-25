@@ -46,8 +46,10 @@ Bare `doctor` performs reversible local write probes in the effective Run store
 and preparation cache. With an experiment it also checks the source, config,
 and retrieval destination. `--connect` creates and removes a private target
 workspace and performs a one-token staging round trip. `--scheduler-probe`
-implies connection, submits at most one 1-CPU no-op job, and cancels it on
-timeout. `--no-write-probe` leaves write capabilities untested and cannot be
+implies connection, submits at most one 1-CPU, 256-MiB, 60-second probe job, and
+cancels it on timeout. For a target-v10 Slurm scratch policy, that allocation
+also validates the configured CPU variable and performs a reversible scratch
+write, durable-workspace copy-back, and cleanup. `--no-write-probe` leaves write capabilities untested and cannot be
 combined with `--scheduler-probe`. Doctor JSON version 2 distinguishes `ready`
 from complete requested verification and can generate, but never apply, a
 Codex permission profile.
@@ -244,6 +246,14 @@ returns plan format 6 with requested and effective scale, policy ceilings,
 worker resources, and scheduler-controlled placement. Operators must configure
 limits and defaults from known site policy; Rundra does not infer cores,
 exclusive placement, or memory overcommit.
+
+Target v10 may declare `execution_storage.type: slurm_scratch`. Human plans
+show the CPU/GPU variable names, image staging, and per-Task copy-back. JSON
+target documents expose the strict `execution_storage` mapping. This is a
+site-owned execution contract: Rundra does not invent scratch paths and fails
+if the scheduler does not provide a safe writable directory. Run inspection
+records the policy under `scheduler_metadata` keys prefixed with
+`execution_storage.`; it does not retain the allocation's concrete path.
 
 `rundr targets --json`, `rundr doctor --json`, and plan format 8 expose the
 selected scheduler's typed capabilities. These include arrays, dependencies,

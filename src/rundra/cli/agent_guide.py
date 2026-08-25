@@ -17,6 +17,7 @@ GUIDE_TOPICS = {
     "htcondor": "Use targets version 9 and require the operator to confirm shared_workspace: true only when the access point and execute nodes see the workspace at the same absolute path. HTCondor supports detached Task clusters and arrays, but not Rundra compact workers, preparation dependencies, file transfer, or scheduler rerun recovery. Inspect plan.target.scheduler.capabilities instead of inferring support from the backend name.",
     "lifecycle": "Use submit, await for one or several long Runs, status/tasks, fetch, then purge. Await emits one final compact result and supports all/any aggregate conditions, avoiding model-driven polling. Dependency-pending workers remain queued before journals exist; Rundra merges identical atomic journal fragments and rejects contradictory outcomes. ETA is omitted until at least 20 Tasks, 10% completion, and 60 seconds of evidence. Agents should use explicit Run IDs rather than --last.",
     "results": "Prefer fetch auto. Set project-v5 fetch_mode: copy when downstream analysis requires ordinary files instead of a shared reference manifest. Compact archive fetch verifies exact Task coverage; add --extract only when individual files are required. Keep derived outputs separate.",
+    "scratch": "Treat target-v10 execution_storage as an operator-owned Slurm contract. Plan reports CPU/GPU variables and copy-back; doctor --scheduler-probe verifies the CPU scratch path inside one bounded allocation. Rundra stages source, config, and verified images locally, copies every Task output back before success, and never owns or deletes the scheduler-provided scratch root.",
     "preparation": "Pin acquired images. Definition projects v4+ declare an explicit context include list; Rundra hashes only that context plus the definition for image-cache identity. Scientific jobs use Rundra-owned afterok dependencies and must not be resubmitted while preparation runs.",
     "provenance": "Inspect the Run record after submission. Prepared Runs record the verified image digest; actual launches record container_runtime and container_runtime_version when available. Plan and doctor intentionally do not claim execution-time runtime identity.",
     "recovery": "Definition preparation and scientific work use a durable afterok dependency, so submit does not wait for the image build. After any interrupted submit, resume the same Run ID; never submit a duplicate. Resolve manually only after proving no scheduler job exists.",
@@ -48,6 +49,9 @@ GUIDE = f"""{START_MARKER}
 - Read scheduler capabilities from structured `targets`, `doctor`, or `plan`
   JSON. Do not infer arrays, dependencies, worker pools, or rerun recovery from
   a scheduler name. OpenPBS worker pools require target `requeue_limit: 0`.
+- For target-v10 allocation scratch, review `plan` storage effects and use
+  `doctor --scheduler-probe` once when onboarding the target. Never substitute
+  a guessed scratch path or treat the scheduler-provided root as durable data.
 - Use `rundr help` to discover available operations and the common workflow.
   Use `rundr help COMMAND` for command-specific arguments and options.
 - Use `rundr agent-guide --list-topics` and `rundr agent-guide --topic TOPIC`

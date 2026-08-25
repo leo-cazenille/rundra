@@ -4,7 +4,9 @@ Rundra includes an opt-in two-node Slurm cluster for validating the complete
 SSH, rsync, Slurm, Apptainer, worker-pool, sharded-output, and retrieval path.
 It executes 1,000 deterministic logical Tasks while limiting scheduled workers
 and Docker CPU/memory consumption.
-The suite also covers bounded-array partial failure and cancellation.
+The suite also covers bounded-array partial failure and cancellation. Compute
+nodes expose private `/scratch` and `/gpu-scratch` tmpfs mounts through the
+same scheduler-variable contract expected from a scratch-mandating site.
 
 Run it on an amd64 Linux host with Docker Engine, Docker Compose v2,
 `/dev/fuse`, and the kernel support required by unprivileged Apptainer:
@@ -40,6 +42,15 @@ RUNDRA_DOCKER_SLURM_DIAGNOSTICS=/path/to/diagnostics \
 
 The diagnostic bundle contains only Docker/Slurm state and the synthetic test
 runs. The temporary SSH and Munge key state is not copied.
+
+The default suite enables target schema v10 allocation scratch. Its bounded
+scheduler doctor probe verifies scratch write/copy-back/cleanup, and all scale,
+failure, and cancellation Runs stage source, configuration, and the SIF into
+compute-local storage. The 1,000-Task worker-pool test requires copied-back
+results to report the synthetic CPU scratch variable. A separate cold fixture
+builds a definition-derived SIF and an application inside a scheduled scratch
+preparation job, inspects the recorded preparation and storage provenance, then
+executes and retrieves one result.
 
 The harness never uses Docker privileged mode. It generates temporary SSH and
 Munge keys, uses strict SSH host verification, prints Compose diagnostics on
