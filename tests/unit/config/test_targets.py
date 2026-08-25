@@ -92,6 +92,88 @@ targets:
     assert target.scheduler.options == {"shared_workspace": True}
 
 
+def test_version_ten_loads_strict_slurm_scratch_policy(tmp_path: Path) -> None:
+    from rundra.config.targets import load_targets_config
+
+    source = tmp_path / "targets.yaml"
+    source.write_text(
+        """\
+version: 10
+targets:
+  cluster:
+    transport: {type: ssh, host: cluster}
+    scheduler: {type: slurm}
+    staging: {type: rsync}
+    container: {type: apptainer}
+    workspace: /home/tester/.rundra
+    execution: {}
+    execution_storage:
+      type: slurm_scratch
+      cpu_environment: SLURM_TMPDIR
+      gpu_environment: SLURM_GPUTMPDIR
+      stage_image: true
+      copy_back: task
+""",
+        encoding="utf-8",
+    )
+
+    config = load_targets_config(source)
+    policy = config.targets["cluster"].execution_storage
+
+    assert config.version == 10
+    assert policy is not None
+    assert policy.cpu_environment == "SLURM_TMPDIR"
+    assert policy.gpu_environment == "SLURM_GPUTMPDIR"
+    assert policy.stage_image is True
+    assert policy.copy_back == "task"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("cpu_environment", "TMPDIR"),
+        ("gpu_environment", "TMPDIR"),
+        ("stage_image", "false"),
+        ("copy_back", "worker"),
+    ],
+)
+def test_version_ten_rejects_weakened_scratch_policy(
+    tmp_path: Path, field: str, value: str
+) -> None:
+    from rundra.config.errors import ConfigError
+    from rundra.config.targets import load_targets_config
+
+    values = {
+        "cpu_environment": "SLURM_TMPDIR",
+        "gpu_environment": "SLURM_GPUTMPDIR",
+        "stage_image": "true",
+        "copy_back": "task",
+    }
+    values[field] = value
+    source = tmp_path / "targets.yaml"
+    source.write_text(
+        "version: 10\ntargets:\n  cluster:\n"
+        "    transport: {type: ssh, host: cluster}\n"
+        "    scheduler: {type: slurm}\n"
+        "    staging: {type: rsync}\n"
+        "    container: {type: apptainer}\n"
+        "    workspace: /home/tester/.rundra\n"
+        "    execution: {}\n"
+        "    execution_storage:\n"
+        "      type: slurm_scratch\n"
+        f"      cpu_environment: {values['cpu_environment']}\n"
+        f"      gpu_environment: {values['gpu_environment']}\n"
+        f"      stage_image: {values['stage_image']}\n"
+        f"      copy_back: {values['copy_back']}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        load_targets_config(source)
+
+    assert caught.value.code == "INVALID_EXECUTION_STORAGE"
+
+
 def test_htcondor_requires_explicit_shared_workspace_contract(tmp_path: Path) -> None:
     from rundra.config.errors import ConfigError
     from rundra.config.targets import load_targets_config
@@ -303,7 +385,7 @@ targets:
 @pytest.mark.parametrize(
     "content, code, path",
     [
-        ("version: 10\ntargets: {}\n", "UNSUPPORTED_VERSION", ("version",)),
+        ("version: 11\ntargets: {}\n", "UNSUPPORTED_VERSION", ("version",)),
         ("version: 1\n", "MISSING_FIELD", ("targets",)),
         (
             "version: 1\ntargets: []\n",

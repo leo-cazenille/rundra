@@ -10,6 +10,7 @@ from types import MappingProxyType
 
 from rundra.config._schema import (
     check_fields,
+    expect_boolean,
     expect_integer,
     expect_mapping,
     expect_string,
@@ -24,6 +25,7 @@ from rundra.domain.scaling import (
     ExecutionPolicy,
     WorkerPoolPolicy,
 )
+from rundra.domain.storage import SlurmScratchPolicy
 from rundra.scheduler_registry import scheduler_kinds
 from rundra.schema_versions import TARGET_CONFIG_SCHEMA
 from rundra.security import is_credential_field, is_safe_ssh_destination
@@ -39,6 +41,7 @@ _TARGET_V6_FIELDS = _TARGET_V5_FIELDS
 _TARGET_V7_FIELDS = _TARGET_V6_FIELDS
 _TARGET_V8_FIELDS = _TARGET_V7_FIELDS
 _TARGET_V9_FIELDS = _TARGET_V8_FIELDS
+_TARGET_V10_FIELDS = _TARGET_V9_FIELDS | {"execution_storage"}
 _MEMORY_PATTERN = re.compile(r"([1-9][0-9]*)(B|KiB|MiB|GiB|TiB)\Z")
 _WALLTIME_PATTERN = re.compile(r"([0-9]{2,}):([0-5][0-9]):([0-5][0-9])\Z")
 _MEMORY_FACTORS = {
@@ -77,7 +80,7 @@ class TargetsConfig:
 
     def __post_init__(self) -> None:
         if self.version not in TARGET_CONFIG_SCHEMA.supported:
-            raise ValueError("TargetsConfig version must be 1 through 9")
+            raise ValueError("TargetsConfig version must be 1 through 10")
         object.__setattr__(self, "targets", MappingProxyType(dict(self.targets)))
         object.__setattr__(
             self, "preparation", MappingProxyType(dict(self.preparation))
@@ -108,7 +111,7 @@ def load_targets_config(source: Path) -> TargetsConfig:
             source=source,
             path=("version",),
             code="UNSUPPORTED_VERSION",
-            message=("Unsupported targets version; supported versions are 1 through 9"),
+            message=("Unsupported targets version; supported versions are 1 through 10"),
         )
     raw_targets = expect_mapping(document["targets"], source=source, path=("targets",))
     targets: dict[str, Target] = {}
@@ -144,7 +147,11 @@ def load_targets_config(source: Path) -> TargetsConfig:
                                         else (
                                             _TARGET_V8_FIELDS
                                             if version == 8
-                                            else _TARGET_V9_FIELDS
+                                            else (
+                                                _TARGET_V9_FIELDS
+                                                if version == 9
+                                                else _TARGET_V10_FIELDS
+                                            )
                                         )
                                     )
                                 )
@@ -182,6 +189,15 @@ def load_targets_config(source: Path) -> TargetsConfig:
                 section["container"], "container", source, path, version=version
             ),
             workspace=workspace,
+            execution_storage=(
+                _execution_storage(
+                    section["execution_storage"],
+                    source,
+                    (*path, "execution_storage"),
+                )
+                if "execution_storage" in section
+                else None
+            ),
         )
         backend_stack = (
             target.transport.kind,
@@ -199,6 +215,16 @@ def load_targets_config(source: Path) -> TargetsConfig:
                     "SSH stack with Slurm or OpenPBS, rsync or shared staging, "
                     "and Apptainer"
                 ),
+            )
+        if (
+            target.execution_storage is not None
+            and target.scheduler.kind != "slurm"
+        ):
+            fail(
+                source=source,
+                path=(*path, "execution_storage"),
+                code="INVALID_EXECUTION_STORAGE",
+                message="Slurm scratch execution requires scheduler.type: slurm",
             )
         if target.transport.kind == "ssh" and (
             not target.workspace.is_absolute() or target.workspace == PurePath("/")
@@ -222,6 +248,69 @@ def load_targets_config(source: Path) -> TargetsConfig:
                 section["execution"], source, (*path, "execution"), version=version
             )
     return TargetsConfig(version, targets, preparation, execution)
+
+
+def _execution_storage(
+    value: object,
+    source: Path,
+    path: tuple[str | int, ...],
+) -> SlurmScratchPolicy:
+    section = expect_mapping(value, source=source, path=path)
+    fields = frozenset(
+        {"type", "cpu_environment", "gpu_environment", "stage_image", "copy_back"}
+    )
+    check_fields(
+        section,
+        allowed=fields,
+        required=fields,
+        source=source,
+        path=path,
+    )
+    kind = expect_string(
+        section["type"], source=source, path=(*path, "type"), nonblank=True
+    )
+    if kind != "slurm_scratch":
+        fail(
+            source=source,
+            path=(*path, "type"),
+            code="INVALID_VALUE",
+            message="Execution storage type must be 'slurm_scratch'",
+        )
+    cpu_environment = expect_string(
+        section["cpu_environment"],
+        source=source,
+        path=(*path, "cpu_environment"),
+        nonblank=True,
+    )
+    gpu_environment = expect_string(
+        section["gpu_environment"],
+        source=source,
+        path=(*path, "gpu_environment"),
+        nonblank=True,
+    )
+    stage_image = expect_boolean(
+        section["stage_image"], source=source, path=(*path, "stage_image")
+    )
+    copy_back = expect_string(
+        section["copy_back"],
+        source=source,
+        path=(*path, "copy_back"),
+        nonblank=True,
+    )
+    try:
+        return SlurmScratchPolicy(
+            cpu_environment=cpu_environment,
+            gpu_environment=gpu_environment,
+            stage_image=stage_image,
+            copy_back=copy_back,
+        )
+    except ValueError as error:
+        fail(
+            source=source,
+            path=path,
+            code="INVALID_EXECUTION_STORAGE",
+            message=str(error),
+        )
 
 
 def _execution_policy(

@@ -1002,7 +1002,7 @@ def _with_launch(rendered: str, launch: LaunchResolutionValue | None) -> str:
 def _target_document(
     target: Target, *, include_capabilities: bool = False
 ) -> dict[str, Any]:
-    return {
+    document = {
         "name": target.name,
         "transport": _backend_document(target.transport.kind, target.transport.options),
         "scheduler": (
@@ -1017,6 +1017,16 @@ def _target_document(
         "container": _backend_document(target.container.kind, target.container.options),
         "workspace": str(target.workspace),
     }
+    if target.execution_storage is not None:
+        policy = target.execution_storage
+        document["execution_storage"] = {
+            "type": "slurm_scratch",
+            "cpu_environment": policy.cpu_environment,
+            "gpu_environment": policy.gpu_environment,
+            "stage_image": policy.stage_image,
+            "copy_back": policy.copy_back,
+        }
+    return document
 
 
 def _backend_document(kind: str, options: Mapping[str, object]) -> dict[str, Any]:

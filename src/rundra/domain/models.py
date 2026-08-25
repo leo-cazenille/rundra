@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from rundra.domain.parameters import ParameterSet
 from rundra.domain.states import ExecutionState, RetrievalState
+from rundra.domain.storage import SlurmScratchPolicy
 
 _RUN_ID_PATTERN = re.compile(r"run_[0-9a-f]{32}\Z")
 _TASK_ID_PATTERN = re.compile(r"task_[0-9]{6,}\Z")
@@ -250,6 +251,7 @@ class Target:
     staging: BackendConfig
     container: BackendConfig
     workspace: PurePath
+    execution_storage: SlurmScratchPolicy | None = None
 
     def __post_init__(self) -> None:
         if type(self.name) is not str:
@@ -261,6 +263,12 @@ class Target:
                 raise TypeError(f"Target {field_name} must be a BackendConfig")
         if not isinstance(self.workspace, PurePath):
             raise TypeError("Target workspace must be a PurePath")
+        if self.execution_storage is not None and type(
+            self.execution_storage
+        ) is not SlurmScratchPolicy:
+            raise TypeError(
+                "Target execution_storage must be a SlurmScratchPolicy or None"
+            )
 
 
 @dataclass(frozen=True, slots=True)
