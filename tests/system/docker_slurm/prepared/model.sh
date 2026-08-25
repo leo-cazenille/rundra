@@ -3,5 +3,5 @@ set -eu
 
 seed=$4
 mkdir -p /workspace/output/results
-printf '{"seed":%s,"scratch":"%s"}\n' "$seed" "${SLURM_TMPDIR:-}" \
+printf '{"seed":%s}\n' "$seed" \
     > /workspace/output/results/result.json

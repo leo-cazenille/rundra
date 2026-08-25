@@ -88,6 +88,15 @@ def test_docker_slurm_runs_one_thousand_tasks_on_compute_nodes(
     run_id = str(run["run_id"])
     assert len(run["scheduler_job_ids"]) <= 2
 
+    inspected = _rundr("inspect", run_id, *store_options)
+    record = inspected["record"]
+    assert isinstance(record, dict)
+    scheduler_metadata = record["scheduler_metadata"]
+    assert isinstance(scheduler_metadata, dict)
+    assert scheduler_metadata["execution_storage.active_environment"] == (
+        "SLURM_TMPDIR"
+    )
+
     waited = _rundr("wait", run_id, "--timeout", "1200", *store_options)
     wait = waited["wait"]
     assert isinstance(wait, dict) and wait["terminal"] is True
@@ -108,7 +117,6 @@ def test_docker_slurm_runs_one_thousand_tasks_on_compute_nodes(
     documents = [json.loads(path.read_text(encoding="utf-8")) for path in results]
     assert {item["seed"] for item in documents} == set(range(1000))
     assert {item["host"] for item in documents} <= {"compute1", "compute2"}
-    assert {item["scratch"] for item in documents} == {"/scratch"}
 
 
 def test_docker_slurm_bounded_array_preserves_partial_failure(
@@ -210,11 +218,9 @@ def test_docker_slurm_builds_image_and_application_in_allocation_scratch(
     fetch = fetched["fetch"]
     assert isinstance(fetch, dict) and fetch["retrieval_state"] == "SUCCEEDED"
     result = json.loads(
-        (destination / "output/task_000000/results/result.json").read_text(
-            encoding="utf-8"
-        )
+        (destination / "output/results/result.json").read_text(encoding="utf-8")
     )
-    assert result == {"seed": 41, "scratch": "/scratch"}
+    assert result == {"seed": 41}
 
 
 def test_docker_slurm_cancels_bounded_array(

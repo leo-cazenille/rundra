@@ -30,5 +30,8 @@ RUN apt-get update \
 COPY slurm.conf /etc/slurm/slurm.conf
 COPY cgroup.conf /etc/slurm/cgroup.conf
 COPY entrypoint.sh /opt/rundra-cluster/entrypoint.sh
+COPY task-prolog.sh /opt/rundra-cluster/task-prolog.sh
+
+RUN chmod 0755 /opt/rundra-cluster/task-prolog.sh
 
 ENTRYPOINT ["/opt/rundra-cluster/entrypoint.sh"]

@@ -46,8 +46,8 @@ runs. The temporary SSH and Munge key state is not copied.
 The default suite enables target schema v10 allocation scratch. Its bounded
 scheduler doctor probe verifies scratch write/copy-back/cleanup, and all scale,
 failure, and cancellation Runs stage source, configuration, and the SIF into
-compute-local storage. The 1,000-Task worker-pool test requires copied-back
-results to report the synthetic CPU scratch variable. A separate cold fixture
+compute-local storage. The 1,000-Task worker-pool test checks the selected CPU
+scratch variable in Run provenance and verifies all copied-back results. A separate cold fixture
 builds a definition-derived SIF and an application inside a scheduled scratch
 preparation job, inspects the recorded preparation and storage provenance, then
 executes and retrieves one result.

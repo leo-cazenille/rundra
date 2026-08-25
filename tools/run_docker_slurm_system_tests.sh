@@ -33,9 +33,11 @@ capture_diagnostics() {
     docker compose -f "$compose" exec -T controller scontrol show nodes \
         > "$destination/slurm-nodes.txt" 2>&1 || true
     mkdir -p "$destination/workspace-runs"
-    docker compose -f "$compose" cp controller:/workspace/runs/. \
-        "$destination/workspace-runs" \
-        > "$destination/workspace-copy.log" 2>&1 || true
+    {
+        docker compose -f "$compose" exec -T controller \
+            tar -C /workspace -cf - runs .rundra-scheduler-logs \
+            | tar -C "$destination/workspace-runs" -xf -
+    } > "$destination/workspace-copy.log" 2>&1 || true
 
     printf 'Docker Slurm diagnostics: %s\n' "$destination" >&2
     tail -n 200 "$destination/compose.log" >&2 || true
@@ -47,6 +49,7 @@ cleanup() {
         capture_diagnostics || true
     fi
     docker compose -f "$compose" down --volumes --remove-orphans || true
+    chmod -R u+w "$state" 2>/dev/null || true
     rm -rf "$state"
     exit "$status"
 }

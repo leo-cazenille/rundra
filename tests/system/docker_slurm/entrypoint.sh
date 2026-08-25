@@ -1,11 +1,6 @@
 #!/bin/sh
 set -eu
 
-# The synthetic scheduler exports allocation-local storage locations. The
-# compute services provide these paths as private tmpfs mounts.
-export SLURM_TMPDIR=/scratch
-export SLURM_GPUTMPDIR=/gpu-scratch
-
 wait_for_bootstrap() {
     while [ ! -f /cluster/ready ]; do sleep 1; done
 }
