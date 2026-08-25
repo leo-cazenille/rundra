@@ -54,6 +54,7 @@ def test_docker_slurm_runs_one_thousand_tasks_on_compute_nodes(
         "--targets-file",
         str(docker_slurm_targets_source),
         "--connect",
+        "--scheduler-inventory",
         "--scheduler-probe",
     )
     doctor = diagnosed["doctor"]
@@ -67,6 +68,25 @@ def test_docker_slurm_runs_one_thousand_tasks_on_compute_nodes(
     )
     assert scheduler_probe["status"] == "pass"
     assert "allocation-local scratch" in str(scheduler_probe["message"])
+    assert {item["name"] for item in doctor["scheduler_inventory"]} == {
+        "cpu-long",
+        "cpu-short",
+        "gpu-short",
+    }
+    planned = _rundr(
+        "plan",
+        str(_SOURCE / "experiment.yaml"),
+        "--config",
+        str(_SOURCE / "config.yaml"),
+        "--seeds",
+        "0:1",
+        "--target",
+        docker_slurm_target_name,
+        "--source-root",
+        str(_SOURCE),
+        *target_options,
+    )
+    assert planned["plan"]["native_options"]["slurm"]["partition"] == "cpu-short"
     submitted = _rundr(
         "submit",
         str(_SOURCE / "experiment.yaml"),

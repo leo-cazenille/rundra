@@ -406,9 +406,7 @@ def render_human(result: OperationResult[Any]) -> str:
                 f"rebuild_image={preparation.rebuild_image}"
             )
         if plan.target.partition_policy is not None:
-            partition = plan.units[0].resources.native.get("slurm", {}).get(
-                "partition"
-            )
+            partition = plan.units[0].resources.native.get("slurm", {}).get("partition")
             route = next(
                 (
                     item
@@ -635,7 +633,7 @@ def render_human(result: OperationResult[Any]) -> str:
 
 def _plan_document(plan: ExecutionPlan) -> dict[str, Any]:
     resources = plan.units[0].resources
-    document = {
+    document: dict[str, Any] = {
         "version": plan.version,
         "experiment": plan.experiment_name,
         "target": _target_document(plan.target, include_capabilities=plan.version >= 8),
@@ -1040,7 +1038,7 @@ def _with_launch(rendered: str, launch: LaunchResolutionValue | None) -> str:
 def _target_document(
     target: Target, *, include_capabilities: bool = False
 ) -> dict[str, Any]:
-    document = {
+    document: dict[str, Any] = {
         "name": target.name,
         "transport": _backend_document(target.transport.kind, target.transport.options),
         "scheduler": (

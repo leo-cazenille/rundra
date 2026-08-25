@@ -331,7 +331,10 @@ class SlurmScheduler:
                 gres.strip(),
             )
             previous = partitions.get(name)
-            if previous is not None and previous.max_walltime_raw != item.max_walltime_raw:
+            if (
+                previous is not None
+                and previous.max_walltime_raw != item.max_walltime_raw
+            ):
                 raise SlurmQueryError(
                     "Slurm partition inventory has inconsistent time limits"
                 )

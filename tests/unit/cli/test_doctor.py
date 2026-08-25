@@ -133,20 +133,14 @@ def test_scheduler_inventory_validates_configured_routes(monkeypatch) -> None:
         BackendConfig("apptainer"),
         PurePosixPath("/shared/rundra"),
         partition_policy=SlurmPartitionPolicy(
-            (
-                SlurmPartitionRoute(
-                    "cpu_short", "cpu-short", "cpu", timedelta(hours=1)
-                ),
-            )
+            (SlurmPartitionRoute("cpu_short", "cpu-short", "cpu", timedelta(hours=1)),)
         ),
     )
 
     class InventoryScheduler:
         def inventory(self) -> tuple[SchedulerPartition, ...]:
             return (
-                SchedulerPartition(
-                    "cpu-short", True, "up", 3600, "01:00:00", "(null)"
-                ),
+                SchedulerPartition("cpu-short", True, "up", 3600, "01:00:00", "(null)"),
             )
 
     monkeypatch.setattr(

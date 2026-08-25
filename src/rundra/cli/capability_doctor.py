@@ -715,8 +715,7 @@ def _scheduler_inventory(
                 )
             elif (
                 discovered.max_walltime_seconds is not None
-                and route.max_walltime.total_seconds()
-                > discovered.max_walltime_seconds
+                and route.max_walltime.total_seconds() > discovered.max_walltime_seconds
             ):
                 checks.append(
                     DoctorCheck(

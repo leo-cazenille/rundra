@@ -46,8 +46,7 @@ class SchedulerPartition:
             if type(getattr(self, field_name)) is not str:
                 raise TypeError(f"Scheduler partition {field_name} must be a string")
         if self.max_walltime_seconds is not None and (
-            type(self.max_walltime_seconds) is not int
-            or self.max_walltime_seconds < 1
+            type(self.max_walltime_seconds) is not int or self.max_walltime_seconds < 1
         ):
             raise ValueError("Scheduler partition walltime must be positive or None")
 

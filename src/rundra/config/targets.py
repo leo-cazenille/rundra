@@ -293,12 +293,8 @@ def _partition_policy(
         route = expect_mapping(raw_route, source=source, path=route_path)
         check_fields(
             route,
-            allowed=frozenset(
-                {"name", "partition", "resource_class", "max_walltime"}
-            ),
-            required=frozenset(
-                {"name", "partition", "resource_class", "max_walltime"}
-            ),
+            allowed=frozenset({"name", "partition", "resource_class", "max_walltime"}),
+            required=frozenset({"name", "partition", "resource_class", "max_walltime"}),
             source=source,
             path=route_path,
         )
@@ -766,7 +762,7 @@ def _backend_config(
                         {
                             "type",
                             "shared_workspace",
-                            *(('partition_routes',) if version >= 11 else ()),
+                            *(("partition_routes",) if version >= 11 else ()),
                         }
                     )
                     if role == "scheduler" and version >= 9

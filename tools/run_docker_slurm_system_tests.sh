@@ -88,14 +88,19 @@ EOF
 chmod 600 "$state/home/.ssh/config" "$state/id_ed25519"
 
 cat > "$state/targets.yaml" <<EOF
-version: 10
+version: 11
 targets:
   docker-slurm:
     transport:
       type: ssh
       host: rundra-docker-slurm
       config_file: $state/home/.ssh/config
-    scheduler: {type: slurm}
+    scheduler:
+      type: slurm
+      partition_routes:
+        - {name: cpu_short, partition: cpu-short, resource_class: cpu, max_walltime: "01:00:00"}
+        - {name: cpu_long, partition: cpu-long, resource_class: cpu, max_walltime: "12:00:00"}
+        - {name: gpu_short, partition: gpu-short, resource_class: gpu, max_walltime: "01:00:00"}
     staging: {type: rsync}
     container: {type: apptainer}
     workspace: /workspace
