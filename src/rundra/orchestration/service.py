@@ -318,7 +318,7 @@ class SchedulerLifecycleService:
         )
         if (
             observation.state is ExecutionState.SUCCEEDED
-            and record.format_version == 6
+            and record.format_version >= 6
             and preparation.image_sha256 is None
         ):
             if self._transport is None:
@@ -1774,7 +1774,10 @@ class OrchestrationService:
                 code="PLAN_MISMATCH",
                 message="Execution plan and experiment names do not match",
             )
-        if any(unit.resources != request.experiment.resources for unit in units):
+        expected_resources, _ = route_scheduler_resources(
+            request.experiment.resources, request.plan.target
+        )
+        if any(unit.resources != expected_resources for unit in units):
             raise OrchestrationError(
                 code="PLAN_MISMATCH",
                 message="Execution plan resources do not match the experiment",

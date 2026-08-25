@@ -19,9 +19,7 @@ def _target() -> Target:
         PurePosixPath("/shared/rundra"),
         partition_policy=SlurmPartitionPolicy(
             (
-                SlurmPartitionRoute(
-                    "cpu_day", "cpu-day", "cpu", timedelta(days=1)
-                ),
+                SlurmPartitionRoute("cpu_day", "cpu-day", "cpu", timedelta(days=1)),
                 SlurmPartitionRoute(
                     "cpu_short", "cpu-short", "cpu", timedelta(hours=1)
                 ),
@@ -63,3 +61,15 @@ def test_routing_rejects_missing_walltime_and_policy_bypass() -> None:
     with pytest.raises(PlanningError) as bypass:
         route_scheduler_resources(request, _target())
     assert bypass.value.code == "PARTITION_ROUTE_POLICY_VIOLATION"
+
+
+def test_worker_allocation_is_routed_after_aggregate_walltime() -> None:
+    from rundra.orchestration.planner import _worker_resources
+
+    logical = ResourceRequest(walltime=timedelta(minutes=20))
+    aggregate = _worker_resources(logical, 1, 4)
+    routed, route = route_scheduler_resources(aggregate, _target())
+
+    assert routed.walltime == timedelta(minutes=80)
+    assert route is not None and route.name == "cpu_day"
+    assert routed.native["slurm"]["partition"] == "cpu-day"

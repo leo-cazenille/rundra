@@ -76,6 +76,7 @@ _RECORD_FIELDS_V5 = _RECORD_FIELDS_V4 | {
     "retrieval_destination",
 }
 _RECORD_FIELDS_V6 = _RECORD_FIELDS_V5 | {"fetch_mode"}
+_RECORD_FIELDS_V7 = _RECORD_FIELDS_V6
 _RECORD_FIELDS_BY_VERSION = {
     1: _RECORD_FIELDS_V1,
     2: _RECORD_FIELDS_V2,
@@ -83,6 +84,7 @@ _RECORD_FIELDS_BY_VERSION = {
     4: _RECORD_FIELDS_V4,
     5: _RECORD_FIELDS_V5,
     6: _RECORD_FIELDS_V6,
+    7: _RECORD_FIELDS_V7,
 }
 
 
@@ -134,13 +136,13 @@ def record_to_dict(record: RunRecord) -> JsonObject:
         },
         "artifacts": [_artifact_to_dict(artifact) for artifact in record.artifacts],
     }
-    if record.format_version in {2, 3, 4, 5, 6}:
+    if record.format_version in {2, 3, 4, 5, 6, 7}:
         document["preparation"] = (
             None
             if record.preparation is None
             else _preparation_to_dict(record.preparation, version=record.format_version)
         )
-    if record.format_version in {4, 5, 6}:
+    if record.format_version in {4, 5, 6, 7}:
         document.update(
             {
                 "task_space": (
@@ -157,7 +159,7 @@ def record_to_dict(record: RunRecord) -> JsonObject:
                 ),
             }
         )
-    if record.format_version in {5, 6}:
+    if record.format_version in {5, 6, 7}:
         assert record.retrieval_destination is not None
         document.update(
             {
@@ -165,7 +167,7 @@ def record_to_dict(record: RunRecord) -> JsonObject:
                 "retrieval_destination": str(record.retrieval_destination),
             }
         )
-    if record.format_version == 6:
+    if record.format_version in {6, 7}:
         document["fetch_mode"] = record.fetch_mode
     return document
 
@@ -185,7 +187,7 @@ def record_from_dict(value: object) -> RunRecord:
     document.setdefault("scheduler_metadata", {})
     _exact_fields(document, _RECORD_FIELDS_BY_VERSION[version], path="record")
     run_kind = (
-        _string(document["run_kind"], path="run_kind") if version in {5, 6} else None
+        _string(document["run_kind"], path="run_kind") if version in {5, 6, 7} else None
     )
     if run_kind not in {None, "materialized", "compact"}:
         raise RunRecordFormatError("run_kind must be materialized or compact")
@@ -209,12 +211,12 @@ def record_from_dict(value: object) -> RunRecord:
                     document["retrieval_destination"],
                     path="retrieval_destination",
                 )
-                if version in {5, 6}
+                if version in {5, 6, 7}
                 else None
             ),
             fetch_mode=(
                 _string(document["fetch_mode"], path="fetch_mode")
-                if version == 6
+                if version in {6, 7}
                 else None
             ),
             experiment_source=_optional_path(
@@ -230,7 +232,7 @@ def record_from_dict(value: object) -> RunRecord:
             ),
             preparation=(
                 _parse_preparation(document["preparation"], version=version)
-                if version in {2, 3, 4, 5, 6} and document["preparation"] is not None
+                if version in {2, 3, 4, 5, 6, 7} and document["preparation"] is not None
                 else None
             ),
             scheduler_job_ids=_string_tuple(
@@ -268,22 +270,23 @@ def record_from_dict(value: object) -> RunRecord:
             artifacts=_parse_artifacts(document["artifacts"]),
             task_space=(
                 _parse_task_space(document["task_space"])
-                if version in {4, 5, 6} and document["task_space"] is not None
+                if version in {4, 5, 6, 7} and document["task_space"] is not None
                 else None
             ),
             execution_strategy=(
                 _string(document["execution_strategy"], path="execution_strategy")
-                if version in {4, 5, 6} and document["execution_strategy"] is not None
+                if version in {4, 5, 6, 7}
+                and document["execution_strategy"] is not None
                 else None
             ),
             retrieval_policy=(
                 _string(document["retrieval_policy"], path="retrieval_policy")
-                if version in {4, 5, 6} and document["retrieval_policy"] is not None
+                if version in {4, 5, 6, 7} and document["retrieval_policy"] is not None
                 else None
             ),
             task_state_store=(
                 _path(document["task_state_store"], path="task_state_store")
-                if version in {4, 5, 6} and document["task_state_store"] is not None
+                if version in {4, 5, 6, 7} and document["task_state_store"] is not None
                 else None
             ),
         )
@@ -932,7 +935,7 @@ def _parse_task(value: object, *, path: str, version: int) -> Task:
                 "seed",
                 "resources",
                 "state",
-                *(("parameter_set",) if version in {3, 5, 6} else ()),
+                *(("parameter_set",) if version in {3, 5, 6, 7} else ()),
             }
         ),
         path=path,
@@ -951,7 +954,7 @@ def _parse_task(value: object, *, path: str, version: int) -> Task:
                 _parse_parameter_set(
                     document["parameter_set"], path=f"{path}.parameter_set"
                 )
-                if version in {3, 5, 6} and document["parameter_set"] is not None
+                if version in {3, 5, 6, 7} and document["parameter_set"] is not None
                 else None
             ),
             state=_execution_state(document["state"], path=f"{path}.state"),

@@ -287,10 +287,17 @@ def create_scalable_plan(
         scheduler_batches = 1
     concurrent_task_capacity = (worker_count or 1) * task_slots_per_worker
     max_lane_depth = ceil(task_space.task_count / concurrent_task_capacity)
-    worker_resources = _worker_resources(
-        effective_resources,
-        task_slots_per_worker,
-        max_lane_depth,
+    worker_resources = (
+        route_scheduler_resources(
+            _worker_resources(
+                spec.resources,
+                task_slots_per_worker,
+                max_lane_depth,
+            ),
+            target,
+        )[0]
+        if selected == WORKER_POOL
+        else effective_resources
     )
     if (
         version >= 7

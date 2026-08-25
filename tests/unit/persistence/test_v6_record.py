@@ -1,8 +1,10 @@
 from dataclasses import replace
+from datetime import timedelta
 from pathlib import PurePosixPath
 
 import pytest
 
+from rundra.domain.scheduling import SlurmPartitionPolicy, SlurmPartitionRoute
 from rundra.domain.storage import SlurmScratchPolicy
 from rundra.persistence import record_from_dict, record_to_dict
 from rundra.persistence.errors import RunRecordFormatError
@@ -83,5 +85,32 @@ def test_version_six_round_trips_optional_slurm_scratch_policy() -> None:
         "gpu_environment": "SLURM_GPUTMPDIR",
         "stage_image": True,
         "copy_back": "task",
+    }
+    assert record_from_dict(document) == record
+
+
+def test_version_seven_round_trips_partition_policy() -> None:
+    base = _record()
+    target = replace(
+        base.run.target,
+        partition_policy=SlurmPartitionPolicy(
+            (SlurmPartitionRoute("cpu_short", "cpu-short", "cpu", timedelta(hours=1)),)
+        ),
+    )
+    record = replace(
+        base,
+        format_version=7,
+        run=replace(base.run, target=target),
+        retrieval_destination=PurePosixPath("/retrieved/routed"),
+        fetch_mode="copy",
+    )
+
+    document = record_to_dict(record)
+
+    assert document["run"]["target"]["partition_policy"]["routes"][0] == {
+        "name": "cpu_short",
+        "partition": "cpu-short",
+        "resource_class": "cpu",
+        "max_walltime_microseconds": 3_600_000_000,
     }
     assert record_from_dict(document) == record

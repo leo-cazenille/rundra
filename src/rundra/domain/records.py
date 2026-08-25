@@ -93,7 +93,7 @@ class RunRecord:
         if self.format_version == 4:
             if type(self.run) is not CompactRun:
                 raise TypeError("RunRecord v4 run must be a CompactRun")
-        elif self.format_version in {5, 6}:
+        elif self.format_version in {5, 6, 7}:
             if type(self.run) not in {Run, CompactRun}:
                 raise TypeError("RunRecord v5 run must be materialized or compact")
         elif type(self.run) is not Run:
@@ -110,7 +110,7 @@ class RunRecord:
             task.parameter_set is None for task in self.run.tasks
         ):
             raise ValueError("RunRecord v3 requires parameterized Tasks")
-        if self.format_version in {5, 6}:
+        if self.format_version in {5, 6, 7}:
             if (
                 not isinstance(self.retrieval_destination, PurePath)
                 or not self.retrieval_destination.is_absolute()
@@ -121,7 +121,7 @@ class RunRecord:
                 )
         elif self.retrieval_destination is not None:
             raise ValueError("RunRecord v1-v4 cannot contain a retrieval destination")
-        if self.format_version == 6:
+        if self.format_version in {6, 7}:
             if self.fetch_mode not in {"auto", "copy", "reference", "archive"}:
                 raise ValueError("RunRecord v6 fetch_mode is unsupported")
         elif self.fetch_mode is not None:
