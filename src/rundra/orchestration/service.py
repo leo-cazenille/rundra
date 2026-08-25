@@ -57,6 +57,7 @@ from rundra.persistence.submission_store import (
 )
 from rundra.persistence.task_store import SqliteTaskStore, TaskState
 from rundra.ports import (
+    AllocationScratch,
     ArrayScheduler,
     BindMount,
     CompactArrayScheduler,
@@ -1133,6 +1134,7 @@ class OrchestrationService:
                                 build_remote_preparation_command(
                                     request.remote_preparation,
                                     workspace,
+                                    scratch_policy=request.plan.target.execution_storage,
                                 ),
                                 resources,
                             ),
@@ -1179,6 +1181,7 @@ class OrchestrationService:
             # immediately; afterok prevents access to an incomplete image.
 
         try:
+            allocation_scratch = _allocation_scratch(request, workspace, len(units))
             scheduled_units = tuple(
                 replace(
                     unit,
@@ -1317,6 +1320,7 @@ class OrchestrationService:
                         worker_policy.infrastructure_retry_limit
                     ),
                     requeue_limit=worker_policy.requeue_limit,
+                    scratch=allocation_scratch,
                 )
                 compact_submission = (
                     cast(
@@ -1334,7 +1338,8 @@ class OrchestrationService:
                     tuple(
                         SchedulerUnit(unit.task_id, unit.command, unit.resources)
                         for unit in scheduled_units
-                    )
+                    ),
+                    scratch=allocation_scratch,
                 )
                 if not isinstance(self._scheduler, ArrayScheduler):
                     raise TypeError(
@@ -1376,7 +1381,8 @@ class OrchestrationService:
                     tuple(
                         SchedulerUnit(unit.task_id, unit.command, unit.resources)
                         for unit in scheduled_units
-                    )
+                    ),
+                    scratch=allocation_scratch,
                 )
                 submission = (
                     cast(DependencyScheduler, self._scheduler).submit_afterok(
@@ -2699,6 +2705,30 @@ def _container_request(
             BindMount(outputs, _CONTAINER_OUTPUTS, read_only=False),
             BindMount(runtime, _CONTAINER_RUNTIME, read_only=False),
         ),
+    )
+
+
+def _allocation_scratch(
+    request: RunExecutionRequest,
+    workspace: StagedWorkspace,
+    task_count: int,
+) -> AllocationScratch | None:
+    policy = request.plan.target.execution_storage
+    if policy is None:
+        return None
+    container = request.experiment.container
+    image = None
+    if container is not None:
+        image = (
+            container.image
+            if container.image.is_absolute()
+            else workspace.source / container.image
+        )
+    return AllocationScratch(
+        workspace.root,
+        policy,
+        image_path=image,
+        task_directories=task_count > 1 or request.compact_plan is not None,
     )
 
 

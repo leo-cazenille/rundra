@@ -14,6 +14,7 @@ from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import Command, NativeValue, ResourceRequest
 from rundra.domain.states import ExecutionState
 from rundra.ports import (
+    AllocationScratch,
     CommandResult,
     CompactSchedulerArrayRequest,
     CompactSchedulerSubmission,
@@ -465,6 +466,7 @@ class SlurmScheduler:
                 *directives,
                 "",
                 "set -eu",
+                *_scratch_setup_lines(request.scratch, request.worker_resources),
                 "attempt=${SLURM_RESTART_COUNT:-0}",
                 'case "$attempt" in ""|*[!0-9]*) exit 64 ;; esac',
                 f'[ "$attempt" -le {request.requeue_limit} ] || exit 75',
@@ -477,7 +479,11 @@ class SlurmScheduler:
                 'journal_tmp="${journal}.$$"',
                 'if [ -e "$journal" ]; then exit 73; fi',
                 ': > "$journal_tmp"',
-                "trap 'rm -f \"$journal_tmp\"' EXIT HUP INT TERM",
+                (
+                    "trap 'rm -f \"$journal_tmp\"; rundra_scratch_cleanup' EXIT HUP INT TERM"
+                    if request.scratch is not None
+                    else "trap 'rm -f \"$journal_tmp\"' EXIT HUP INT TERM"
+                ),
                 (
                     f"{quoted_srun} --nodes=1 "
                     f"--ntasks={request.task_slots_per_worker} "
@@ -489,6 +495,7 @@ class SlurmScheduler:
                 *merge_lines,
                 'chmod 400 "$journal_tmp"',
                 'mv -- "$journal_tmp" "$journal"',
+                *(("rundra_scratch_cleanup",) if request.scratch is not None else ()),
                 "trap - EXIT HUP INT TERM",
                 "",
             )
@@ -531,7 +538,10 @@ class SlurmScheduler:
                 units = request.group.units[start : start + max_array_size]
                 if len(units) == 1:
                     submissions.append(
-                        self._submit(SchedulerGroup(units), dependency=dependency)
+                        self._submit(
+                            SchedulerGroup(units, scratch=request.group.scratch),
+                            dependency=dependency,
+                        )
                     )
                     continue
                 mapping = tuple(
@@ -543,7 +553,7 @@ class SlurmScheduler:
                     f"{request.manifest_path.suffix}"
                 )
                 bounded = SlurmArrayRequest(
-                    SchedulerGroup(units),
+                    SchedulerGroup(units, scratch=request.group.scratch),
                     mapping,
                     manifest_path,
                     max_array_size,
@@ -692,6 +702,7 @@ class SlurmScheduler:
                 *directives,
                 "",
                 "set -eu",
+                *_scratch_setup_lines(request.group.scratch, worker_resources),
                 'if [ "${SLURM_ARRAY_TASK_ID+x}" != x ]; then',
                 "  printf '%s\\n' 'missing SLURM_ARRAY_TASK_ID' >&2",
                 "  exit 64",
@@ -702,7 +713,11 @@ class SlurmScheduler:
                 'journal_tmp="${journal}.$$"',
                 'if [ -e "$journal" ]; then exit 73; fi',
                 ': > "$journal_tmp"',
-                "trap 'rm -f \"$journal_tmp\"' EXIT HUP INT TERM",
+                (
+                    "trap 'rm -f \"$journal_tmp\"; rundra_scratch_cleanup' EXIT HUP INT TERM"
+                    if request.group.scratch is not None
+                    else "trap 'rm -f \"$journal_tmp\"' EXIT HUP INT TERM"
+                ),
                 (
                     f"{quoted_srun} --nodes=1 --ntasks={task_slots} "
                     f"--ntasks-per-node={task_slots} "
@@ -713,6 +728,7 @@ class SlurmScheduler:
                 *merge_lines,
                 'chmod 400 "$journal_tmp"',
                 'mv -- "$journal_tmp" "$journal"',
+                *(("rundra_scratch_cleanup",) if request.group.scratch is not None else ()),
                 "trap - EXIT HUP INT TERM",
                 "",
             )
@@ -1077,19 +1093,31 @@ def render_slurm_array_manifest(request: SlurmArrayRequest) -> str:
     if type(request) is not SlurmArrayRequest:
         raise TypeError("render_slurm_array_manifest requires a SlurmArrayRequest")
     branches: list[str] = []
+    scratch = request.group.scratch
     for unit, mapping in zip(request.group.units, request.mapping, strict=True):
-        branches.extend(
-            (
-                f"  {mapping.array_index})",
-                f"    # task_id={mapping.task_id} seed={mapping.seed}",
-                f"    {serialize_remote_command(unit.command)}",
-                "    ;;",
+        branches.extend((f"  {mapping.array_index})", f"    # task_id={mapping.task_id} seed={mapping.seed}"))
+        if scratch is None:
+            branches.append(f"    {serialize_remote_command(unit.command)}")
+        else:
+            branches.extend(
+                (
+                    *_scratch_task_directories(scratch, str(mapping.task_id), "    "),
+                    "    set +e",
+                    f"    {_render_scheduler_command(unit.command, scratch)}",
+                    "    task_status=$?",
+                    "    set -e",
+                    "    copy_status=0",
+                    f"    rundra_copy_back {shlex.quote(str(mapping.task_id))} || copy_status=$?",
+                    '    [ "$task_status" -eq 0 ] || exit "$task_status"',
+                    '    [ "$copy_status" -eq 0 ] || exit "$copy_status"',
+                )
             )
-        )
+        branches.append("    ;;")
     return "\n".join(
         (
             "#!/bin/sh",
             "set -eu",
+            *(_scratch_copy_function(scratch) if scratch is not None else ()),
             'if [ "$#" -ne 1 ]; then',
             "  printf '%s\\n' 'invalid Rundra array index' >&2",
             "  exit 64",
@@ -1123,6 +1151,7 @@ def render_slurm_bundle_manifest(
     ):
         raise ValueError("task_slots_per_worker must fit the SchedulerArrayRequest")
     status = _directive_path(status_root, name="bundle status")
+    scratch = request.group.scratch
     branches: list[str] = []
     for worker_index in range(worker_count):
         branches.extend((f"  {worker_index})", '    case "$SLURM_PROCID" in'))
@@ -1150,19 +1179,20 @@ def render_slurm_bundle_manifest(
                 mapping = request.mapping[ordinal]
                 lane_task_ids.append(str(mapping.task_id))
                 timeout = _task_timeout_seconds(unit.resources.walltime)
-                command = serialize_remote_command(unit.command)
-                rendered = (
-                    command.replace("exec env --", "env --", 1)
-                    if timeout is None
-                    else command.replace(
-                        "exec env --",
-                        (f"timeout --signal=TERM --kill-after=30s {timeout}s env --"),
-                        1,
-                    )
+                command = (
+                    serialize_remote_command(unit.command).replace("exec env --", "env --", 1)
+                    if scratch is None
+                    else _render_scheduler_command(unit.command, scratch)
                 )
+                rendered = command if timeout is None else f"timeout --signal=TERM --kill-after=30s {timeout}s {command}"
                 branches.extend(
                     (
                         f"        # task_id={mapping.task_id} seed={mapping.seed}",
+                        *(
+                            _scratch_task_directories(scratch, str(mapping.task_id), "        ")
+                            if scratch is not None
+                            else ()
+                        ),
                         (
                             f"        printf 'START\\t%s\\t%s\\t%s\\n' "
                             f'{mapping.task_id} "$(date +%s)" "$(hostname)" '
@@ -1172,6 +1202,15 @@ def render_slurm_bundle_manifest(
                         f"        {rendered}",
                         "        task_status=$?",
                         "        set -e",
+                        *(
+                            (
+                                "        copy_status=0",
+                                f"        rundra_copy_back {shlex.quote(str(mapping.task_id))} || copy_status=$?",
+                                '        if [ "$copy_status" -ne 0 ]; then task_status="$copy_status"; fi',
+                            )
+                            if scratch is not None
+                            else ()
+                        ),
                         (
                             f"        printf '%s\\t%s\\n' {mapping.task_id} "
                             '"$task_status" >> "$journal_tmp"'
@@ -1203,6 +1242,7 @@ def render_slurm_bundle_manifest(
         (
             "#!/bin/sh",
             "set -eu",
+            *(_scratch_copy_function(scratch) if scratch is not None else ()),
             'if [ "$#" -ne 1 ]; then exit 64; fi',
             'if [ "${SLURM_ARRAY_JOB_ID+x}" != x ]; then exit 64; fi',
             'if [ "${SLURM_PROCID+x}" != x ]; then exit 64; fi',
@@ -1296,12 +1336,13 @@ def render_slurm_compact_bundle_manifest(
     status = _directive_path(status_root, name="bundle status")
     task_space = request.task_space
     timeout = _task_timeout_seconds(request.resources.walltime)
+    scratch = request.scratch
     command_cases = tuple(
         line
         for index, command in enumerate(request.commands)
         for line in (
             f"          {index})",
-            f"            {_render_compact_command(command, timeout=timeout)}",
+            f"            {_render_compact_command(command, timeout=timeout, scratch=scratch)}",
             "            ;;",
         )
     )
@@ -1365,6 +1406,11 @@ def render_slurm_compact_bundle_manifest(
                 ),
                 '        rm -rf -- "$output_root/$task_id" "$runtime_root/$task_id"',
                 '        mkdir -p -- "$output_root/$task_id" "$runtime_root/$task_id"',
+                *(
+                    _scratch_task_directories(scratch, "$task_id", "        ")
+                    if scratch is not None
+                    else ()
+                ),
                 (
                     f'        if [ "$prior_starts" -gt '
                     f"{request.infrastructure_retry_limit} ]; then"
@@ -1389,6 +1435,15 @@ def render_slurm_compact_bundle_manifest(
                 "        esac",
                 "        task_status=$?",
                 "        set -e",
+                *(
+                    (
+                        "        copy_status=0",
+                        '        rundra_copy_back "$task_id" || copy_status=$?',
+                        '        if [ "$copy_status" -ne 0 ]; then task_status="$copy_status"; fi',
+                    )
+                    if scratch is not None
+                    else ()
+                ),
                 (
                     '        printf \'%s\\t%s\\n\' "$task_id" "$task_status" '
                     '>> "$journal_tmp"'
@@ -1415,6 +1470,7 @@ def render_slurm_compact_bundle_manifest(
         (
             "#!/bin/sh",
             "set -eu",
+            *(_scratch_copy_function(scratch) if scratch is not None else ()),
             'if [ "$#" -ne 1 ]; then exit 64; fi',
             "worker=$1",
             'case "$worker" in *[!0-9]*|"") exit 64 ;; esac',
@@ -1428,7 +1484,15 @@ def render_slurm_compact_bundle_manifest(
     )
 
 
-def _render_compact_command(command: Command, *, timeout: int | None) -> str:
+def _render_compact_command(
+    command: Command,
+    *,
+    timeout: int | None,
+    scratch: AllocationScratch | None = None,
+) -> str:
+    if scratch is not None:
+        rendered = _render_scheduler_command(command, scratch, compact=True)
+        return rendered if timeout is None else f"timeout --signal=TERM --kill-after=30s {timeout}s {rendered}"
     words = ["env", "--"]
     words.extend(
         _compact_shell_word(f"{name}={value}")
@@ -1458,6 +1522,107 @@ def _compact_shell_word(value: str) -> str:
         elif part:
             rendered.append(shlex.quote(part))
     return "".join(rendered) or "''"
+
+
+def _render_scheduler_command(
+    command: Command,
+    scratch: AllocationScratch,
+    *,
+    compact: bool = False,
+) -> str:
+    words = ["env", "--"]
+    words.extend(
+        f"{name}={_scratch_shell_word(value, scratch, compact=compact)}"
+        for name, value in sorted(command.environment.items())
+    )
+    words.extend(
+        _scratch_shell_word(argument, scratch, compact=compact)
+        for argument in command.argv
+    )
+    rendered = " ".join(words)
+    if command.working_directory is not None:
+        rendered = "cd -- " + _scratch_shell_word(str(command.working_directory), scratch, compact=compact) + " && " + rendered
+    return rendered
+
+
+def _scratch_shell_word(value: str, scratch: AllocationScratch, *, compact: bool) -> str:
+    prefixes = [(str(scratch.shared_root), "RUNDRA_SCRATCH_ROOT")]
+    if scratch.image_path is not None:
+        prefixes.append((str(scratch.image_path), "RUNDRA_SCRATCH_IMAGE"))
+    for prefix, variable in prefixes:
+        if value == prefix or value.startswith(f"{prefix}/"):
+            suffix = value[len(prefix) :]
+            rendered_suffix = _compact_shell_word(suffix) if compact else shlex.quote(suffix)
+            return f'"${variable}"{rendered_suffix}'
+    return _compact_shell_word(value) if compact else shlex.quote(value)
+
+
+def _scratch_copy_function(scratch: AllocationScratch) -> tuple[str, ...]:
+    task_suffix = '/$1' if scratch.task_directories else ""
+    return (
+        "rundra_copy_back() {",
+        f'  rundra_copy_source="$RUNDRA_SCRATCH_ROOT/output{task_suffix}"',
+        f'  rundra_copy_destination="$RUNDRA_SHARED_ROOT/output{task_suffix}"',
+        '  [ -d "$rundra_copy_source" ] || return 74',
+        '  rundra_copy_parent=${rundra_copy_destination%/*}',
+        '  rundra_copy_name=${rundra_copy_destination##*/}',
+        '  rundra_copy_tmp="$rundra_copy_parent/.${rundra_copy_name}.rundra-copy.$$"',
+        '  rundra_copy_old="$rundra_copy_parent/.${rundra_copy_name}.rundra-old.$$"',
+        '  rm -rf -- "$rundra_copy_tmp" "$rundra_copy_old"',
+        '  cp -a -- "$rundra_copy_source" "$rundra_copy_tmp" || { rm -rf -- "$rundra_copy_tmp"; return 74; }',
+        '  if [ -e "$rundra_copy_destination" ]; then mv -- "$rundra_copy_destination" "$rundra_copy_old" || return 74; fi',
+        '  if mv -- "$rundra_copy_tmp" "$rundra_copy_destination"; then rm -rf -- "$rundra_copy_old"; return 0; fi',
+        '  rm -rf -- "$rundra_copy_tmp"',
+        '  if [ -e "$rundra_copy_old" ]; then mv -- "$rundra_copy_old" "$rundra_copy_destination" || :; fi',
+        "  return 74",
+        "}",
+    )
+
+
+def _scratch_task_directories(scratch: AllocationScratch, task_id: str, indentation: str) -> tuple[str, ...]:
+    if not scratch.task_directories:
+        return ()
+    rendered = task_id if task_id.startswith("$") else shlex.quote(task_id)
+    return (f'{indentation}mkdir -p -- "$RUNDRA_SCRATCH_ROOT/output"/{rendered} "$RUNDRA_SCRATCH_ROOT/runtime"/{rendered}',)
+
+
+def _scratch_setup_lines(scratch: AllocationScratch | None, resources: ResourceRequest) -> tuple[str, ...]:
+    if scratch is None:
+        return ()
+    environment = scratch.policy.gpu_environment if resources.gpus_per_task > 0 else scratch.policy.cpu_environment
+    lines = [
+        "umask 077",
+        f'rundra_scratch_base=${{{environment}:?{environment} is required by target policy}}',
+        'case "$rundra_scratch_base" in /*) ;; *) printf \'%s\\n\' \'scratch path is not absolute\' >&2; exit 72 ;; esac',
+        '[ "$rundra_scratch_base" != / ] && [ -d "$rundra_scratch_base" ] && [ ! -L "$rundra_scratch_base" ] && [ -w "$rundra_scratch_base" ] || { printf \'%s\\n\' \'scratch path is unsafe or not writable\' >&2; exit 72; }',
+        'RUNDRA_SCRATCH_ROOT="$rundra_scratch_base/rundra-${SLURM_JOB_ID:?missing SLURM_JOB_ID}-${SLURM_ARRAY_TASK_ID:-single}"',
+        'case "$RUNDRA_SCRATCH_ROOT" in "$rundra_scratch_base"/rundra-*) ;; *) exit 72 ;; esac',
+        f"RUNDRA_SHARED_ROOT={shlex.quote(str(scratch.shared_root))}",
+        "export RUNDRA_SCRATCH_ROOT RUNDRA_SHARED_ROOT",
+        'rm -rf -- "$RUNDRA_SCRATCH_ROOT"',
+        'mkdir -m 700 -- "$RUNDRA_SCRATCH_ROOT"',
+        'mkdir -p -- "$RUNDRA_SCRATCH_ROOT/source" "$RUNDRA_SCRATCH_ROOT/input" "$RUNDRA_SCRATCH_ROOT/output" "$RUNDRA_SCRATCH_ROOT/runtime"',
+        'cp -a -- "$RUNDRA_SHARED_ROOT/source"/. "$RUNDRA_SCRATCH_ROOT/source"/',
+        'cp -a -- "$RUNDRA_SHARED_ROOT/input"/. "$RUNDRA_SCRATCH_ROOT/input"/',
+        'chmod -R a-w -- "$RUNDRA_SCRATCH_ROOT/source" "$RUNDRA_SCRATCH_ROOT/input"',
+    ]
+    if scratch.image_path is not None:
+        lines.extend((
+            f"rundra_shared_image={shlex.quote(str(scratch.image_path))}",
+            'RUNDRA_SCRATCH_IMAGE="$RUNDRA_SCRATCH_ROOT/image.sif"',
+            'rundra_image_digest=$(sha256sum -- "$rundra_shared_image")',
+            'cp -- "$rundra_shared_image" "$RUNDRA_SCRATCH_IMAGE"',
+            'rundra_scratch_digest=$(sha256sum -- "$RUNDRA_SCRATCH_IMAGE")',
+            '[ "${rundra_image_digest%% *}" = "${rundra_scratch_digest%% *}" ] || { printf \'%s\\n\' \'staged image digest mismatch\' >&2; exit 65; }',
+            'chmod a-w -- "$RUNDRA_SCRATCH_IMAGE"',
+            "export RUNDRA_SCRATCH_IMAGE",
+        ))
+    lines.extend((
+        "rundra_scratch_cleanup() { chmod -R u+w -- \"$RUNDRA_SCRATCH_ROOT\" 2>/dev/null || :; rm -rf -- \"$RUNDRA_SCRATCH_ROOT\"; }",
+        *_scratch_copy_function(scratch),
+        "trap 'rundra_scratch_cleanup' EXIT HUP INT TERM",
+    ))
+    return tuple(lines)
 
 
 def _render_compact_lane_shard(
@@ -1557,9 +1722,19 @@ def render_sbatch_array_script(
         "  printf '%s\\n' 'missing SLURM_ARRAY_TASK_ID' >&2\n"
         "  exit 64\n"
         "fi\n"
-        f'exec /bin/sh {manifest_path} "$SLURM_ARRAY_TASK_ID"'
+        f'{"" if request.group.scratch is not None else "exec "}/bin/sh {manifest_path} "$SLURM_ARRAY_TASK_ID"'
     )
-    return "\n".join(("#!/bin/sh", *directives, "", "set -eu", command, ""))
+    return "\n".join(
+        (
+            "#!/bin/sh",
+            *directives,
+            "",
+            "set -eu",
+            *_scratch_setup_lines(request.group.scratch, resources),
+            command,
+            "",
+        )
+    )
 
 
 def render_sbatch_script(
@@ -1585,8 +1760,31 @@ def render_sbatch_script(
         stdout_path=stdout_path,
         stderr_path=stderr_path,
     )
-    command = serialize_remote_command(unit.command)
-    return "\n".join(("#!/bin/sh", *directives, "", "set -eu", command, ""))
+    scratch = group.scratch
+    if scratch is None:
+        body = (serialize_remote_command(unit.command),)
+    else:
+        body = (
+            "set +e",
+            _render_scheduler_command(unit.command, scratch),
+            "task_status=$?",
+            "set -e",
+            "copy_status=0",
+            f"rundra_copy_back {shlex.quote(str(unit.task_id))} || copy_status=$?",
+            'if [ "$task_status" -ne 0 ]; then exit "$task_status"; fi',
+            'if [ "$copy_status" -ne 0 ]; then exit "$copy_status"; fi',
+        )
+    return "\n".join(
+        (
+            "#!/bin/sh",
+            *directives,
+            "",
+            "set -eu",
+            *_scratch_setup_lines(scratch, resources),
+            *body,
+            "",
+        )
+    )
 
 
 def _sbatch_directives(

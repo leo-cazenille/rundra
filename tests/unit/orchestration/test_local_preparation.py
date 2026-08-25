@@ -28,6 +28,7 @@ from rundra.domain.preparation import (
     PreparationSourceGit,
     PreparationSourceWorkingTree,
 )
+from rundra.domain.storage import SlurmScratchPolicy
 from rundra.orchestration.preparation import (
     PreparationError,
     PreparedSource,
@@ -476,6 +477,13 @@ def test_remote_preparation_script_builds_and_reuses_target_cache(
     _fake_apptainer(fake_bin).rename(fake_bin / "apptainer")
     monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ['PATH']}")
     command = build_remote_preparation_command(spec, workspace)
+    scratch_command = build_remote_preparation_command(
+        spec, workspace, scratch_policy=SlurmScratchPolicy()
+    )
+
+    assert "SLURM_TMPDIR is required by target policy" in scratch_command.argv[2]
+    assert "$rundra_run_root/source" in scratch_command.argv[4]
+    assert 'mktemp -d "$rundra_scratch/build.XXXXXX"' in scratch_command.argv[4]
 
     cold = subprocess.run(
         command.argv, check=False, capture_output=True, text=True, timeout=10

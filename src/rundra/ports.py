@@ -23,6 +23,7 @@ from rundra.domain.models import (
 )
 from rundra.domain.scaling import TaskSpace
 from rundra.domain.states import ExecutionState
+from rundra.domain.storage import SlurmScratchPolicy
 
 
 class SchedulerSubmissionOutcome(StrEnum):
@@ -145,10 +146,41 @@ class SchedulerUnit:
 
 
 @dataclass(frozen=True, slots=True)
+class AllocationScratch:
+    """Immutable shared-to-allocation storage mapping for one scheduler job."""
+
+    shared_root: PurePath
+    policy: SlurmScratchPolicy
+    image_path: PurePath | None = None
+    task_directories: bool = True
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.shared_root, PurePath)
+            or not self.shared_root.is_absolute()
+            or self.shared_root == PurePath("/")
+            or "\x00" in str(self.shared_root)
+        ):
+            raise ValueError("Allocation scratch shared_root must be absolute and safe")
+        if type(self.policy) is not SlurmScratchPolicy:
+            raise TypeError("Allocation scratch policy must be a SlurmScratchPolicy")
+        if self.image_path is not None and (
+            not isinstance(self.image_path, PurePath)
+            or not self.image_path.is_absolute()
+            or self.image_path == PurePath("/")
+            or "\x00" in str(self.image_path)
+        ):
+            raise ValueError("Allocation scratch image_path must be absolute and safe")
+        if type(self.task_directories) is not bool:
+            raise TypeError("Allocation scratch task_directories must be bool")
+
+
+@dataclass(frozen=True, slots=True)
 class SchedulerGroup:
     """One nonempty scheduler submission with explicit logical Task members."""
 
     units: tuple[SchedulerUnit, ...]
+    scratch: AllocationScratch | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.units, Sequence) or isinstance(self.units, (str, bytes)):
@@ -160,6 +192,8 @@ class SchedulerGroup:
             raise ValueError("SchedulerGroup must contain at least one unit")
         if len({unit.task_id for unit in units}) != len(units):
             raise ValueError("SchedulerGroup Task IDs must be unique")
+        if self.scratch is not None and type(self.scratch) is not AllocationScratch:
+            raise TypeError("SchedulerGroup scratch must be AllocationScratch or None")
         object.__setattr__(self, "units", units)
 
 
@@ -265,6 +299,7 @@ class CompactSchedulerArrayRequest:
     shard_root: PurePath | None = None
     infrastructure_retry_limit: int = 0
     requeue_limit: int = 0
+    scratch: AllocationScratch | None = None
 
     def __post_init__(self) -> None:
         if type(self.task_space) is not TaskSpace:
@@ -308,6 +343,8 @@ class CompactSchedulerArrayRequest:
                 or "\x00" in str(path)
             ):
                 raise ValueError(f"Compact scheduler {name} must be absolute")
+        if self.scratch is not None and type(self.scratch) is not AllocationScratch:
+            raise TypeError("Compact scheduler scratch must be AllocationScratch or None")
         object.__setattr__(self, "commands", commands)
 
 

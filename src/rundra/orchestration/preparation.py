@@ -30,6 +30,7 @@ from rundra.domain.preparation import (
     definition_image_recipe_key,
     source_recipe_identity,
 )
+from rundra.domain.storage import SlurmScratchPolicy
 from rundra.ports import StagedWorkspace, Transport
 from rundra.sync import with_default_sync_excludes
 
@@ -614,12 +615,18 @@ def remote_preparation_record(
 def build_remote_preparation_command(
     spec: RemotePreparationSpec,
     workspace: StagedWorkspace,
+    *,
+    scratch_policy: SlurmScratchPolicy | None = None,
 ) -> Command:
     """Render one bounded target job that verifies, builds, and publishes caches."""
     plan = spec.plan
     recipe = plan.recipe
     if type(recipe.image) is PreparationImageDefinition:
-        return _build_remote_definition_command(spec, workspace)
+        return _scratch_preparation_command(
+            _build_remote_definition_command(spec, workspace),
+            workspace,
+            scratch_policy,
+        )
     image_recipe = _prebuilt_image(plan)
     target_cache = spec.target_cache_root or workspace.root.parent.parent / "cache"
     image = target_cache / "images" / f"{image_recipe.sha256}.sif"
@@ -817,7 +824,68 @@ def build_remote_preparation_command(
             'mv -- "$actions_tmp" "$actions"',
         )
     )
-    return Command(("/bin/sh", "-c", "\n".join(lines)))
+    return _scratch_preparation_command(
+        Command(("/bin/sh", "-c", "\n".join(lines))),
+        workspace,
+        scratch_policy,
+    )
+
+
+def _scratch_preparation_command(
+    command: Command,
+    workspace: StagedWorkspace,
+    policy: SlurmScratchPolicy | None,
+) -> Command:
+    if policy is None:
+        return command
+    shared = str(workspace.root)
+    if any(character.isspace() for character in shared):
+        raise PreparationError("Slurm scratch workspace paths cannot contain whitespace")
+    script = command.argv[2].replace(shared, "$rundra_run_root")
+    script = script.replace(
+        'mktemp -d "$cache/images/.pull.XXXXXX"',
+        'mktemp -d "$rundra_scratch/pull.XXXXXX"',
+    )
+    script = script.replace(
+        'mktemp -d "$cache/builds/.work.XXXXXX"',
+        'mktemp -d "$rundra_scratch/build.XXXXXX"',
+    )
+    script = script.replace(
+        'mktemp -d "$index_root/.build.XXXXXX"',
+        'mktemp -d "$rundra_scratch/definition.XXXXXX"',
+    )
+    wrapper = """\
+set -eu
+umask 077
+rundra_base=${SLURM_TMPDIR:?SLURM_TMPDIR is required by target policy}
+case "$rundra_base" in /*) ;; *) printf '%s\n' 'scratch path is not absolute' >&2; exit 72 ;; esac
+[ "$rundra_base" != / ] && [ -d "$rundra_base" ] && [ ! -L "$rundra_base" ] && [ -w "$rundra_base" ] || { printf '%s\n' 'scratch path is unsafe or not writable' >&2; exit 72; }
+rundra_scratch="$rundra_base/rundra-preparation-${SLURM_JOB_ID:?missing SLURM_JOB_ID}"
+case "$rundra_scratch" in "$rundra_base"/rundra-preparation-*) ;; *) exit 72 ;; esac
+rm -rf -- "$rundra_scratch"
+mkdir -m 700 -- "$rundra_scratch"
+trap 'chmod -R u+w -- "$rundra_scratch" 2>/dev/null || :; rm -rf -- "$rundra_scratch"' EXIT HUP INT TERM
+cp -a -- "$2"/. "$rundra_scratch"/
+rundra_run_root="$rundra_scratch"
+export rundra_run_root rundra_scratch
+set +e
+/bin/sh -c "$1"
+rundra_status=$?
+set -e
+if [ "$rundra_status" -eq 0 ]; then
+  rundra_source_tmp="$2/.scratch-source-${SLURM_JOB_ID}"
+  rm -rf -- "$rundra_source_tmp"
+  cp -a -- "$rundra_run_root/source" "$rundra_source_tmp"
+  chmod -R u+w -- "$2/source"
+  rm -rf -- "$2/source"
+  mv -- "$rundra_source_tmp" "$2/source"
+  cp -a -- "$rundra_run_root/metadata"/. "$2/metadata"/
+fi
+exit "$rundra_status"
+"""
+    return Command(
+        ("/bin/sh", "-c", wrapper, "rundra-scratch-preparation", script, shared)
+    )
 
 
 def _build_remote_definition_command(

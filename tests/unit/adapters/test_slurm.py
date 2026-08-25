@@ -28,7 +28,9 @@ from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import Command, ResourceRequest, TaskId
 from rundra.domain.scaling import SeedRange, TaskSpace
 from rundra.domain.states import ExecutionState
+from rundra.domain.storage import SlurmScratchPolicy
 from rundra.ports import (
+    AllocationScratch,
     CapabilityCheck,
     CommandResult,
     CompactSchedulerArrayRequest,
@@ -1085,6 +1087,92 @@ exec env -- python3 experiment.py
 """
     )
 
+
+def test_slurm_scratch_script_stages_maps_copies_back_and_cleans() -> None:
+    scratch = AllocationScratch(
+        PurePosixPath("/remote/run"),
+        SlurmScratchPolicy(),
+        image_path=PurePosixPath("/remote/cache/image.sif"),
+        task_directories=False,
+    )
+    command = Command(
+        (
+            "apptainer",
+            "exec",
+            "--bind",
+            "/remote/run/source:/workspace/source:ro",
+            "--bind",
+            "/remote/run/output:/workspace/output:rw",
+            "/remote/cache/image.sif",
+            "simulate",
+        )
+    )
+    group = SchedulerGroup(
+        (SchedulerUnit(TaskId.from_ordinal(0), command, ResourceRequest()),),
+        scratch=scratch,
+    )
+
+    script = render_sbatch_script(group)
+
+    assert "SLURM_TMPDIR is required by target policy" in script
+    assert 'RUNDRA_SCRATCH_IMAGE="$RUNDRA_SCRATCH_ROOT/image.sif"' in script
+    assert '"$RUNDRA_SCRATCH_ROOT"/source:/workspace/source:ro' in script
+    assert '"$RUNDRA_SCRATCH_IMAGE"' in script
+    assert "rundra_copy_back task_000000" in script
+    assert "rundra_scratch_cleanup" in script
+    assert "staged image digest mismatch" in script
+
+
+def test_slurm_scratch_gpu_job_uses_gpu_scratch_variable() -> None:
+    scratch = AllocationScratch(
+        PurePosixPath("/remote/run"),
+        SlurmScratchPolicy(),
+        image_path=PurePosixPath("/remote/cache/image.sif"),
+        task_directories=False,
+    )
+    group = SchedulerGroup(
+        (
+            SchedulerUnit(
+                TaskId.from_ordinal(0),
+                Command(("true",)),
+                ResourceRequest(gpus_per_task=1),
+            ),
+        ),
+        scratch=scratch,
+    )
+
+    script = render_sbatch_script(group)
+
+    assert "SLURM_GPUTMPDIR is required by target policy" in script
+    assert "SLURM_TMPDIR is required by target policy" not in script
+
+
+def test_slurm_scratch_array_manifest_copies_each_task_back() -> None:
+    base = _array_request(count=2)
+    scratch = AllocationScratch(
+        PurePosixPath("/remote/run"),
+        SlurmScratchPolicy(),
+        task_directories=True,
+    )
+    request = SlurmArrayRequest(
+        SchedulerGroup(base.group.units, scratch=scratch),
+        base.mapping,
+        base.manifest_path,
+        base.max_array_size,
+        base.allow_duplicate_seeds,
+    )
+
+    manifest = render_slurm_array_manifest(request)
+    script = render_sbatch_array_script(
+        request,
+        stdout_path=PurePosixPath("/logs/%A_%a.out"),
+        stderr_path=PurePosixPath("/logs/%A_%a.err"),
+    )
+
+    assert manifest.count("rundra_copy_back task_") == 2
+    assert '"$RUNDRA_SCRATCH_ROOT/output"/task_000000' in manifest
+    assert "SLURM_TMPDIR is required by target policy" in script
+    assert "exec /bin/sh" not in script
 
 def test_rendered_script_preserves_hostile_command_literals_without_execution(
     tmp_path: PurePosixPath,
