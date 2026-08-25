@@ -188,6 +188,14 @@ def test_docker_slurm_builds_image_and_application_in_allocation_scratch(
     assert preparation["image_action"] == "build_definition_image"
     assert preparation["build_action"] == "build_and_publish"
     assert preparation["builder_scheduler_id"] is not None
+    scheduler_metadata = record["scheduler_metadata"]
+    assert isinstance(scheduler_metadata, dict)
+    assert scheduler_metadata["execution_storage.type"] == "slurm_scratch"
+    assert scheduler_metadata["execution_storage.active_environment"] == (
+        "SLURM_TMPDIR"
+    )
+    assert scheduler_metadata["execution_storage.stage_image"] is True
+    assert scheduler_metadata["execution_storage.copy_back"] == "task"
 
     destination = tmp_path / "prepared-retrieved"
     fetched = _rundr(

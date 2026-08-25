@@ -1858,6 +1858,7 @@ class OrchestrationService:
                     else None
                 ),
                 preparation=request.preparation,
+                scheduler_metadata=_execution_storage_metadata(request),
                 task_space=request.compact_plan.task_space,
                 execution_strategy=request.compact_plan.strategy,
                 retrieval_policy=request.compact_plan.retrieval_policy,
@@ -1902,13 +1903,13 @@ class OrchestrationService:
                 else None
             ),
             preparation=request.preparation,
+            scheduler_metadata=_execution_storage_metadata(request),
             task_array_mapping=request.plan.array_mapping,
             task_retrieval_states={
                 unit.task_id: RetrievalState.NOT_REQUESTED
                 for unit in request.plan.units
             },
         )
-
     def _fail_before_completion(self, record: RunRecord, native_state: str) -> None:
         failed = _with_execution_state(record, ExecutionState.FAILED)
         self.store.update(
@@ -1949,6 +1950,28 @@ class OrchestrationService:
         if record.is_compact:
             assert self._task_store is not None
             self._task_store.set_all_retrieval(record.run.id, RetrievalState.FAILED)
+
+
+def _execution_storage_metadata(
+    request: RunExecutionRequest,
+) -> dict[str, NativeValue]:
+    policy = request.plan.target.execution_storage
+    if policy is None:
+        return {}
+    resources = request.plan.units[0].resources
+    active_environment = (
+        policy.gpu_environment
+        if resources.gpus_per_task > 0
+        else policy.cpu_environment
+    )
+    return {
+        "execution_storage.type": "slurm_scratch",
+        "execution_storage.cpu_environment": policy.cpu_environment,
+        "execution_storage.gpu_environment": policy.gpu_environment,
+        "execution_storage.active_environment": active_environment,
+        "execution_storage.stage_image": policy.stage_image,
+        "execution_storage.copy_back": policy.copy_back,
+    }
 
 
 def _compact_record(
