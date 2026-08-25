@@ -181,13 +181,21 @@ execution plan after mapping every current Slurm script path.
   confirm that neither scientific nor preparation computation runs from shared
   home storage.
 
+## M32 implementation
+
+M32 implements explicit target-owned Slurm partition routes and read-only
+partition inventory. Selection is deterministic and network-free during plan:
+the shortest configured CPU/GPU route that fits explicit walltime is used for
+scientific and preparation jobs. This is not live queue placement and does not
+measure capacity or budget use.
+
 ## Later milestone order
 
 After M31, implement the remaining designs independently:
 
 1. Slurm usage measurement and read-only `rundr usage` reporting.
 2. Budget admission and reservation enforcement.
-3. Automatic single-target selection and duration-based partition routing.
+3. Automatic single-target selection using declared compatible targets.
 4. Storage-limited target finalization and result custody.
 5. Multi-target Campaigns and split placement.
 

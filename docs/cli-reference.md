@@ -10,7 +10,7 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 | `validate` | `EXPERIMENT` | `--json` | Validate experiment YAML without executing. |
 | `plan` | `EXPERIMENT` | `--config`, `--seed`/`--seeds`/`--random-seed`, `--target`, `--targets-file`, `--project-file`, `--profile`, preparation options, `--execution-strategy`, `--retrieval`, `--workers`, `--task-slots-per-worker`, `--json` | Resolve and inspect execution without target contact or state changes. |
 | `targets` | none | `--targets-file`, `--json` | Validate and list configured targets. |
-| `doctor` | optional `EXPERIMENT` | launch path overrides, `--connect`, `--local-target-access`, `--prepare-location`, `--scheduler-probe`, `--probe-timeout`, `--no-write-probe`, `--agent`, `--json` | Audit installation, sandbox paths, target access, reversible staging, preparation caches, and an optional bounded scheduler submission. |
+| `doctor` | optional `EXPERIMENT` | launch path overrides, `--connect`, `--local-target-access`, `--prepare-location`, `--scheduler-inventory`, `--scheduler-probe`, `--probe-timeout`, `--no-write-probe`, `--agent`, `--json` | Audit installation, sandbox paths, target access, reversible staging, preparation caches, read-only scheduler inventory, and an optional bounded scheduler submission. |
 | `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--workers`, `--task-slots-per-worker`, `--verbose`, `--progress`, `--progress-interval`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
 | `wait` | `RUN_ID` or `--last` | `--timeout`, `--poll-interval`, `--notify`, `--notify-file PATH`, `--data-dir`, `--verbose`, `--progress`, `--progress-interval`, `--json` | Reconcile until terminal or a renewable timeout; optionally emit an alert or atomic terminal JSON file. |
 | `await` | one or more `RUN_ID` values | `--until all`/`any`, `--timeout`, `--poll-interval`, `--fail-on-run-failure`, `--notify-file PATH`, `--data-dir`, `--json` | Wait silently for an aggregate terminal condition and emit one compact final result. |
@@ -247,7 +247,7 @@ worker resources, and scheduler-controlled placement. Operators must configure
 limits and defaults from known site policy; Rundra does not infer cores,
 exclusive placement, or memory overcommit.
 
-Target v10 may declare `execution_storage.type: slurm_scratch`. Human plans
+Target v10+ may declare `execution_storage.type: slurm_scratch`. Human plans
 show the CPU/GPU variable names, image staging, and per-Task copy-back. JSON
 target documents expose the strict `execution_storage` mapping. This is a
 site-owned execution contract: Rundra does not invent scratch paths and fails
@@ -261,6 +261,17 @@ compact worker pools, scheduler-driven rerun recovery, and probes. Consult
 these flags instead of inferring features from a scheduler name. OpenPBS
 supports bounded worker pools but requires `requeue_limit: 0`; Slurm supports
 scheduler-driven worker reruns.
+
+Target v11 may declare `scheduler.partition_routes` with exact Slurm partition
+names, CPU/GPU resource classes, and maximum walltimes. A routed experiment
+must declare walltime. `plan` selects the shortest compatible route offline and
+reports the effective `native_options.slurm.partition`; undeclared explicit
+partitions are rejected rather than treated as overrides.
+
+`doctor --connect --scheduler-inventory --json` queries partition metadata
+without submitting a job. It is intended for operator onboarding and route
+validation. `--scheduler-probe` remains a separate, explicitly resource-
+consuming check.
 
 `rundr doctor EXPERIMENT --offline` performs an additional cache-only audit for
 preparation. Use `--prepare-location local` to require client caches,

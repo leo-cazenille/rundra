@@ -9,6 +9,8 @@
 - Run `rundr doctor EXPERIMENT --connect --agent codex --json` and `rundr plan
   EXPERIMENT` before consuming cluster resources. Use the explicit
   `--scheduler-probe` only when a bounded scheduler submission is wanted.
+  For target-v11 route onboarding, use `--connect --scheduler-inventory --json`;
+  this read-only query submits no job and agents must not parse native `sinfo`.
   Review task count, seeds, resources, concurrency, and retrieval strategy.
 - Use explicit seeds for reproducibility. Above a target safety threshold, pass
   the exact requested `--confirm-tasks N` value only after reviewing the plan.

@@ -816,6 +816,30 @@ M31 does not implement target budgets, automatic target choice, campaign
 placement, or post-retrieval retention cleanup. Those remain separate policy
 milestones.
 
+### 10.4 Target-owned Slurm partition routing
+
+Target version 11 may add `scheduler.partition_routes`. Each route has a unique
+logical name, exact native partition, `cpu` or `gpu` resource class, and finite
+maximum walltime. Routed requests must declare walltime. Rundra classifies a
+request as GPU only when `gpus_per_task` is positive and selects the shortest
+compatible route, using declaration order only to break equal-limit ties.
+
+Routing is pure target policy. It applies to scientific arrays, worker pools,
+scheduled preparation, and scheduler probes. An explicit native partition must
+match a compatible declared route and cannot bypass policy. Account, QOS,
+constraint, and exclusive settings retain their existing explicit semantics.
+
+`doctor --connect --scheduler-inventory` performs a read-only Slurm inventory
+and submits no job. Structured output reports partition identity, default and
+availability state, configured time limit, and GRES text. When routes are
+configured, doctor checks that partitions exist and that route limits do not
+exceed scheduler limits. Pure `plan` never performs this query.
+
+Routed plans use plan schema 9 and routed Runs use RunRecord schema 7. The full
+route policy and effective native partition are retained as provenance. M32
+does not implement usage budgets, dynamic queue selection, or multi-target
+placement.
+
 Large parameter/seed products use an inclusive arithmetic seed range and a
 constant-size TaskSpace. Ordinals are parameter-major and seed-minor; the Task
 at ordinal `p * seed_count + s` has parameter-set ordinal `p`, seed ordinal `s`,
