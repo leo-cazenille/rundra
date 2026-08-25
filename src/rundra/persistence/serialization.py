@@ -28,6 +28,7 @@ from rundra.domain.preparation import PreparationRecord, PreparedOutput
 from rundra.domain.records import RunRecord
 from rundra.domain.scaling import CompactRun, SeedRange, TaskSpace
 from rundra.domain.states import ExecutionState, RetrievalState
+from rundra.domain.storage import SlurmScratchPolicy
 from rundra.persistence.errors import RunRecordFormatError
 from rundra.schema_versions import RUN_RECORD_SCHEMA
 
@@ -556,8 +557,8 @@ def _backend_to_dict(backend: BackendConfig) -> JsonObject:
     return {"kind": backend.kind, "options": dict(sorted(backend.options.items()))}
 
 
-def _target_to_dict(target: Target) -> JsonObject:
-    return {
+def _target_to_dict(target: Target, *, version: int) -> JsonObject:
+    document: JsonObject = {
         "name": target.name,
         "transport": _backend_to_dict(target.transport),
         "scheduler": _backend_to_dict(target.scheduler),
@@ -565,6 +566,20 @@ def _target_to_dict(target: Target) -> JsonObject:
         "container": _backend_to_dict(target.container),
         "workspace": str(target.workspace),
     }
+    if target.execution_storage is not None:
+        if version != 6:
+            raise RunRecordFormatError(
+                "RunRecord v1-v5 cannot contain target execution_storage"
+            )
+        policy = target.execution_storage
+        document["execution_storage"] = {
+            "type": "slurm_scratch",
+            "cpu_environment": policy.cpu_environment,
+            "gpu_environment": policy.gpu_environment,
+            "stage_image": policy.stage_image,
+            "copy_back": policy.copy_back,
+        }
+    return document
 
 
 def _config_to_dict(config: ConfigSnapshot) -> JsonObject:
@@ -597,7 +612,7 @@ def _run_to_dict(run: Run, *, version: int) -> JsonObject:
     document: JsonObject = {
         "id": str(run.id),
         "experiment_name": run.experiment_name,
-        "target": _target_to_dict(run.target),
+        "target": _target_to_dict(run.target, version=version),
         "created_at": run.created_at.isoformat(),
         "state": run.state.value,
         "retrieval_state": run.retrieval_state.value,
@@ -745,8 +760,9 @@ def _parse_backend(value: object, *, path: str) -> BackendConfig:
         _invalid(path, error)
 
 
-def _parse_target(value: object, *, path: str) -> Target:
+def _parse_target(value: object, *, path: str, version: int) -> Target:
     document = _object(value, path=path)
+    storage_present = version == 6 and "execution_storage" in document
     _exact_fields(
         document,
         frozenset(
@@ -757,10 +773,53 @@ def _parse_target(value: object, *, path: str) -> Target:
                 "staging",
                 "container",
                 "workspace",
+                *(("execution_storage",) if storage_present else ()),
             }
         ),
         path=path,
     )
+    storage: SlurmScratchPolicy | None = None
+    if storage_present:
+        storage_path = f"{path}.execution_storage"
+        storage_document = _object(document["execution_storage"], path=storage_path)
+        _exact_fields(
+            storage_document,
+            frozenset(
+                {
+                    "type",
+                    "cpu_environment",
+                    "gpu_environment",
+                    "stage_image",
+                    "copy_back",
+                }
+            ),
+            path=storage_path,
+        )
+        if _string(storage_document["type"], path=f"{storage_path}.type") != (
+            "slurm_scratch"
+        ):
+            raise RunRecordFormatError(f"{storage_path}.type must be slurm_scratch")
+        try:
+            storage = SlurmScratchPolicy(
+                cpu_environment=_string(
+                    storage_document["cpu_environment"],
+                    path=f"{storage_path}.cpu_environment",
+                ),
+                gpu_environment=_string(
+                    storage_document["gpu_environment"],
+                    path=f"{storage_path}.gpu_environment",
+                ),
+                stage_image=_boolean(
+                    storage_document["stage_image"],
+                    path=f"{storage_path}.stage_image",
+                ),
+                copy_back=_string(
+                    storage_document["copy_back"],
+                    path=f"{storage_path}.copy_back",
+                ),
+            )
+        except (TypeError, ValueError) as error:
+            _invalid(storage_path, error)
     try:
         return Target(
             name=_string(document["name"], path=f"{path}.name"),
@@ -769,6 +828,7 @@ def _parse_target(value: object, *, path: str) -> Target:
             staging=_parse_backend(document["staging"], path=f"{path}.staging"),
             container=_parse_backend(document["container"], path=f"{path}.container"),
             workspace=_path(document["workspace"], path=f"{path}.workspace"),
+            execution_storage=storage,
         )
     except RunRecordFormatError:
         raise
@@ -858,7 +918,9 @@ def _parse_run(value: object, *, path: str, version: int, compact: bool = False)
             experiment_name=_string(
                 document["experiment_name"], path=f"{path}.experiment_name"
             ),
-            target=_parse_target(document["target"], path=f"{path}.target"),
+            target=_parse_target(
+                document["target"], path=f"{path}.target", version=version
+            ),
             tasks=tuple(
                 _parse_task(item, path=f"{path}.tasks[{index}]", version=version)
                 for index, item in enumerate(task_values)

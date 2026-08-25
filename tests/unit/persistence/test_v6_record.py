@@ -3,6 +3,7 @@ from pathlib import PurePosixPath
 
 import pytest
 
+from rundra.domain.storage import SlurmScratchPolicy
 from rundra.persistence import record_from_dict, record_to_dict
 from rundra.persistence.errors import RunRecordFormatError
 from tests.unit.persistence.test_json_store import _record
@@ -58,3 +59,29 @@ def test_version_six_requires_a_fetch_mode() -> None:
     del document["fetch_mode"]
     with pytest.raises(RunRecordFormatError, match="missing field"):
         record_from_dict(document)
+
+
+def test_version_six_round_trips_optional_slurm_scratch_policy() -> None:
+    base = _record()
+    target = replace(
+        base.run.target,
+        execution_storage=SlurmScratchPolicy(),
+    )
+    record = replace(
+        base,
+        format_version=6,
+        run=replace(base.run, target=target),
+        retrieval_destination=PurePosixPath("/retrieved/scratch"),
+        fetch_mode="copy",
+    )
+
+    document = record_to_dict(record)
+
+    assert document["run"]["target"]["execution_storage"] == {
+        "type": "slurm_scratch",
+        "cpu_environment": "SLURM_TMPDIR",
+        "gpu_environment": "SLURM_GPUTMPDIR",
+        "stage_image": True,
+        "copy_back": "task",
+    }
+    assert record_from_dict(document) == record
