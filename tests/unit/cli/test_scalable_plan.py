@@ -93,7 +93,7 @@ resources: {cpus_per_task: 1, memory: 2GiB, walltime: "00:02:00"}
     targets = tmp_path / "targets.yaml"
     targets.write_text(
         """\
-version: 4
+version: 10
 targets:
   shoal:
     transport: {type: ssh, host: cluster}
@@ -101,6 +101,12 @@ targets:
     staging: {type: rsync}
     container: {type: apptainer}
     workspace: /remote/work
+    execution_storage:
+      type: slurm_scratch
+      cpu_environment: SLURM_TMPDIR
+      gpu_environment: SLURM_GPUTMPDIR
+      stage_image: true
+      copy_back: task
     execution:
       hard_task_limit: 100000000
       confirmation_threshold: 10000
@@ -139,4 +145,8 @@ targets:
     assert scheduling["concurrent_task_capacity"] == 320
     assert scheduling["max_lane_depth"] == 63
     assert scheduling["worker_resources"]["tasks"] == 40
-    assert "slots_per_worker=40" in render_human(result)
+    human = render_human(result)
+    assert "slots_per_worker=40" in human
+    assert "allocation-local Slurm scratch" in human
+    assert "cpu=SLURM_TMPDIR, gpu=SLURM_GPUTMPDIR" in human
+    assert "outputs copied back after each task" in human

@@ -393,6 +393,14 @@ def render_human(result: OperationResult[Any]) -> str:
                 f"offline={preparation.offline}, rebuild={preparation.rebuild}, "
                 f"rebuild_image={preparation.rebuild_image}"
             )
+        if plan.target.execution_storage is not None:
+            storage = plan.target.execution_storage
+            rendered += (
+                "\nExecution storage: allocation-local Slurm scratch; "
+                f"cpu={storage.cpu_environment}, gpu={storage.gpu_environment}, "
+                "source/config/image staged per allocation, "
+                "outputs copied back after each task"
+            )
         return _with_launch(rendered, value.launch)
     if isinstance(value, TargetsValue):
         lines = ["Configured targets:"]

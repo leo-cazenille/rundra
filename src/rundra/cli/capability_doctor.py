@@ -679,10 +679,46 @@ def _scheduler_probe(target: Target, timeout: int) -> DoctorCheck:
             raise RuntimeError("workspace unavailable")
         scheduler = scheduler_for_target(target, transport, log_directory=root)
         script = 'printf "%s" "$1" > "$2"; hostname > "$3"'
+        command_arguments = (token, str(marker), str(hostname))
+        if target.execution_storage is not None:
+            script = """\
+set -eu
+token=$1
+marker=$2
+hostname_path=$3
+environment_name=$4
+eval "scratch_base=\${$environment_name-}"
+case "$scratch_base" in
+  /*) ;;
+  *) exit 71 ;;
+esac
+[ "$scratch_base" != / ]
+[ -d "$scratch_base" ]
+[ -w "$scratch_base" ]
+[ ! -L "$scratch_base" ]
+scratch_directory=$scratch_base/rundra-doctor-$token
+cleanup() {
+  rm -f -- "$scratch_directory/marker"
+  rmdir -- "$scratch_directory" 2>/dev/null || true
+}
+trap cleanup EXIT HUP INT TERM
+mkdir -m 700 -- "$scratch_directory"
+printf "%s" "$token" > "$scratch_directory/marker"
+temporary_marker=$marker.tmp-$token
+cp -- "$scratch_directory/marker" "$temporary_marker"
+mv -f -- "$temporary_marker" "$marker"
+hostname > "$hostname_path"
+"""
+            command_arguments = (
+                token,
+                str(marker),
+                str(hostname),
+                target.execution_storage.cpu_environment,
+            )
         unit = SchedulerUnit(
             TaskId("task_000000"),
             Command(
-                ("sh", "-c", script, "rundr-doctor", token, str(marker), str(hostname))
+                ("sh", "-c", script, "rundr-doctor", *command_arguments)
             ),
             ResourceRequest(
                 cpus_per_task=1,
@@ -708,11 +744,13 @@ def _scheduler_probe(target: Target, timeout: int) -> DoctorCheck:
         result = transport.run(Command(("cat", "--", str(marker))))
         if observation.state != ExecutionState.SUCCEEDED or result.stdout != token:
             raise RuntimeError("marker unavailable")
-        return DoctorCheck(
-            "scheduler_probe",
-            "pass",
-            "scheduler submission and compute-side workspace access succeeded",
-        )
+        message = "scheduler submission and compute-side workspace access succeeded"
+        if target.execution_storage is not None:
+            message += (
+                "; allocation-local scratch write, copy-back, and cleanup succeeded "
+                f"via {target.execution_storage.cpu_environment}"
+            )
+        return DoctorCheck("scheduler_probe", "pass", message)
     except Exception:
         return DoctorCheck(
             "scheduler_probe", "fail", "scheduler submission probe failed"
