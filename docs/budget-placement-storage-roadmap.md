@@ -79,21 +79,22 @@ failure models and should not be introduced in one milestone.
 - Suggested custody states are EPHEMERAL, FINALIZER_PENDING, DELIVERING,
   DURABLE, CLEANED, AT_RISK, and LOST.
 
-### ISIR target design
+### Scratch-first Slurm target design
 
-The documented ISIR cluster has Slurm CPU and GPU partition families divided by
-maximum walltime. Shared `/home` is suitable for Rundra control data, persistent
-caches, and retrieved results, but not as an execution working directory.
-CPU allocations expose node-local scratch through `SLURM_TMPDIR`; GPU
-allocations expose NVMe scratch through `SLURM_GPUTMPDIR`.
+Some Slurm clusters provide CPU and GPU partition families divided by maximum
+walltime. Shared home storage may be suitable for Rundra control data,
+persistent caches, and retrieved results, but not as an execution working
+directory. CPU allocations may expose node-local scratch through
+`SLURM_TMPDIR`; GPU allocations may expose a separate fast scratch root through
+`SLURM_GPUTMPDIR`.
 
-The eventual automatic-routing design uses one logical ISIR target. Every
-scheduler request declares a resource class and explicit walltime. Rundra picks
-the shortest compatible configured partition before considering live capacity.
+The eventual automatic-routing design uses one logical target. Every scheduler
+request declares a resource class and explicit walltime. Rundra picks the
+shortest compatible configured partition before considering live capacity.
 Exact partition, GPU GRES, constraint, account, and QOS names remain operator
 configuration and must not be inferred from hardware totals.
 
-The cluster totals are capacity information, not user budgets. ISIR budget
+Published cluster totals are capacity information, not user budgets. Budget
 limits therefore remain infinite until an administrator or account owner
 provides actual usage limits.
 
@@ -117,6 +118,9 @@ storage.
 - Stage the sealed source snapshot, effective config, and verified SIF into
   scratch once per allocation or worker. Native execution stages source and
   config without an image.
+- Run scheduled source compilation and definition-image preparation from the
+  same allocation-local scratch policy. Publish verified source, build, and
+  image cache entries to shared storage only after successful preparation.
 - Verify the copied SIF SHA-256 before starting scientific Tasks.
 - Give each Task an isolated runtime and output directory below the allocation
   scratch root.
@@ -126,9 +130,9 @@ storage.
 - Stage once per worker-pool allocation rather than once per bundled Task.
 - Use tightly scoped cleanup traps for Rundra-created scratch paths. Never
   recursively remove the scratch root supplied by the scheduler.
-- Keep preparation caching, result fetching, target selection, and RunRecord
-  semantics unchanged. Definition-image builds, budget accounting, automatic
-  partition routing, Campaigns, and scheduler finalizers are out of M31.
+- Keep preparation cache identities, result fetching, target selection, and
+  RunRecord semantics unchanged. Budget accounting, automatic partition
+  routing, Campaigns, and scheduler finalizers are out of M31.
 
 Example conceptual target addition:
 
@@ -166,9 +170,16 @@ execution plan after mapping every current Slurm script path.
 - Extend Docker Slurm tests with a node-local scratch mount and assertions that
   scientific commands execute there while durable outputs return to the Run
   workspace.
-- Add an opt-in ISIR acceptance test only after the permanent target is
-  registered. It must use a small bounded allocation and confirm that no
-  scientific process runs from shared `/home`.
+- Add a synthetic Docker Slurm target with shared persistent storage, separate
+  CPU and GPU scratch mounts, and policy checks that reject scientific or
+  preparation computation from the shared workspace.
+- Exercise prebuilt images, definition-image preparation, application builds,
+  arrays, and worker pools in Docker. Assert that caches and Task outputs are
+  copied back while allocation-local paths are removed.
+- Keep any real-cluster acceptance configuration outside the repository. A
+  bounded acceptance test may consume an externally supplied target and must
+  confirm that neither scientific nor preparation computation runs from shared
+  home storage.
 
 ## Later milestone order
 
@@ -176,7 +187,7 @@ After M31, implement the remaining designs independently:
 
 1. Slurm usage measurement and read-only `rundr usage` reporting.
 2. Budget admission and reservation enforcement.
-3. Automatic single-target selection and ISIR partition routing.
+3. Automatic single-target selection and duration-based partition routing.
 4. Storage-limited target finalization and result custody.
 5. Multi-target Campaigns and split placement.
 
