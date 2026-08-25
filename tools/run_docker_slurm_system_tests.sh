@@ -85,7 +85,7 @@ EOF
 chmod 600 "$state/home/.ssh/config" "$state/id_ed25519"
 
 cat > "$state/targets.yaml" <<EOF
-version: 4
+version: 10
 targets:
   docker-slurm:
     transport:
@@ -96,6 +96,12 @@ targets:
     staging: {type: rsync}
     container: {type: apptainer}
     workspace: /workspace
+    execution_storage:
+      type: slurm_scratch
+      cpu_environment: SLURM_TMPDIR
+      gpu_environment: SLURM_GPUTMPDIR
+      stage_image: true
+      copy_back: task
     execution:
       hard_task_limit: 2000
       confirmation_threshold: 500

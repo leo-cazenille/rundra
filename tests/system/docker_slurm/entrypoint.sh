@@ -1,6 +1,11 @@
 #!/bin/sh
 set -eu
 
+# The synthetic scheduler exports allocation-local storage locations. The
+# compute services provide these paths as private tmpfs mounts.
+export SLURM_TMPDIR=/scratch
+export SLURM_GPUTMPDIR=/gpu-scratch
+
 wait_for_bootstrap() {
     while [ ! -f /cluster/ready ]; do sleep 1; done
 }
@@ -38,6 +43,7 @@ case "${1:-}" in
     compute)
         wait_for_bootstrap
         start_munge
+        install -d -m 1777 /scratch /gpu-scratch
         exec slurmd -D
         ;;
     *)

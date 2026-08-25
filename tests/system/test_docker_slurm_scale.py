@@ -46,14 +46,26 @@ def test_docker_slurm_runs_one_thousand_tasks_on_compute_nodes(
         "--data-dir",
         str(tmp_path / "records"),
     )
-    _rundr(
+    diagnosed = _rundr(
         "doctor",
         "--target",
         docker_slurm_target_name,
         "--targets-file",
         str(docker_slurm_targets_source),
         "--connect",
+        "--scheduler-probe",
     )
+    doctor = diagnosed["doctor"]
+    assert isinstance(doctor, dict)
+    checks = doctor["checks"]
+    assert isinstance(checks, list)
+    scheduler_probe = next(
+        check
+        for check in checks
+        if isinstance(check, dict) and check.get("name") == "scheduler_probe"
+    )
+    assert scheduler_probe["status"] == "pass"
+    assert "allocation-local scratch" in str(scheduler_probe["message"])
     submitted = _rundr(
         "submit",
         str(_SOURCE / "experiment.yaml"),
@@ -95,6 +107,7 @@ def test_docker_slurm_runs_one_thousand_tasks_on_compute_nodes(
     documents = [json.loads(path.read_text(encoding="utf-8")) for path in results]
     assert {item["seed"] for item in documents} == set(range(1000))
     assert {item["host"] for item in documents} <= {"compute1", "compute2"}
+    assert {item["scratch"] for item in documents} == {"/scratch"}
 
 
 def test_docker_slurm_bounded_array_preserves_partial_failure(

@@ -50,6 +50,9 @@ services:
         condition: service_healthy
     cpus: 2
     mem_limit: 2g
+    tmpfs:
+      - /scratch:mode=1777,size=256m
+      - /gpu-scratch:mode=1777,size=256m
 
   compute2:
     <<: [*apptainer, *cluster-volumes]
@@ -61,6 +64,9 @@ services:
         condition: service_healthy
     cpus: 2
     mem_limit: 2g
+    tmpfs:
+      - /scratch:mode=1777,size=256m
+      - /gpu-scratch:mode=1777,size=256m
 
 volumes:
   cluster-config:
