@@ -157,6 +157,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--profile")
     doctor.add_argument("--connect", action="store_true")
     doctor.add_argument("--scheduler-probe", action="store_true")
+    doctor.add_argument("--scheduler-inventory", action="store_true")
     doctor.add_argument("--probe-timeout", type=int, default=120)
     doctor.add_argument("--no-write-probe", action="store_true")
     doctor.add_argument("--local-target-access", action="store_true")
@@ -689,6 +690,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 arguments.target,
                 connect=arguments.connect,
                 scheduler_probe=arguments.scheduler_probe,
+                scheduler_inventory=arguments.scheduler_inventory,
                 probe_timeout=arguments.probe_timeout,
                 write_probe=not arguments.no_write_probe,
                 data_dir=arguments.data_dir,
@@ -722,6 +724,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     resolved_doctor.value.target,
                     connect=arguments.connect,
                     scheduler_probe=arguments.scheduler_probe,
+                    scheduler_inventory=arguments.scheduler_inventory,
                     probe_timeout=arguments.probe_timeout,
                     write_probe=not arguments.no_write_probe,
                     data_dir=resolved_doctor.value.data_dir,

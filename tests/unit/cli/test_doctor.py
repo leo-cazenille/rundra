@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import subprocess
+from datetime import timedelta
 from pathlib import Path
 
 from rundra.cli.capability_doctor import doctor_operation
@@ -14,6 +15,8 @@ from rundra.domain.preparation import (
     PreparationStorageConfig,
     source_recipe_identity,
 )
+from rundra.domain.scheduling import SlurmPartitionPolicy, SlurmPartitionRoute
+from rundra.ports import SchedulerPartition
 
 
 def test_doctor_accepts_a_writable_local_target(tmp_path: Path) -> None:
@@ -101,6 +104,64 @@ def test_doctor_rejects_scheduler_probe_without_write_probe(tmp_path: Path) -> N
 
     assert result.error is not None
     assert result.error.code == "CLI_USAGE_ERROR"
+
+
+def test_doctor_requires_connect_for_read_only_scheduler_inventory(
+    tmp_path: Path,
+) -> None:
+    result = doctor_operation(
+        tmp_path / "targets.yaml",
+        None,
+        scheduler_inventory=True,
+    )
+
+    assert result.error is not None
+    assert result.error.code == "CLI_USAGE_ERROR"
+
+
+def test_scheduler_inventory_validates_configured_routes(monkeypatch) -> None:
+    from pathlib import PurePosixPath
+
+    from rundra.cli import capability_doctor
+    from rundra.domain.models import BackendConfig, Target
+
+    target = Target(
+        "cluster",
+        BackendConfig("ssh", {"host": "cluster"}),
+        BackendConfig("slurm"),
+        BackendConfig("rsync"),
+        BackendConfig("apptainer"),
+        PurePosixPath("/shared/rundra"),
+        partition_policy=SlurmPartitionPolicy(
+            (
+                SlurmPartitionRoute(
+                    "cpu_short", "cpu-short", "cpu", timedelta(hours=1)
+                ),
+            )
+        ),
+    )
+
+    class InventoryScheduler:
+        def inventory(self) -> tuple[SchedulerPartition, ...]:
+            return (
+                SchedulerPartition(
+                    "cpu-short", True, "up", 3600, "01:00:00", "(null)"
+                ),
+            )
+
+    monkeypatch.setattr(
+        capability_doctor,
+        "scheduler_for_target",
+        lambda *args, **kwargs: InventoryScheduler(),
+    )
+
+    inventory, checks = capability_doctor._scheduler_inventory(target)
+
+    assert len(inventory) == 1
+    assert {check.name: check.status for check in checks} == {
+        "scheduler_inventory": "pass",
+        "partition_route_cpu_short": "pass",
+    }
 
 
 def test_doctor_requires_target_for_local_target_access(tmp_path: Path) -> None:

@@ -26,6 +26,39 @@ from rundra.domain.states import ExecutionState
 from rundra.domain.storage import SlurmScratchPolicy
 
 
+@dataclass(frozen=True, slots=True)
+class SchedulerPartition:
+    """Bounded scheduler partition information for operator diagnostics."""
+
+    name: str
+    default: bool
+    availability: str
+    max_walltime_seconds: int | None
+    max_walltime_raw: str
+    gres: str
+
+    def __post_init__(self) -> None:
+        if type(self.name) is not str or not self.name.strip():
+            raise ValueError("Scheduler partition name must be nonblank")
+        if type(self.default) is not bool:
+            raise TypeError("Scheduler partition default must be bool")
+        for field_name in ("availability", "max_walltime_raw", "gres"):
+            if type(getattr(self, field_name)) is not str:
+                raise TypeError(f"Scheduler partition {field_name} must be a string")
+        if self.max_walltime_seconds is not None and (
+            type(self.max_walltime_seconds) is not int
+            or self.max_walltime_seconds < 1
+        ):
+            raise ValueError("Scheduler partition walltime must be positive or None")
+
+
+@runtime_checkable
+class SchedulerInventoryProvider(Protocol):
+    """Optional read-only scheduler partition inventory capability."""
+
+    def inventory(self) -> tuple[SchedulerPartition, ...]: ...
+
+
 class SchedulerSubmissionOutcome(StrEnum):
     """Portable classification for a failed scheduler submission attempt."""
 

@@ -116,6 +116,35 @@ def test_slurm_array_request_preserves_explicit_bounded_mapping() -> None:
     assert request.max_array_size == 3
 
 
+def test_slurm_inventory_parses_duration_partitions_without_submission() -> None:
+    now = datetime.now(UTC)
+    command = Command(("sinfo", "--noheader", "--format=%P|%l|%a|%G"))
+    transport = ScriptedTransport(
+        deque(
+            (
+                CommandResult(
+                    command,
+                    0,
+                    "cpu-short*|01:00:00|up|(null)\n"
+                    "cpu-day|1-00:00:00|up|(null)\n"
+                    "gpu-short|01:00:00|down|gpu:a6000:4\n",
+                    "",
+                    now,
+                    now,
+                ),
+            )
+        )
+    )
+
+    inventory = SlurmScheduler(transport).inventory()
+
+    assert [item.name for item in inventory] == ["cpu-day", "cpu-short", "gpu-short"]
+    assert inventory[0].max_walltime_seconds == 86400
+    assert inventory[1].default is True
+    assert inventory[2].availability == "down"
+    assert transport.run_calls == [command]
+
+
 def test_slurm_array_request_rejects_invalid_task_and_index_mappings() -> None:
     request = _array_request()
     first, second, third = request.mapping

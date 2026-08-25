@@ -21,6 +21,7 @@ from rundra.ports import (
     SchedulerArrayRequest,
     SchedulerGroup,
     SchedulerObservation,
+    SchedulerPartition,
     SchedulerReference,
     SchedulerSubmission,
     SchedulerSubmissionFailure,
@@ -257,6 +258,7 @@ class SlurmScheduler:
         scancel: str = "scancel",
         scontrol: str = "scontrol",
         srun: str = "srun",
+        sinfo: str = "sinfo",
         timezone: tzinfo | None = None,
         log_directory: PurePath | None = None,
     ) -> None:
@@ -269,6 +271,7 @@ class SlurmScheduler:
             ("scancel", scancel),
             ("scontrol", scontrol),
             ("srun", srun),
+            ("sinfo", sinfo),
         ):
             if (
                 type(executable) is not str
@@ -299,8 +302,41 @@ class SlurmScheduler:
         self._scancel = scancel
         self._scontrol = scontrol
         self._srun = srun
+        self._sinfo = sinfo
         self._timezone = timezone
         self._log_directory = log_directory
+
+    def inventory(self) -> tuple[SchedulerPartition, ...]:
+        """Return a read-only, structured Slurm partition inventory."""
+
+        result = self._transport.run(
+            Command((self._sinfo, "--noheader", "--format=%P|%l|%a|%G"))
+        )
+        if result.exit_code != 0:
+            raise SlurmQueryError("Slurm partition inventory failed")
+        partitions: dict[str, SchedulerPartition] = {}
+        for line in result.stdout.splitlines():
+            fields = line.strip().split("|", 3)
+            if len(fields) != 4:
+                raise SlurmQueryError("Slurm partition inventory was malformed")
+            raw_name, raw_limit, availability, gres = fields
+            default = raw_name.endswith("*")
+            name = raw_name.removesuffix("*")
+            item = SchedulerPartition(
+                name,
+                default,
+                availability.strip(),
+                _slurm_limit_seconds(raw_limit.strip()),
+                raw_limit.strip(),
+                gres.strip(),
+            )
+            previous = partitions.get(name)
+            if previous is not None and previous.max_walltime_raw != item.max_walltime_raw:
+                raise SlurmQueryError(
+                    "Slurm partition inventory has inconsistent time limits"
+                )
+            partitions[name] = item
+        return tuple(partitions[name] for name in sorted(partitions))
 
     def submit(self, group: SchedulerGroup) -> SchedulerSubmission:
         """Submit one generated script and retain opaque Slurm identity."""
@@ -1877,6 +1913,31 @@ def _array_log_path(value: PurePath, *, name: str) -> PurePath:
             f"Slurm array {name} path must contain %A and %a placeholders"
         )
     return value
+
+
+def _slurm_limit_seconds(value: str) -> int | None:
+    if value.lower() in {"infinite", "unlimited"}:
+        return None
+    days = 0
+    time_value = value
+    if "-" in value:
+        raw_days, time_value = value.split("-", 1)
+        if not raw_days.isdigit():
+            raise SlurmQueryError("Slurm partition time limit is invalid")
+        days = int(raw_days)
+    parts = time_value.split(":")
+    if len(parts) == 1 and parts[0].isdigit():
+        return (days * 24 * 60 + int(parts[0])) * 60
+    if len(parts) == 2:
+        hours = "0"
+        minutes, seconds = parts
+    elif len(parts) == 3:
+        hours, minutes, seconds = parts
+    else:
+        raise SlurmQueryError("Slurm partition time limit is invalid")
+    if not all(part.isdigit() for part in (hours, minutes, seconds)):
+        raise SlurmQueryError("Slurm partition time limit is invalid")
+    return days * 86400 + int(hours) * 3600 + int(minutes) * 60 + int(seconds)
 
 
 def _native_directives(resources: ResourceRequest) -> tuple[str, ...]:

@@ -58,7 +58,7 @@ _BACKENDS: Final = MappingProxyType(
         ),
         "slurm": SchedulerBackendDescriptor(
             SchedulerCapabilities(True, True, True, True, True, True, "slurm_array"),
-            ("sbatch", "squeue", "scancel", "scontrol"),
+            ("sbatch", "squeue", "scancel", "scontrol", "sinfo"),
         ),
         "pbs": SchedulerBackendDescriptor(
             SchedulerCapabilities(

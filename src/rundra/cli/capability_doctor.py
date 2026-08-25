@@ -33,7 +33,14 @@ from rundra.orchestration.preparation import (
     select_remote_preparation_location,
 )
 from rundra.orchestration.routing import route_scheduler_resources
-from rundra.ports import Scheduler, SchedulerGroup, SchedulerReference, SchedulerUnit
+from rundra.ports import (
+    Scheduler,
+    SchedulerGroup,
+    SchedulerInventoryProvider,
+    SchedulerPartition,
+    SchedulerReference,
+    SchedulerUnit,
+)
 from rundra.results import OperationError, OperationResult
 from rundra.scheduler_registry import scheduler_for_target
 
@@ -70,6 +77,7 @@ class DoctorValue:
     scheduler_probed: bool
     agent: str
     agent_config: str | None
+    scheduler_inventory: tuple[SchedulerPartition, ...] = ()
     format_version: int = 3
 
     @property
@@ -87,6 +95,7 @@ def doctor_operation(
     *,
     connect: bool = False,
     scheduler_probe: bool = False,
+    scheduler_inventory: bool = False,
     probe_timeout: int = 120,
     write_probe: bool = True,
     data_dir: Path | None = None,
@@ -106,6 +115,8 @@ def doctor_operation(
         return _usage("--probe-timeout must be from 1 to 600")
     if scheduler_probe and not write_probe:
         return _usage("--scheduler-probe requires local write probes")
+    if scheduler_inventory and not connect:
+        return _usage("--scheduler-inventory requires --connect")
     if local_target_access and target_name is None:
         return _usage("--local-target-access requires a selected target")
     if offline and experiment_source is None:
@@ -175,6 +186,7 @@ def doctor_operation(
 
     target: Target | None = None
     connected = False
+    inventory: tuple[SchedulerPartition, ...] = ()
     if target_name:
         legacy = target_doctor_operation(source, target_name, connect=connect)
         if legacy.ok and legacy.value is not None:
@@ -222,6 +234,9 @@ def doctor_operation(
                 )
             if scheduler_probe and connected:
                 checks.append(_scheduler_probe(target, probe_timeout))
+            if scheduler_inventory and connected:
+                inventory, inventory_checks = _scheduler_inventory(target)
+                checks.extend(inventory_checks)
             if offline and preparation is not None and experiment_source is not None:
                 location = (
                     "local"
@@ -356,6 +371,7 @@ def doctor_operation(
             scheduler_probe,
             agent,
             config,
+            inventory,
         ),
     )
 
@@ -653,6 +669,76 @@ def _remote_workspace_requirement(
         "target",
         "satisfied" if check.status == "pass" else "unsatisfied",
     )
+
+
+def _scheduler_inventory(
+    target: Target,
+) -> tuple[tuple[SchedulerPartition, ...], tuple[DoctorCheck, ...]]:
+    transport = (
+        _transport(target) if target.transport.kind != "local" else LocalTransport()
+    )
+    scheduler = scheduler_for_target(target, transport)
+    if not isinstance(scheduler, SchedulerInventoryProvider):
+        return (), (
+            DoctorCheck(
+                "scheduler_inventory",
+                "fail",
+                "configured scheduler does not support partition inventory",
+            ),
+        )
+    try:
+        inventory = scheduler.inventory()
+    except Exception:
+        return (), (
+            DoctorCheck(
+                "scheduler_inventory", "fail", "scheduler inventory query failed"
+            ),
+        )
+    checks = [
+        DoctorCheck(
+            "scheduler_inventory",
+            "pass",
+            f"discovered {len(inventory)} scheduler partition(s) without submission",
+        )
+    ]
+    if target.partition_policy is not None:
+        by_name = {item.name: item for item in inventory}
+        for route in target.partition_policy.routes:
+            discovered = by_name.get(route.partition)
+            if discovered is None:
+                checks.append(
+                    DoctorCheck(
+                        f"partition_route_{route.name}",
+                        "fail",
+                        f"configured partition {route.partition} was not discovered",
+                    )
+                )
+            elif (
+                discovered.max_walltime_seconds is not None
+                and route.max_walltime.total_seconds()
+                > discovered.max_walltime_seconds
+            ):
+                checks.append(
+                    DoctorCheck(
+                        f"partition_route_{route.name}",
+                        "fail",
+                        f"configured route {route.name} exceeds scheduler time limit",
+                    )
+                )
+            else:
+                status = (
+                    "pass"
+                    if discovered.availability.lower() in {"up", "yes"}
+                    else "warning"
+                )
+                checks.append(
+                    DoctorCheck(
+                        f"partition_route_{route.name}",
+                        status,
+                        f"configured route {route.name} matches {route.partition}",
+                    )
+                )
+    return inventory, tuple(checks)
 
 
 def _scheduler_probe(target: Target, timeout: int) -> DoctorCheck:

@@ -99,6 +99,18 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
             "target": None if value.target is None else value.target.name,
             "connected": value.connected,
             "scheduler_probed": value.scheduler_probed,
+            "scheduler_inventoried": bool(value.scheduler_inventory),
+            "scheduler_inventory": [
+                {
+                    "name": item.name,
+                    "default": item.default,
+                    "availability": item.availability,
+                    "max_walltime_seconds": item.max_walltime_seconds,
+                    "max_walltime_raw": item.max_walltime_raw,
+                    "gres": item.gres,
+                }
+                for item in value.scheduler_inventory
+            ],
             "scheduler_capabilities": (
                 None
                 if value.target is None
