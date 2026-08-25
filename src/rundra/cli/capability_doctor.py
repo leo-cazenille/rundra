@@ -679,7 +679,7 @@ def _scheduler_probe(target: Target, timeout: int) -> DoctorCheck:
             raise RuntimeError("workspace unavailable")
         scheduler = scheduler_for_target(target, transport, log_directory=root)
         script = 'printf "%s" "$1" > "$2"; hostname > "$3"'
-        command_arguments = (token, str(marker), str(hostname))
+        command_arguments: tuple[str, ...] = (token, str(marker), str(hostname))
         if target.execution_storage is not None:
             script = """\
 set -eu
@@ -687,7 +687,7 @@ token=$1
 marker=$2
 hostname_path=$3
 environment_name=$4
-eval "scratch_base=\${$environment_name-}"
+eval "scratch_base=\\${$environment_name-}"
 case "$scratch_base" in
   /*) ;;
   *) exit 71 ;;
@@ -717,9 +717,7 @@ hostname > "$hostname_path"
             )
         unit = SchedulerUnit(
             TaskId("task_000000"),
-            Command(
-                ("sh", "-c", script, "rundr-doctor", *command_arguments)
-            ),
+            Command(("sh", "-c", script, "rundr-doctor", *command_arguments)),
             ResourceRequest(
                 cpus_per_task=1,
                 memory_bytes=256 * 1024 * 1024,

@@ -1174,6 +1174,7 @@ def test_slurm_scratch_array_manifest_copies_each_task_back() -> None:
     assert "SLURM_TMPDIR is required by target policy" in script
     assert "exec /bin/sh" not in script
 
+
 def test_rendered_script_preserves_hostile_command_literals_without_execution(
     tmp_path: PurePosixPath,
 ) -> None:

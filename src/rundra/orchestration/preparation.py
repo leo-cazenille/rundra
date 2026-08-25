@@ -840,7 +840,9 @@ def _scratch_preparation_command(
         return command
     shared = str(workspace.root)
     if any(character.isspace() for character in shared):
-        raise PreparationError("Slurm scratch workspace paths cannot contain whitespace")
+        raise PreparationError(
+            "Slurm scratch workspace paths cannot contain whitespace"
+        )
     script = command.argv[2].replace(shared, "$rundra_run_root")
     script = script.replace(
         'mktemp -d "$cache/images/.pull.XXXXXX"',

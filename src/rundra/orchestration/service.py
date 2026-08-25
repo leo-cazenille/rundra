@@ -16,6 +16,7 @@ from rundra.domain.models import (
     ArtifactKind,
     Command,
     ExperimentSpec,
+    NativeValue,
     ResourceRequest,
     Run,
     RunId,
@@ -1910,6 +1911,7 @@ class OrchestrationService:
                 for unit in request.plan.units
             },
         )
+
     def _fail_before_completion(self, record: RunRecord, native_state: str) -> None:
         failed = _with_execution_state(record, ExecutionState.FAILED)
         self.store.update(

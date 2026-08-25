@@ -344,7 +344,9 @@ class CompactSchedulerArrayRequest:
             ):
                 raise ValueError(f"Compact scheduler {name} must be absolute")
         if self.scratch is not None and type(self.scratch) is not AllocationScratch:
-            raise TypeError("Compact scheduler scratch must be AllocationScratch or None")
+            raise TypeError(
+                "Compact scheduler scratch must be AllocationScratch or None"
+            )
         object.__setattr__(self, "commands", commands)
 
 

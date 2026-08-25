@@ -111,7 +111,9 @@ def load_targets_config(source: Path) -> TargetsConfig:
             source=source,
             path=("version",),
             code="UNSUPPORTED_VERSION",
-            message=("Unsupported targets version; supported versions are 1 through 10"),
+            message=(
+                "Unsupported targets version; supported versions are 1 through 10"
+            ),
         )
     raw_targets = expect_mapping(document["targets"], source=source, path=("targets",))
     targets: dict[str, Target] = {}
@@ -216,10 +218,7 @@ def load_targets_config(source: Path) -> TargetsConfig:
                     "and Apptainer"
                 ),
             )
-        if (
-            target.execution_storage is not None
-            and target.scheduler.kind != "slurm"
-        ):
+        if target.execution_storage is not None and target.scheduler.kind != "slurm":
             fail(
                 source=source,
                 path=(*path, "execution_storage"),

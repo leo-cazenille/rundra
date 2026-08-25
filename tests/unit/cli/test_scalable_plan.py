@@ -75,7 +75,7 @@ targets:
     assert "20000 task(s)" in render_human(result)
 
 
-def test_target_v4_plan_emits_worker_slot_capacity(tmp_path: Path) -> None:
+def test_target_v10_plan_emits_worker_slot_and_scratch_capacity(tmp_path: Path) -> None:
     experiment = tmp_path / "experiment.yaml"
     experiment.write_text(
         """\
@@ -115,10 +115,13 @@ targets:
       max_array_size: 1001
       output_shard_tasks: 1000
       automatic_retrieval_threshold: 20000
+      max_memory_per_worker: 80GiB
       worker_pool:
         activation_threshold: 10000
+        default_workers: 8
         max_workers: 8
-        task_slots_per_worker: 40
+        default_task_slots_per_worker: 40
+        max_task_slots_per_worker: 40
         tasks_per_lease: 100
         infrastructure_retry_limit: 2
         requeue_limit: 8
@@ -138,7 +141,7 @@ targets:
 
     assert result.ok
     document = result_document(result)
-    assert document["format_version"] == 5
+    assert document["format_version"] == 8
     scheduling = document["plan"]["scheduling"]
     assert scheduling["worker_count"] == 8
     assert scheduling["task_slots_per_worker"] == 40

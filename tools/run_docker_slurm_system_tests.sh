@@ -118,10 +118,13 @@ targets:
       max_array_size: 4
       output_shard_tasks: 100
       automatic_retrieval_threshold: 2000
+      max_memory_per_worker: 256MiB
       worker_pool:
         activation_threshold: 100
+        default_workers: 4
         max_workers: 4
-        task_slots_per_worker: 1
+        default_task_slots_per_worker: 1
+        max_task_slots_per_worker: 1
         tasks_per_lease: 100
         infrastructure_retry_limit: 1
         requeue_limit: 2

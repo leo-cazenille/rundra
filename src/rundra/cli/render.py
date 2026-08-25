@@ -325,7 +325,7 @@ def render_human(result: OperationResult[Any]) -> str:
             "Safety: validated offline; no target contact, workspace creation, "
             "Run creation, or submission"
         )
-        if plan.version in {4, 5, 6, 7}:
+        if plan.version in {4, 5, 6, 7, 8}:
             assert plan.execution_policy is not None
             rendered += (
                 f"\nScheduling: batches={plan.scheduler_batches}, "
@@ -333,7 +333,7 @@ def render_human(result: OperationResult[Any]) -> str:
                 f"max_active={plan.execution_policy.max_active_tasks}, "
                 f"retrieval={plan.retrieval_policy}, preview={len(plan.units)}"
             )
-            if plan.version in {5, 6, 7}:
+            if plan.version in {5, 6, 7, 8}:
                 rendered += (
                     f", slots_per_worker={plan.task_slots_per_worker}, "
                     f"task_capacity={plan.concurrent_task_capacity}, "

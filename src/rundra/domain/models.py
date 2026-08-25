@@ -263,9 +263,10 @@ class Target:
                 raise TypeError(f"Target {field_name} must be a BackendConfig")
         if not isinstance(self.workspace, PurePath):
             raise TypeError("Target workspace must be a PurePath")
-        if self.execution_storage is not None and type(
-            self.execution_storage
-        ) is not SlurmScratchPolicy:
+        if (
+            self.execution_storage is not None
+            and type(self.execution_storage) is not SlurmScratchPolicy
+        ):
             raise TypeError(
                 "Target execution_storage must be a SlurmScratchPolicy or None"
             )

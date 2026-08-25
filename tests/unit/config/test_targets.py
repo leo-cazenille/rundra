@@ -106,7 +106,24 @@ targets:
     staging: {type: rsync}
     container: {type: apptainer}
     workspace: /home/tester/.rundra
-    execution: {}
+    execution:
+      hard_task_limit: 100
+      confirmation_threshold: 100
+      max_active_tasks: 4
+      max_concurrent_jobs: 2
+      max_array_size: 100
+      output_shard_tasks: 10
+      automatic_retrieval_threshold: 100
+      max_memory_per_worker: 1GiB
+      worker_pool:
+        activation_threshold: 10
+        default_workers: 1
+        max_workers: 2
+        default_task_slots_per_worker: 1
+        max_task_slots_per_worker: 2
+        tasks_per_lease: 10
+        infrastructure_retry_limit: 1
+        requeue_limit: 1
     execution_storage:
       type: slurm_scratch
       cpu_environment: SLURM_TMPDIR
