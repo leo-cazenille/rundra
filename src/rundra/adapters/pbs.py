@@ -579,7 +579,10 @@ class OpenPBSScheduler:
         return tuple(
             self._with_logs(
                 SchedulerObservation(
-                    reference, ExecutionState.CANCELLED, "DELETION_REQUESTED"
+                    reference,
+                    ExecutionState.CANCELLED,
+                    "DELETION_REQUESTED",
+                    metadata={"cancellation_acknowledged": True},
                 )
             )
             for reference in normalized

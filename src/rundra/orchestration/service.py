@@ -503,7 +503,7 @@ class SchedulerLifecycleService:
             )
             if not references:
                 raise ValueError("Run has no scheduler root job IDs")
-            self._scheduler.cancel(references)
+            cancellation_observations = self._scheduler.cancel(references)
         except RunStoreError:
             raise
         except Exception as error:
@@ -512,6 +512,35 @@ class SchedulerLifecycleService:
                 message=f"Run {record.run.id} cancellation failed: {error}",
                 run_id=record.run.id,
             ) from error
+        cancellation_acknowledged = bool(cancellation_observations) and all(
+            observation.state is ExecutionState.CANCELLED
+            and observation.metadata.get("cancellation_acknowledged") is True
+            for observation in cancellation_observations
+        )
+        if cancellation_acknowledged and record.run.tasks and not record.is_compact:
+            tasks = tuple(
+                task
+                if task.state in _TERMINAL_STATES
+                else replace(task, state=ExecutionState.CANCELLED)
+                for task in record.run.tasks
+            )
+            native_states = dict(record.task_native_states)
+            for task in tasks:
+                if task.state is ExecutionState.CANCELLED:
+                    native_states[task.id] = "CANCELLATION_ACKNOWLEDGED"
+            updated = replace(
+                record,
+                run=replace(
+                    record.run,
+                    tasks=tasks,
+                    state=ExecutionState.CANCELLED,
+                ),
+                task_native_states=native_states,
+                completed_at=self._clock(),
+                native_state="CANCELLATION_ACKNOWLEDGED",
+            )
+            self._store.update(updated, expected=record)
+            return updated
         return self.wait(record, timeout=timeout, poll_interval=poll_interval)
 
     def _cancel_preparation(self, record: RunRecord) -> RunRecord:

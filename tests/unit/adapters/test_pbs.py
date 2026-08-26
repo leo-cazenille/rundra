@@ -230,3 +230,4 @@ def test_cancel_returns_durable_deletion_request() -> None:
 
     assert observation.state is ExecutionState.CANCELLED
     assert observation.native_state == "DELETION_REQUESTED"
+    assert observation.metadata == {"cancellation_acknowledged": True}

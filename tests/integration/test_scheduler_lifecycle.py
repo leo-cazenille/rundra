@@ -835,6 +835,50 @@ def test_array_cancel_reconciles_first_and_cancels_scheduler_roots(
     assert repeated == cancelled
 
 
+def test_array_cancel_preserves_acknowledged_root_cancellation_after_task_race(
+    tmp_path: Path,
+) -> None:
+    record = _array_record()
+    store = JsonRunStore(tmp_path / "records")
+    store.create(record)
+
+    class AcknowledgedCancellationScheduler:
+        def submit(self, group: SchedulerGroup) -> SchedulerSubmission:
+            raise AssertionError("lifecycle reconciliation must not submit")
+
+        def query(
+            self, references: tuple[SchedulerReference, ...]
+        ) -> tuple[SchedulerObservation, ...]:
+            raise AssertionError(
+                "acknowledged cancellation must not be reclassified from history"
+            )
+
+        def cancel(
+            self, references: tuple[SchedulerReference, ...]
+        ) -> tuple[SchedulerObservation, ...]:
+            return tuple(
+                SchedulerObservation(
+                    reference,
+                    ExecutionState.CANCELLED,
+                    "DELETION_REQUESTED",
+                    metadata={"cancellation_acknowledged": True},
+                )
+                for reference in references
+            )
+
+    cancelled = SchedulerLifecycleService(
+        store=store,
+        scheduler=AcknowledgedCancellationScheduler(),
+        clock=lambda: _CREATED + timedelta(seconds=4),
+        sleeper=lambda delay: None,
+    ).cancel(record, poll_interval=0.01)
+
+    assert cancelled.run.state is ExecutionState.CANCELLED
+    assert {task.state for task in cancelled.run.tasks} == {ExecutionState.CANCELLED}
+    assert cancelled.native_state == "CANCELLATION_ACKNOWLEDGED"
+    assert store.load(record.run.id) == cancelled
+
+
 def test_logs_use_normalized_artifacts_without_exposing_slurm_filenames(
     tmp_path: Path,
 ) -> None:
