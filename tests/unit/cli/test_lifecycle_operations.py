@@ -652,6 +652,69 @@ def test_compact_shard_fetch_ingests_all_tasks_without_materializing_selection(
     assert task_store.counts(record.run.id).retrieval[RetrievalState.SUCCEEDED] == 2
 
 
+def test_compact_shard_fetch_retries_eventually_visible_complete_coverage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from rundra.orchestration.workers import TaskOutcome, WorkerLease, seal_output_shard
+
+    space = TaskSpace(1, SeedRange(0, 1))
+    record = replace(
+        _v4_record(),
+        task_space=space,
+        scheduler_metadata={"result_shards": True},
+    )
+    shard_artifacts: list[tuple[Artifact, Artifact]] = []
+    shard_root = tmp_path / "fetched/output/.rundra-shards"
+    for ordinal in range(2):
+        source = tmp_path / f"source-{ordinal}"
+        task_root = source / str(TaskId.from_ordinal(ordinal))
+        task_root.mkdir(parents=True)
+        (task_root / "result.txt").write_text(str(ordinal), encoding="utf-8")
+        shard = seal_output_shard(
+            source,
+            shard_root,
+            WorkerLease(ordinal, ordinal, ordinal + 1),
+            (TaskOutcome(space.coordinate(ordinal), 0),),
+        )
+        checksum = Path(f"{shard.path}.sha256")
+        checksum.write_text(f"{shard.sha256}  {shard.path.name}\n", encoding="ascii")
+        shard_artifacts.append(
+            (
+                Artifact(ArtifactKind.RAW_RESULT, shard.path),
+                Artifact(ArtifactKind.RAW_RESULT, checksum),
+            )
+        )
+
+    class EventuallyVisibleShardStager:
+        calls = 0
+
+        def fetch(self, request: FetchRequest) -> FetchResult:
+            artifacts = shard_artifacts[self.calls]
+            self.calls += 1
+            return FetchResult(artifacts)
+
+    stager = EventuallyVisibleShardStager()
+    monkeypatch.setattr(operations, "sleep", lambda _delay: None)
+
+    artifacts, rows = operations._fetch_complete_compact_shards(
+        record,
+        stager,  # type: ignore[arg-type]
+        operations._record_workspace(record),
+        tmp_path / "fetched",
+        mode="archive",
+        selected=(),
+        select_all=True,
+        task_total=2,
+    )
+
+    assert stager.calls == 2
+    assert len(artifacts) == 4
+    assert {task_id for _name, codes in rows for task_id in codes} == {
+        TaskId.from_ordinal(0),
+        TaskId.from_ordinal(1),
+    }
+
+
 def test_concurrent_fetches_are_idempotent_and_preserve_one_artifact(
     tmp_path: Path,
 ) -> None:

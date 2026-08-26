@@ -133,6 +133,7 @@ from rundra.scheduler_registry import (
 )
 from rundra.schema_versions import RUN_LIST_SCHEMA, STATUS_SCHEMA, TASKS_SCHEMA
 
+_SHARD_VISIBILITY_ATTEMPTS = 5
 _DEFAULT_PREPARATION_STORAGE = PreparationStorageConfig()
 LAST_RUN_SELECTOR = "__rundra_last_run__"
 _COMPACT_EXECUTION_THRESHOLD = 1000
@@ -3490,20 +3491,15 @@ def _fetch_compact_shards_locked(
     workspace = _record_workspace(record)
     try:
         active_stager = stager or _record_stager(record)
-        fetched = active_stager.fetch(
-            FetchRequest(
-                workspace,
-                (".rundra-shards/*.tar", ".rundra-shards/*.sha256"),
-                destination,
-                mode,
-            )
-        )
-        artifacts = _selected_fetch_artifacts(record, selected, fetched.artifacts)
-        shard_paths = tuple(
-            Path(artifact.path)
-            for artifact in artifacts
-            if artifact.kind is ArtifactKind.OUTPUT_SHARD
-            and str(artifact.path).endswith(".tar")
+        artifacts, shard_rows = _fetch_complete_compact_shards(
+            record,
+            active_stager,
+            workspace,
+            destination,
+            mode=mode,
+            selected=selected,
+            select_all=select_all,
+            task_total=task_total,
         )
         if extract:
             artifacts = (
@@ -3515,16 +3511,11 @@ def _fetch_compact_shards_locked(
                     None if select_all else selected,
                 ),
             )
-        if shard_paths:
-            task_store.ingest_result_shards(
-                record.run.id,
-                _verified_shard_rows(record, shard_paths),
-                selected=None if select_all else selected,
-            )
-        elif select_all:
-            task_store.set_all_retrieval(record.run.id, RetrievalState.SUCCEEDED)
-        else:
-            task_store.set_retrieval(record.run.id, selected, RetrievalState.SUCCEEDED)
+        task_store.ingest_result_shards(
+            record.run.id,
+            shard_rows,
+            selected=None if select_all else selected,
+        )
     except (OSError, RuntimeError, ValueError) as error:
         try:
             if select_all:
@@ -3582,6 +3573,63 @@ def _fetch_compact_shards_locked(
             format_version=record.format_version,
         ),
     )
+
+
+def _fetch_complete_compact_shards(
+    record: RunRecord,
+    stager: Stager,
+    workspace: StagedWorkspace,
+    destination: Path,
+    *,
+    mode: str,
+    selected: tuple[TaskId, ...],
+    select_all: bool,
+    task_total: int,
+) -> tuple[tuple[Artifact, ...], tuple[tuple[str, Mapping[TaskId, int]], ...]]:
+    artifacts: tuple[Artifact, ...] = ()
+    for attempt in range(_SHARD_VISIBILITY_ATTEMPTS):
+        fetched = stager.fetch(
+            FetchRequest(
+                workspace,
+                (".rundra-shards/*.tar", ".rundra-shards/*.sha256"),
+                destination,
+                mode,
+            )
+        )
+        artifacts = _merge_artifacts(
+            artifacts,
+            _selected_fetch_artifacts(record, selected, fetched.artifacts),
+        )
+        shard_paths = tuple(
+            Path(artifact.path)
+            for artifact in artifacts
+            if artifact.kind is ArtifactKind.OUTPUT_SHARD
+            and str(artifact.path).endswith(".tar")
+        )
+        rows = tuple(_verified_shard_rows(record, shard_paths))
+        covered: set[TaskId] = set()
+        for _name, task_exit_codes in rows:
+            overlap = covered.intersection(task_exit_codes)
+            if overlap:
+                raise ValueError(
+                    "Result shards contain duplicate Task "
+                    f"{min(str(task_id) for task_id in overlap)}"
+                )
+            covered.update(task_exit_codes)
+        complete = (
+            len(covered) == task_total
+            if select_all
+            else set(selected).issubset(covered)
+        )
+        if complete:
+            return artifacts, rows
+        if attempt + 1 < _SHARD_VISIBILITY_ATTEMPTS:
+            sleep(0.25 * (2**attempt))
+            continue
+        raise ValueError(
+            f"Result shards cover {len(covered)} of {task_total} requested Tasks"
+        )
+    raise AssertionError("compact shard visibility attempts must be positive")
 
 
 def _compact_retrieval_state(
