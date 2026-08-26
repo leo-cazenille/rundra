@@ -1501,6 +1501,62 @@ def test_slurm_query_combines_queue_and_accounting_in_request_order() -> None:
     assert transport.run_calls == [squeue_command, sacct_command]
 
 
+@pytest.mark.parametrize(
+    ("native_state", "exit_code", "expected"),
+    [
+        ("COMPLETED", "0:0", ExecutionState.SUCCEEDED),
+        ("FAILED", "127:0", ExecutionState.FAILED),
+        ("CANCELLED", "0:0", ExecutionState.CANCELLED),
+    ],
+)
+def test_slurm_query_uses_accounting_when_terminal_job_is_absent_from_queue(
+    native_state: str,
+    exit_code: str,
+    expected: ExecutionState,
+) -> None:
+    reference = SchedulerReference("2774")
+    transport = ScriptedTransport(
+        deque(
+            (
+                _command_result(
+                    Command(("unused",)),
+                    1,
+                    "",
+                    "slurm_load_jobs error: Invalid job id specified",
+                ),
+                _command_result(
+                    Command(("unused",)),
+                    0,
+                    f"2774|{native_state}|{exit_code}|2026-08-26T05:33:49|"
+                    "2026-08-26T05:33:54|node04|\n",
+                ),
+            )
+        )
+    )
+
+    observation = SlurmScheduler(transport, timezone=UTC).query((reference,))[0]
+
+    assert observation.state is expected
+    assert observation.native_state == native_state
+    assert observation.metadata["source"] == "sacct"
+
+
+def test_slurm_query_requires_authoritative_fallback_after_queue_failure() -> None:
+    reference = SchedulerReference("2774")
+    transport = ScriptedTransport(
+        deque(
+            (
+                _command_result(Command(("unused",)), 1, "", "invalid job id"),
+                _command_result(Command(("unused",)), 0, ""),
+                _command_result(Command(("unused",)), 1, "", "invalid job id"),
+            )
+        )
+    )
+
+    with pytest.raises(SlurmQueryError, match="sacct did not resolve"):
+        SlurmScheduler(transport).query((reference,))
+
+
 def test_slurm_query_reconciles_array_elements_independently() -> None:
     first = SchedulerReference("123_0")
     second = SchedulerReference("123_1")

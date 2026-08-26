@@ -969,21 +969,27 @@ class SlurmScheduler:
         self, normalized: tuple[SchedulerReference, ...]
     ) -> dict[SchedulerReference, SchedulerObservation]:
         joined = ",".join(reference.native_id for reference in normalized)
-        queued = self._run_query(
-            Command(
-                (
-                    self._squeue,
-                    "--noheader",
-                    "--array",
-                    "--jobs",
-                    joined,
-                    "--format",
-                    "%i|%T|%S|%N",
-                )
-            ),
-            source="squeue",
-        )
-        observations = _parse_squeue(queued.stdout, normalized, self._timezone)
+        queue_error: SlurmQueryError | None = None
+        try:
+            queued = self._run_query(
+                Command(
+                    (
+                        self._squeue,
+                        "--noheader",
+                        "--array",
+                        "--jobs",
+                        joined,
+                        "--format",
+                        "%i|%T|%S|%N",
+                    )
+                ),
+                source="squeue",
+            )
+        except SlurmQueryError as error:
+            queue_error = error
+            observations: dict[SchedulerReference, SchedulerObservation] = {}
+        else:
+            observations = _parse_squeue(queued.stdout, normalized, self._timezone)
         missing = tuple(
             reference for reference in normalized if reference not in observations
         )
@@ -1009,13 +1015,28 @@ class SlurmScheduler:
                 try:
                     observations.update(self._query_scontrol(missing))
                 except SlurmQueryError as fallback_error:
+                    queue_context = (
+                        f"{queue_error}; " if queue_error is not None else ""
+                    )
                     raise SlurmQueryError(
-                        f"{accounting_error}; scontrol fallback failed: {fallback_error}"
+                        f"{queue_context}{accounting_error}; "
+                        f"scontrol fallback failed: {fallback_error}"
                     ) from fallback_error
             else:
                 observations.update(
                     _parse_sacct(accounting.stdout, missing, self._timezone)
                 )
+                unresolved = tuple(
+                    reference for reference in missing if reference not in observations
+                )
+                if queue_error is not None and unresolved:
+                    try:
+                        observations.update(self._query_scontrol(unresolved))
+                    except SlurmQueryError as fallback_error:
+                        raise SlurmQueryError(
+                            f"{queue_error}; sacct did not resolve all requested jobs; "
+                            f"scontrol fallback failed: {fallback_error}"
+                        ) from fallback_error
         return {
             reference: self._with_log_metadata(
                 observations.get(
