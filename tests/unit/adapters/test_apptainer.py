@@ -110,13 +110,12 @@ def test_apptainer_runtime_adds_gpu_binds_and_container_working_directory() -> N
         "singularity",
         "exec",
         "--cleanenv",
-        "--no-eval",
         "--nv",
         "--bind",
         "/runs/one/source:/workspace/source:ro",
         "--bind",
         "/runs/one/output:/workspace/output:rw",
-        "--cwd",
+        "--pwd",
         "/workspace/runtime",
         "/images/project image.sif",
         "python",
@@ -155,6 +154,7 @@ def test_singularity_compatibility_uses_its_native_environment_prefix() -> None:
     command = ApptainerRuntime(executable="/opt/bin/singularity").build_command(request)
 
     assert command.environment == {"SINGULARITYENV_MODE": "test"}
+    assert "--no-eval" not in command.argv
 
 
 @pytest.mark.parametrize("name", ["BAD-NAME", "1INVALID", "PREPEND_PATH"])

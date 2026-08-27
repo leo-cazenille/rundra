@@ -107,12 +107,10 @@ class ApptainerRuntime:
         for bind in request.binds:
             _validate_bind(bind)
 
-        argv: list[str] = [
-            self._executable,
-            "exec",
-            "--cleanenv",
-            "--no-eval",
-        ]
+        singularity_compatible = PurePath(self._executable).name == "singularity"
+        argv: list[str] = [self._executable, "exec", "--cleanenv"]
+        if not singularity_compatible:
+            argv.append("--no-eval")
         if request.gpu:
             argv.append("--nv")
         for bind in request.binds:
@@ -124,13 +122,16 @@ class ApptainerRuntime:
                 )
             )
         if request.command.working_directory is not None:
-            argv.extend(("--cwd", str(request.command.working_directory)))
+            argv.extend(
+                (
+                    "--pwd" if singularity_compatible else "--cwd",
+                    str(request.command.working_directory),
+                )
+            )
         argv.append(image)
         argv.extend(request.command.argv)
         environment_prefix = (
-            "SINGULARITYENV_"
-            if PurePath(self._executable).name == "singularity"
-            else "APPTAINERENV_"
+            "SINGULARITYENV_" if singularity_compatible else "APPTAINERENV_"
         )
         environment = {
             f"{environment_prefix}{name}": value

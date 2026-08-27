@@ -484,6 +484,8 @@ def test_remote_preparation_script_builds_and_reuses_target_cache(
     assert "SLURM_TMPDIR is required by target policy" in scratch_command.argv[2]
     assert "singularity exec" in command.argv[-1]
     assert "apptainer exec" not in command.argv[-1]
+    assert "--no-eval" not in command.argv[-1]
+    assert "--pwd /workspace" in command.argv[-1]
     assert "$rundra_run_root/source" in scratch_command.argv[4]
     assert 'mktemp -d "$rundra_scratch/build.XXXXXX"' in scratch_command.argv[4]
 

@@ -722,17 +722,12 @@ def build_remote_preparation_command(
                 '  chmod -R u+w -- "$work"',
                 "  "
                 + shlex.join(
-                    (
+                    _container_exec_argv(
                         spec.apptainer_executable,
-                        "exec",
-                        "--cleanenv",
-                        "--no-eval",
-                        "--bind",
                         "$work:/workspace:rw",
-                        "--cwd",
                         "/workspace",
                         "$image",
-                        *build.argv,
+                        build.argv,
                     )
                 )
                 .replace("'$work:/workspace:rw'", '"$work:/workspace:rw"')
@@ -1028,17 +1023,12 @@ def _remote_definition_application_lines(
         '  chmod -R u+w -- "$work"',
         "  "
         + shlex.join(
-            (
+            _container_exec_argv(
                 spec.apptainer_executable,
-                "exec",
-                "--cleanenv",
-                "--no-eval",
-                "--bind",
                 "$work:/workspace:rw",
-                "--cwd",
                 "/workspace",
                 "$image",
-                *build.argv,
+                build.argv,
             )
         )
         .replace("'$work:/workspace:rw'", '"$work:/workspace:rw"')
@@ -1710,17 +1700,12 @@ def _resolve_build(
             shutil.copytree(snapshot, work, symlinks=False)
             _make_writable(work)
             completed = subprocess.run(
-                (
+                _container_exec_argv(
                     apptainer_executable,
-                    "exec",
-                    "--cleanenv",
-                    "--no-eval",
-                    "--bind",
                     f"{work}:/workspace:rw",
-                    "--cwd",
                     "/workspace",
                     str(image),
-                    *build.argv,
+                    build.argv,
                 ),
                 check=False,
                 stdin=subprocess.DEVNULL,
@@ -1744,12 +1729,34 @@ def _resolve_build(
                 _make_writable(entry)
                 shutil.rmtree(entry)
             _publish_directory(temporary_entry, entry)
+            return (
+                prepared,
+                key,
+                outputs,
+                (stdout_path, stderr_path),
+                "build_and_publish",
+            )
+
+
+def _container_exec_argv(
+    executable: str,
+    bind: str,
+    working_directory: str,
+    image: str,
+    payload: tuple[str, ...],
+) -> tuple[str, ...]:
+    singularity_compatible = PurePath(executable).name == "singularity"
     return (
-        prepared,
-        key,
-        outputs,
-        (stdout_path, stderr_path),
-        "build_and_publish",
+        executable,
+        "exec",
+        "--cleanenv",
+        *(() if singularity_compatible else ("--no-eval",)),
+        "--bind",
+        bind,
+        "--pwd" if singularity_compatible else "--cwd",
+        working_directory,
+        image,
+        *payload,
     )
 
 
