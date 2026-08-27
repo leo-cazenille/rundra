@@ -883,7 +883,17 @@ if [ "$rundra_status" -eq 0 ]; then
   chmod -R u+w -- "$2/source"
   rm -rf -- "$2/source"
   mv -- "$rundra_source_tmp" "$2/source"
-  cp -a -- "$rundra_run_root/metadata"/. "$2/metadata"/
+  for rundra_metadata_name in preparation-actions.tsv preparation-image.tsv preparation-build.txt preparation-outputs.tsv; do
+    rundra_metadata="$rundra_run_root/metadata/$rundra_metadata_name"
+    [ ! -e "$rundra_metadata" ] || { [ -f "$rundra_metadata" ] && [ ! -L "$rundra_metadata" ]; } || { printf '%s\n' 'unsafe preparation metadata' >&2; exit 72; }
+    if [ -f "$rundra_metadata" ]; then
+      rundra_metadata_tmp="$2/metadata/.$rundra_metadata_name.scratch-${SLURM_JOB_ID}"
+      rm -f -- "$rundra_metadata_tmp"
+      cp -- "$rundra_metadata" "$rundra_metadata_tmp"
+      chmod a-w -- "$rundra_metadata_tmp"
+      mv -- "$rundra_metadata_tmp" "$2/metadata/$rundra_metadata_name"
+    fi
+  done
 fi
 exit "$rundra_status"
 """
