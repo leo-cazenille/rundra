@@ -840,6 +840,12 @@ route policy and effective native partition are retained as provenance. M32
 does not implement usage budgets, dynamic queue selection, or multi-target
 placement.
 
+Target version 11 may set `container.executable` for the `apptainer` backend to
+one safe executable argument. The default remains `apptainer`; `singularity`
+selects a site-provided Singularity CE compatibility runtime. Capability
+checks, runtime identity, scientific execution, image pulls, definition builds,
+and application compilation must all use the configured executable.
+
 Large parameter/seed products use an inclusive arithmetic seed range and a
 constant-size TaskSpace. Ordinals are parameter-major and seed-minor; the Task
 at ordinal `p * seed_count + s` has parameter-set ordinal `p`, seed ordinal `s`,

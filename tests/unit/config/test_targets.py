@@ -168,7 +168,7 @@ targets:
           resource_class: gpu
           max_walltime: "24:00:00"
     staging: {type: rsync}
-    container: {type: apptainer}
+    container: {type: apptainer, executable: singularity}
     workspace: /home/tester/.rundra
     execution:
       hard_task_limit: 100
@@ -199,6 +199,31 @@ targets:
     assert policy is not None
     assert tuple(route.name for route in policy.routes) == ("cpu_short", "gpu_day")
     assert policy.routes[0].max_walltime == timedelta(hours=1)
+    assert config.targets["cluster"].container.options == {"executable": "singularity"}
+
+
+def test_version_eleven_rejects_unsafe_container_executable(tmp_path: Path) -> None:
+    from rundra.config.errors import ConfigError
+    from rundra.config.targets import load_targets_config
+
+    source = tmp_path / "targets.yaml"
+    source.write_text(
+        """\
+version: 11
+targets:
+  cluster:
+    transport: {type: ssh, host: cluster}
+    scheduler: {type: slurm}
+    staging: {type: rsync}
+    container: {type: apptainer, executable: "singularity --quiet"}
+    workspace: /home/tester/.rundra
+    execution: {}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="one safe argument"):
+        load_targets_config(source)
 
 
 def test_version_eleven_rejects_duplicate_partitions(tmp_path: Path) -> None:

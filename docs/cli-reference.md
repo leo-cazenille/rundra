@@ -268,6 +268,12 @@ must declare walltime. `plan` selects the shortest compatible route offline and
 reports the effective `native_options.slurm.partition`; undeclared explicit
 partitions are rejected rather than treated as overrides.
 
+Target v11 may also select the site-provided name of an Apptainer-compatible
+runtime. Use `container: {type: apptainer, executable: singularity}` for sites
+that expose Singularity CE instead of the `apptainer` command. The value is one
+executable argument, not a command line, and applies consistently to diagnosis,
+execution, image acquisition, definition builds, and application compilation.
+
 `doctor --connect --scheduler-inventory --json` queries partition metadata
 without submitting a job. It is intended for operator onboarding and route
 validation. `--scheduler-probe` remains a separate, explicitly resource-

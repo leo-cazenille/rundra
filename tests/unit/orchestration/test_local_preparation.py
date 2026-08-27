@@ -444,7 +444,7 @@ def test_remote_preparation_script_builds_and_reuses_target_cache(
         transport=target.transport,
         scheduler=target.scheduler,
         staging=target.staging,
-        container=target.container,
+        container=BackendConfig("apptainer", {"executable": "singularity"}),
         workspace=tmp_path / "remote",
     )
     prepared_source = PreparedSource(source, "34" * 32, "snapshot", "working-tree")
@@ -474,7 +474,7 @@ def test_remote_preparation_script_builds_and_reuses_target_cache(
     workspace.metadata.mkdir()
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
-    _fake_apptainer(fake_bin).rename(fake_bin / "apptainer")
+    _fake_apptainer(fake_bin).rename(fake_bin / "singularity")
     monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ['PATH']}")
     command = build_remote_preparation_command(spec, workspace)
     scratch_command = build_remote_preparation_command(
@@ -482,6 +482,8 @@ def test_remote_preparation_script_builds_and_reuses_target_cache(
     )
 
     assert "SLURM_TMPDIR is required by target policy" in scratch_command.argv[2]
+    assert "singularity exec" in command.argv[-1]
+    assert "apptainer exec" not in command.argv[-1]
     assert "$rundra_run_root/source" in scratch_command.argv[4]
     assert 'mktemp -d "$rundra_scratch/build.XXXXXX"' in scratch_command.argv[4]
 

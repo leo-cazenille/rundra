@@ -755,18 +755,22 @@ def _backend_config(
             frozenset({"type", "host", "executable", "config_file"})
             if role == "transport"
             else (
-                frozenset({"type", "root"})
-                if role == "staging" and version >= 5
+                frozenset({"type", "executable"})
+                if role == "container" and version >= 11
                 else (
-                    frozenset(
-                        {
-                            "type",
-                            "shared_workspace",
-                            *(("partition_routes",) if version >= 11 else ()),
-                        }
+                    frozenset({"type", "root"})
+                    if role == "staging" and version >= 5
+                    else (
+                        frozenset(
+                            {
+                                "type",
+                                "shared_workspace",
+                                *(("partition_routes",) if version >= 11 else ()),
+                            }
+                        )
+                        if role == "scheduler" and version >= 9
+                        else frozenset({"type"})
                     )
-                    if role == "scheduler" and version >= 9
-                    else frozenset({"type"})
                 )
             )
         ),
@@ -868,6 +872,24 @@ def _backend_config(
                     message="SSH config_file must be an absolute non-root path",
                 )
             options["config_file"] = config_file
+    elif role == "container" and kind == "apptainer":
+        if "executable" in section:
+            executable = expect_string(
+                section["executable"],
+                source=source,
+                path=(*path, "executable"),
+                nonblank=True,
+            )
+            if "\x00" in executable or any(
+                character.isspace() for character in executable
+            ):
+                fail(
+                    source=source,
+                    path=(*path, "executable"),
+                    code="INVALID_VALUE",
+                    message="Container executable must be one safe argument",
+                )
+            options["executable"] = executable
     elif role == "staging" and kind == "shared":
         if "root" not in section:
             fail(
@@ -907,6 +929,6 @@ def _backend_config(
             source=source,
             path=(*path, field),
             code="UNKNOWN_FIELD",
-            message=f"Field '{field}' is only valid for SSH transport",
+            message=f"Field '{field}' is not valid for {kind} {role}",
         )
     return BackendConfig(kind=kind, options=options)

@@ -95,6 +95,7 @@ class RemotePreparationSpec:
     source_identity: str
     platform_fingerprint: str
     build_key: str | None
+    apptainer_executable: str = "apptainer"
     index_key: str | None = None
     target_cache_root: PurePath | None = None
     image_search_paths: tuple[PurePath, ...] = ()
@@ -297,9 +298,11 @@ def remote_platform_fingerprint(transport: Transport) -> str:
     return hashlib.sha256(result.stdout.strip().encode("utf-8")).hexdigest()
 
 
-def remote_builder_version(transport: Transport) -> str:
+def remote_builder_version(
+    transport: Transport, apptainer_executable: str = "apptainer"
+) -> str:
     """Read the target Apptainer version without performing a build."""
-    result = transport.run(Command(("apptainer", "version")))
+    result = transport.run(Command((apptainer_executable, "version")))
     value = result.stdout.strip() or result.stderr.strip()
     if result.exit_code != 0 or not value:
         raise PreparationError("Could not determine target Apptainer builder version")
@@ -548,6 +551,9 @@ def create_remote_preparation_spec(
         source_identity=source.identity,
         platform_fingerprint=platform_fingerprint,
         build_key=key,
+        apptainer_executable=str(
+            target.container.options.get("executable", "apptainer")
+        ),
         index_key=(
             None
             if build is None or type(image) is PreparationImageDefinition
@@ -631,6 +637,7 @@ def build_remote_preparation_command(
     target_cache = spec.target_cache_root or workspace.root.parent.parent / "cache"
     image = target_cache / "images" / f"{image_recipe.sha256}.sif"
     image_lock = target_cache / "locks" / f"image-{image_recipe.sha256}.lock"
+    runtime = shlex.quote(spec.apptainer_executable)
     lines = [
         "set -eu",
         "umask 077",
@@ -680,7 +687,7 @@ def build_remote_preparation_command(
                 '  image_tmp_dir=$(mktemp -d "$cache/images/.pull.XXXXXX")',
                 '  image_tmp="$image_tmp_dir/image.sif"',
                 '  trap \'rm -rf -- "$image_tmp_dir"; rmdir -- "$image_lock" 2>/dev/null || :\' EXIT HUP INT TERM',
-                f'  apptainer pull --disable-cache "$image_tmp" {shlex.quote(image_recipe.uri)}',
+                f'  {runtime} pull --disable-cache "$image_tmp" {shlex.quote(image_recipe.uri)}',
                 "  actual=$(sha256sum -- \"$image_tmp\" | cut -d' ' -f1)",
                 f"  [ \"$actual\" = {shlex.quote(image_recipe.sha256)} ] || {{ printf '%s\\n' 'pulled image digest mismatch' >&2; exit 65; }}",
                 '  chmod a-w -- "$image_tmp"',
@@ -716,7 +723,7 @@ def build_remote_preparation_command(
                 "  "
                 + shlex.join(
                     (
-                        "apptainer",
+                        spec.apptainer_executable,
                         "exec",
                         "--cleanenv",
                         "--no-eval",
@@ -936,7 +943,7 @@ def _build_remote_definition_command(
             "  printf '%s\\n' 'definition image unavailable in offline mode' >&2; exit 69"
         )
     else:
-        build_args = ["apptainer", "build", "--disable-cache"]
+        build_args = [spec.apptainer_executable, "build", "--disable-cache"]
         if policy.mode == "fakeroot":
             build_args.append("--fakeroot")
         else:
@@ -1022,7 +1029,7 @@ def _remote_definition_application_lines(
         "  "
         + shlex.join(
             (
-                "apptainer",
+                spec.apptainer_executable,
                 "exec",
                 "--cleanenv",
                 "--no-eval",

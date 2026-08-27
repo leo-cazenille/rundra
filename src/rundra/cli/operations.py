@@ -1482,7 +1482,10 @@ def _remote_preparation_inputs(
         image_search_paths=target_storage.image_search_paths,
         definition_build=target_storage.definition_build,
         builder_version=(
-            remote_builder_version(transport)
+            remote_builder_version(
+                transport,
+                str(target.container.options.get("executable", "apptainer")),
+            )
             if type(image) is PreparationImageDefinition
             else None
         ),
@@ -4278,10 +4281,13 @@ def _unsupported_execution_target(
 def _execution_adapters(
     target: Target,
 ) -> tuple[Transport, Stager, ContainerRuntime, Scheduler]:
+    container_executable = _target_container_executable(target)
     if target.transport.kind == "local":
         transport = LocalTransport()
         runtime: ContainerRuntime = (
-            NativeRuntime() if target.container.kind == "native" else ApptainerRuntime()
+            NativeRuntime()
+            if target.container.kind == "native"
+            else ApptainerRuntime(container_executable)
         )
         return transport, LocalStager(), runtime, LocalScheduler(transport)
     host = target.transport.options.get("host")
@@ -4312,7 +4318,7 @@ def _execution_adapters(
     return (
         remote_transport,
         stager,
-        RemoteApptainerRuntime(remote_transport),
+        RemoteApptainerRuntime(remote_transport, container_executable),
         scheduler,
     )
 
@@ -4342,6 +4348,13 @@ def _target_ssh_selection(target: Target) -> tuple[str, PurePath | None]:
     if config_file is not None and type(config_file) is not str:
         raise ValueError("SSH target config_file is invalid")
     return executable, None if config_file is None else PurePath(config_file)
+
+
+def _target_container_executable(target: Target) -> str:
+    executable = target.container.options.get("executable", "apptainer")
+    if type(executable) is not str:
+        raise ValueError("Container target executable is invalid")
+    return executable
 
 
 def _read_remote_log(transport: Transport, path: PurePath) -> str:

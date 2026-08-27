@@ -87,10 +87,19 @@ def doctor_operation(
         executable = str(target.transport.options.get("executable", "ssh"))
         config_value = target.transport.options.get("config_file")
         config_file = None if config_value is None else Path(str(config_value))
+        container_executable = str(
+            target.container.options.get("executable", "apptainer")
+        )
         checks.extend(_ssh_static_checks(host, executable, config_file))
         if connect:
             checks.append(
-                _ssh_connect_check(host, executable, config_file, target.scheduler.kind)
+                _ssh_connect_check(
+                    host,
+                    executable,
+                    config_file,
+                    target.scheduler.kind,
+                    container_executable,
+                )
             )
     return OperationResult.success(
         "doctor", DoctorValue(source, target, tuple(checks), connect)
@@ -213,13 +222,17 @@ def _ssh_configuration_checks(
 
 
 def _ssh_connect_check(
-    host: str, executable: str, config_file: Path | None, scheduler: str
+    host: str,
+    executable: str,
+    config_file: Path | None,
+    scheduler: str,
+    container_executable: str,
 ) -> DoctorCheck:
     scheduler_tools = scheduler_required_tools(scheduler)
     tools = (
         "rsync",
         *scheduler_tools,
-        "apptainer",
+        container_executable,
         "base64",
         "gzip",
     )
