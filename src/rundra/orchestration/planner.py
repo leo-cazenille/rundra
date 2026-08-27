@@ -464,13 +464,14 @@ def create_sweep_plan(
             message="Sweep plans require parameterized effective configs",
         )
     _validate_placeholders(spec.command)
+    effective_resources, _ = route_scheduler_resources(spec.resources, target)
     units = tuple(
         ExecutionUnit(
             task_id=TaskId.from_ordinal(index),
             seed=seed,
             config=expanded_config.config,
             command=_render_command(spec.command, expanded_config.config, seed),
-            resources=spec.resources,
+            resources=effective_resources,
             parameter_set=expanded_config.parameter_set,
         )
         for index, (expanded_config, seed) in enumerate(
