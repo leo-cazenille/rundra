@@ -495,6 +495,42 @@ def test_failed_preparation_prevents_scientific_status_progression(tmp_path) -> 
     assert failed.preparation is not None
     assert failed.preparation.builder_status == "FAILED"
     assert scheduler.queried == [(SchedulerReference("900"),)]
+    assert scheduler.cancelled == [(_REFERENCE,)]
+
+
+def test_failed_preparation_remains_refreshable_when_dependency_cancel_fails(
+    tmp_path,
+) -> None:
+    record = _prepared_record()
+    store = JsonRunStore(tmp_path / "records")
+    store.create(record)
+    scheduler = PreparedLifecycleScheduler(
+        SchedulerObservation(
+            SchedulerReference("900"),
+            ExecutionState.FAILED,
+            "FAILED",
+            exit_code=2,
+        ),
+        _observation(ExecutionState.QUEUED, "PENDING"),
+    )
+
+    def reject_cancel(
+        references: tuple[SchedulerReference, ...],
+    ) -> tuple[SchedulerObservation, ...]:
+        scheduler.cancelled.append(references)
+        raise RuntimeError("scheduler unavailable")
+
+    scheduler.cancel = reject_cancel  # type: ignore[method-assign]
+
+    with pytest.raises(OrchestrationError) as caught:
+        SchedulerLifecycleService(store=store, scheduler=scheduler).refresh(record)
+
+    assert caught.value.code == "DEPENDENT_JOB_CANCEL_FAILED"
+    persisted = store.load(_RUN_ID)
+    assert persisted.run.state is ExecutionState.SUBMITTED
+    assert persisted.preparation is not None
+    assert persisted.preparation.builder_status == "SUBMITTED"
+    assert scheduler.cancelled == [(_REFERENCE,)]
 
 
 def test_queued_preparation_persists_as_submitted(tmp_path) -> None:

@@ -377,6 +377,21 @@ class SchedulerLifecycleService:
             ),
         )
         if observation.state in {ExecutionState.FAILED, ExecutionState.CANCELLED}:
+            dependent_references = tuple(
+                SchedulerReference(native_id) for native_id in record.scheduler_job_ids
+            )
+            if dependent_references:
+                try:
+                    self._scheduler.cancel(dependent_references)
+                except Exception as error:
+                    raise OrchestrationError(
+                        code="DEPENDENT_JOB_CANCEL_FAILED",
+                        message=(
+                            f"Run {record.run.id} preparation failed, but dependent "
+                            f"job cancellation failed: {error}"
+                        ),
+                        run_id=record.run.id,
+                    ) from error
             terminal_state = (
                 ExecutionState.CANCELLED
                 if observation.state is ExecutionState.CANCELLED
