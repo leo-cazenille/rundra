@@ -10,7 +10,7 @@ and result retrieval through one command-line interface.
 Rundra requires Python 3.12. Install the command as an isolated user tool:
 
 ```bash
-uv tool install rundra
+uv tool install --python 3.12 rundra
 rundr --version
 rundr help
 ```
@@ -18,7 +18,7 @@ rundr help
 Install the optional MCP interface with:
 
 ```bash
-uv tool install 'rundra[mcp]'
+uv tool install --python 3.12 'rundra[mcp]'
 rundr-mcp --help
 ```
 

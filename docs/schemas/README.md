@@ -11,11 +11,12 @@ positional, and option names; their semantics are in the
 [CLI reference](../cli-reference.md).
 
 Every CLI document has a `format_version`, an `operation` name, and an `ok`
-flag. Unprepared operations retain version 1; prepared plans and Runs use
-version 2; parameterized plans and Runs use version 3; compact TaskSpace
-documents use version 4. A successful document contains an operation-specific value. A
-failed document contains `error.code`, `error.message`, and `error.details`
-instead. Use the fields, not object-key order or human output, as the interface.
+flag. Schema versions are operation-specific: current maxima are plan v9,
+RunRecord v7, status/tasks/logs/inspect v6, doctor v3, target-list and Run-list
+v2, and await v1. A successful document contains an operation-specific value;
+a failed document contains `error.code`, `error.message`, and
+`error.details`. Use fields, not object-key order or human output, as the
+interface.
 
 ## Contract inventory
 
@@ -44,7 +45,8 @@ instead. Use the fields, not object-key order or human output, as the interface.
 | CLI usage failure | [`cli-usage-error-v1.json`](cli-usage-error-v1.json) | `CLI_USAGE_ERROR` |
 | persisted state | [`run-record-v1.json`](run-record-v1.json) | one complete unprepared RunRecord |
 | previous persisted state | [`run-record-v5.json`](run-record-v5.json) | canonical Run kind and retrieval destination |
-| current persisted state | [`run-record-v6.json`](run-record-v6.json) | typed fetch mode and verified preparation identity |
+| previous persisted state | [`run-record-v6.json`](run-record-v6.json) | typed fetch mode and verified preparation identity |
+| current routed persisted state | composed and contract-tested | RunRecord v7 with target-owned Slurm routing identity |
 
 Project-managed preparation uses format version 2. Version-2 plans and
 RunRecords add preparation source, image, build, cache, output-hash, and log
@@ -84,8 +86,9 @@ nullable preparation, and nullable compact-state fields. Materialized tasks
 always include a nullable `parameter_set`. This decouples durable schema
 evolution from plan, preparation, sweep, and compact-execution versions.
 
-Accepted Slurm worker-pool Runs at or above 1,000 Tasks now use this durable v4
-form automatically. The Run store permits only a validated one-way conversion:
+Accepted compact worker-pool Runs at or above 1,000 Tasks use the compact Run
+kind and Task-state sidecar automatically. The Run store permits only a
+validated one-way conversion from historical materialized records:
 Run identity, target, experiment, source/provenance, Task IDs, seed order, and
 current lifecycle state must remain identical. Scheduler manifest and recovery
 receipt generation are still transiently materialized and are not part of the
@@ -101,7 +104,12 @@ RunRecord version 6 makes `fetch_mode` a typed durable field and separates a
 definition image's deterministic recipe key from its measured SIF SHA-256.
 Pending target definition builds leave `container_digest` and `image_sha256`
 unavailable; successful preparation records the verified equal digest in both.
-Readers continue accepting versions 1 through 5 without rewriting them.
+Readers continue accepting versions 1 through 6 without rewriting them.
+
+RunRecord version 7 and plan version 9 preserve target-owned Slurm partition
+routing. Routed experiments record the selected partition and route identity
+without changing the portable experiment resource model. Version 7 otherwise
+retains the version-6 fetch and verified-preparation fields.
 
 For shell pipelines, use an available JSON parser rather than matching text:
 

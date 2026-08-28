@@ -2,6 +2,13 @@
 
 All notable user-visible changes are recorded here.
 
+## [Unreleased]
+
+### Changed
+
+- Human, agent, target, scheduler, schema, and release documentation now
+  reflects the current 0.1 command surface and backend capabilities.
+
 ## [0.1.6] - 2026-08-28
 
 ### Added

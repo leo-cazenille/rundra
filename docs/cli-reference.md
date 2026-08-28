@@ -188,10 +188,11 @@ scheduler identities before returning so later processes can operate by Run ID.
 ## Machine output and exits
 
 All programmatically useful commands support the checked versioned
-[JSON contracts](schemas/README.md). Unprepared projects continue emitting
-`format_version: 1`; prepared plans and RunRecords emit `format_version: 2`;
-parameterized plans and Runs emit `format_version: 3`. Compact TaskSpace plans,
-RunRecords, and `tasks` pages emit `format_version: 4`.
+[JSON contracts](schemas/README.md). Versions are operation-specific rather than
+one global CLI version. The current maxima are plan v9, RunRecord v7,
+status/tasks/logs/inspect v6, target-list and Run-list v2, doctor v3, and await
+v1. Consumers must branch on each document's `format_version`; older supported
+documents retain their original shape.
 JSON goes to stdout with an empty stderr. Human errors go to stderr. Both
 renderers consume the same operation result.
 
@@ -263,7 +264,7 @@ if the scheduler does not provide a safe writable directory. Run inspection
 records the policy under `scheduler_metadata` keys prefixed with
 `execution_storage.`; it does not retain the allocation's concrete path.
 
-`rundr targets --json`, `rundr doctor --json`, and plan format 8 expose the
+`rundr targets --json`, `rundr doctor --json`, and plan format 8 or later expose the
 selected scheduler's typed capabilities. These include arrays, dependencies,
 compact worker pools, scheduler-driven rerun recovery, and probes. Consult
 these flags instead of inferring features from a scheduler name. OpenPBS

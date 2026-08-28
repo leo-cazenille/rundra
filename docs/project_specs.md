@@ -892,7 +892,7 @@ Authentication should rely on external mechanisms such as:
 
 ## 11. Backend interfaces
 
-The initial architecture should keep four infrastructure concerns independent.
+The architecture keeps four infrastructure concerns independent.
 
 ---
 
@@ -904,7 +904,7 @@ Responsibilities:
 - test connectivity;
 - retrieve basic target capability information.
 
-Initial implementations:
+Implemented transports:
 
 - `LocalTransport`
 - `SSHTransport`
@@ -991,12 +991,14 @@ Responsibilities:
 - retrieve requested outputs;
 - support filesystem semantics of the target.
 
-Initial implementations:
+Implemented stagers:
 
 - `LocalStager`
 - `RsyncStager`
+- `SharedFilesystemStager`
 
-A `SharedFilesystemStager` may be introduced if it makes the shoal implementation clearer.
+Shared staging is valid only when the client and target genuinely see the same
+filesystem paths; Rundra verifies visibility rather than inferring it.
 
 ---
 
@@ -1010,7 +1012,7 @@ Responsibilities:
 - apply safe environment configuration;
 - perform basic runtime validation.
 
-Initial implementation:
+Implemented container runtime:
 
 - `ApptainerRuntime`
 
@@ -1040,7 +1042,8 @@ $TMPDIR     node-local
 
 The architecture should eventually be able to distinguish semantic storage roles.
 
-Version 0.1 only needs what is required for shoal and local execution.
+Version 0.1 implements local execution and the checked SSH scheduler paths while
+keeping storage roles target-owned and explicit.
 
 ---
 
