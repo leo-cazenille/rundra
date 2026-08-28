@@ -96,6 +96,8 @@ from rundra.orchestration.preparation import (
 )
 from rundra.orchestration.progress import ProgressEvent, ProgressObserver, ProgressPhase
 from rundra.orchestration.service import (
+    _BUNDLE_JOURNAL_READ_UNAVAILABLE,
+    _DEFAULT_QUERY_FAILURE_LIMIT,
     OrchestrationError,
     OrchestrationService,
     RunExecutionRequest,
@@ -133,6 +135,8 @@ from rundra.scheduler_registry import (
 )
 from rundra.schema_versions import RUN_LIST_SCHEMA, STATUS_SCHEMA, TASKS_SCHEMA
 
+_STATUS_JOURNAL_READ_RETRIES = 1
+_STATUS_JOURNAL_RETRY_DELAY_SECONDS = 0.2
 _SHARD_VISIBILITY_ATTEMPTS = 5
 _DEFAULT_PREPARATION_STORAGE = PreparationStorageConfig()
 LAST_RUN_SELECTOR = "__rundra_last_run__"
@@ -2322,6 +2326,8 @@ def status_operation(
     scheduler: Scheduler | None = None,
     transport: Transport | None = None,
     task_store: SqliteTaskStore | None = None,
+    retry_sleeper: Callable[[float], None] = sleep,
+    journal_read_retries: int = _STATUS_JOURNAL_READ_RETRIES,
 ) -> OperationResult[StatusValue]:
     record, error = _load_record(run_id, store)
     if error is not None:
@@ -2334,27 +2340,62 @@ def status_operation(
         ExecutionState.FAILED,
         ExecutionState.CANCELLED,
     }:
-        try:
-            active_scheduler = scheduler or _record_scheduler(record)
-            record = SchedulerLifecycleService(
-                store=store,
-                scheduler=active_scheduler,
-                transport=transport or _record_ssh_transport(record),
-                task_store=task_store,
-            ).refresh(record)
-        except RunStoreError as store_error:
-            return OperationResult.failure(
-                "status", _run_store_operation_error(store_error, record.run.id)
-            )
-        except (OrchestrationError, RuntimeError, TypeError, ValueError) as error:
-            return OperationResult.failure(
-                "status",
-                OperationError(
-                    "SCHEDULER_QUERY_FAILED",
-                    f"Run {record.run.id} scheduler query failed: {error}",
-                    {"run_id": str(record.run.id)},
-                ),
-            )
+        attempts = 0
+        while True:
+            attempts += 1
+            try:
+                active_scheduler = scheduler or _record_scheduler(record)
+                record = SchedulerLifecycleService(
+                    store=store,
+                    scheduler=active_scheduler,
+                    transport=transport or _record_ssh_transport(record),
+                    task_store=task_store,
+                ).refresh(record)
+                break
+            except RunStoreError as store_error:
+                return OperationResult.failure(
+                    "status", _run_store_operation_error(store_error, record.run.id)
+                )
+            except OrchestrationError as orchestration_error:
+                retryable = orchestration_error.code == _BUNDLE_JOURNAL_READ_UNAVAILABLE
+                if retryable and attempts <= journal_read_retries:
+                    retry_sleeper(_STATUS_JOURNAL_RETRY_DELAY_SECONDS)
+                    try:
+                        record = store.load(record.run.id)
+                    except RunStoreError as store_error:
+                        return OperationResult.failure(
+                            "status",
+                            _run_store_operation_error(store_error, record.run.id),
+                        )
+                    continue
+                return OperationResult.failure(
+                    "status",
+                    OperationError(
+                        "SCHEDULER_QUERY_FAILED",
+                        (
+                            f"Run {record.run.id} scheduler query failed: "
+                            f"{orchestration_error}"
+                        ),
+                        {
+                            "run_id": str(record.run.id),
+                            "retryable": retryable,
+                            "attempts": attempts,
+                        },
+                    ),
+                )
+            except (RuntimeError, TypeError, ValueError) as query_error:
+                return OperationResult.failure(
+                    "status",
+                    OperationError(
+                        "SCHEDULER_QUERY_FAILED",
+                        f"Run {record.run.id} scheduler query failed: {query_error}",
+                        {
+                            "run_id": str(record.run.id),
+                            "retryable": False,
+                            "attempts": attempts,
+                        },
+                    ),
+                )
     try:
         record = _finalize_remote_preparation(record, store, transport=transport)
     except RunStoreError as store_error:
@@ -2395,6 +2436,7 @@ def wait_operation(
     progress: ProgressObserver | None = None,
     sleeper: Callable[[float], None] = sleep,
     monotonic_clock: Callable[[], float] = monotonic,
+    query_failure_limit: int = _DEFAULT_QUERY_FAILURE_LIMIT,
 ) -> OperationResult[WaitValue]:
     if timeout is not None and (type(timeout) not in (int, float) or timeout < 0):
         return OperationResult.failure(
@@ -2408,6 +2450,14 @@ def wait_operation(
                 "INVALID_POLL_INTERVAL", "Wait poll interval must be positive"
             ),
         )
+    if type(query_failure_limit) is not int or query_failure_limit < 1:
+        return OperationResult.failure(
+            "wait",
+            OperationError(
+                "INVALID_QUERY_FAILURE_LIMIT",
+                "Wait query failure limit must be positive",
+            ),
+        )
     selected_record, selected_error = _load_record(run_id, store)
     if selected_error is not None:
         return OperationResult.failure("wait", selected_error)
@@ -2419,6 +2469,8 @@ def wait_operation(
         ExecutionState.FAILED,
         ExecutionState.CANCELLED,
     }
+    consecutive_query_failures = 0
+    last_value: StatusValue | None = None
     while True:
         status = status_operation(
             resolved_run_id,
@@ -2426,14 +2478,32 @@ def wait_operation(
             scheduler=scheduler,
             transport=transport,
             task_store=task_store,
+            retry_sleeper=sleeper,
         )
         if not status.ok:
             assert status.error is not None
             if status.error.code == "RUN_STORE_CONFLICT":
                 continue
+            if status.error.details.get("retryable") is True:
+                consecutive_query_failures += 1
+                elapsed = max(0.0, monotonic_clock() - started)
+                if timeout is not None and elapsed >= float(timeout):
+                    if last_value is not None:
+                        return OperationResult.success(
+                            "wait", WaitValue(last_value, False, True, float(elapsed))
+                        )
+                    return OperationResult.failure("wait", status.error)
+                if consecutive_query_failures < query_failure_limit:
+                    delay = float(poll_interval)
+                    if timeout is not None:
+                        delay = min(delay, max(0.0, float(timeout) - elapsed))
+                    sleeper(delay)
+                    continue
             return OperationResult.failure("wait", status.error)
         assert status.value is not None
         value = status.value
+        consecutive_query_failures = 0
+        last_value = value
         elapsed = max(0.0, monotonic_clock() - started)
         terminal = value.state in terminal_states
         total = sum(value.task_counts.values())
@@ -2480,6 +2550,7 @@ def await_runs_operation(
     task_store: SqliteTaskStore | None = None,
     sleeper: Callable[[float], None] = sleep,
     monotonic_clock: Callable[[], float] = monotonic,
+    query_failure_limit: int = _DEFAULT_QUERY_FAILURE_LIMIT,
 ) -> OperationResult[AwaitRunsValue]:
     if isinstance(run_ids, (str, bytes)) or not isinstance(run_ids, Sequence):
         return OperationResult.failure(
@@ -2525,6 +2596,14 @@ def await_runs_operation(
                 "INVALID_POLL_INTERVAL", "Await poll interval must be positive"
             ),
         )
+    if type(query_failure_limit) is not int or query_failure_limit < 1:
+        return OperationResult.failure(
+            "await",
+            OperationError(
+                "INVALID_QUERY_FAILURE_LIMIT",
+                "Await query failure limit must be positive",
+            ),
+        )
 
     for run_id in selected:
         _, error = _load_record(run_id, store)
@@ -2537,6 +2616,8 @@ def await_runs_operation(
         ExecutionState.FAILED,
         ExecutionState.CANCELLED,
     }
+    consecutive_query_failures = 0
+    last_statuses: tuple[StatusValue, ...] | None = None
     while True:
         statuses: list[StatusValue] = []
         retry_snapshot = False
@@ -2547,19 +2628,49 @@ def await_runs_operation(
                 scheduler=scheduler,
                 transport=transport,
                 task_store=task_store,
+                retry_sleeper=sleeper,
             )
             if not status.ok:
                 assert status.error is not None
                 if status.error.code == "RUN_STORE_CONFLICT":
                     retry_snapshot = True
                     break
+                if status.error.details.get("retryable") is True:
+                    consecutive_query_failures += 1
+                    elapsed = max(0.0, monotonic_clock() - started)
+                    if (
+                        timeout is not None
+                        and elapsed >= float(timeout)
+                        and last_statuses is not None
+                    ):
+                        return OperationResult.success(
+                            "await",
+                            AwaitRunsValue(
+                                last_statuses,
+                                until,
+                                False,
+                                True,
+                                float(elapsed),
+                                fail_on_run_failure,
+                            ),
+                        )
+                    if consecutive_query_failures < query_failure_limit:
+                        retry_snapshot = True
+                        break
                 return OperationResult.failure("await", status.error)
             assert status.value is not None
             statuses.append(replace(status.value, task_details=()))
         if retry_snapshot:
+            delay = float(poll_interval)
+            elapsed = max(0.0, monotonic_clock() - started)
+            if timeout is not None:
+                delay = min(delay, max(0.0, float(timeout) - elapsed))
+            sleeper(delay)
             continue
 
         elapsed = max(0.0, monotonic_clock() - started)
+        consecutive_query_failures = 0
+        last_statuses = tuple(statuses)
         terminal = tuple(status.state in terminal_states for status in statuses)
         condition_met = all(terminal) if until == "all" else any(terminal)
         value = AwaitRunsValue(

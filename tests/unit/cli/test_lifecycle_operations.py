@@ -63,7 +63,7 @@ from rundra.ports import (
     FetchRequest,
     FetchResult,
 )
-from rundra.results import OperationResult
+from rundra.results import OperationError, OperationResult
 from tests.unit.persistence.test_v4_record import _v4_record
 
 
@@ -286,6 +286,162 @@ def test_wait_timeout_is_a_successful_renewable_result(tmp_path: Path) -> None:
     assert waited.ok and isinstance(waited.value, WaitValue)
     assert waited.value.terminal is False
     assert waited.value.timed_out is True
+
+
+def test_status_retries_transient_bundle_journal_read_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, run_id = _stored_array_record(tmp_path / "source")
+    original = source.load(RunId(run_id))
+    active = replace(
+        original,
+        run=replace(
+            original.run,
+            state=ExecutionState.RUNNING,
+            tasks=tuple(
+                replace(task, state=ExecutionState.RUNNING)
+                for task in original.run.tasks
+            ),
+        ),
+        completed_at=None,
+    )
+    store = JsonRunStore(tmp_path / "active")
+    store.create(active)
+    calls = 0
+
+    def flaky_refresh(
+        service: operations.SchedulerLifecycleService, record: RunRecord
+    ) -> RunRecord:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise operations.OrchestrationError(
+                code=operations._BUNDLE_JOURNAL_READ_UNAVAILABLE,
+                message="temporarily unavailable",
+                run_id=record.run.id,
+            )
+        return record
+
+    monkeypatch.setattr(operations.SchedulerLifecycleService, "refresh", flaky_refresh)
+    delays: list[float] = []
+
+    status = status_operation(
+        run_id,
+        store,
+        scheduler=operations.LocalScheduler(operations.LocalTransport()),
+        transport=operations.LocalTransport(),
+        retry_sleeper=delays.append,
+    )
+
+    assert status.ok
+    assert calls == 2
+    assert delays == [0.2]
+
+
+def test_status_reports_persistent_bundle_journal_read_as_retryable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, run_id = _stored_array_record(tmp_path / "source")
+    original = source.load(RunId(run_id))
+    active = replace(
+        original,
+        run=replace(original.run, state=ExecutionState.RUNNING),
+        completed_at=None,
+    )
+    store = JsonRunStore(tmp_path / "active")
+    store.create(active)
+
+    def failed_refresh(
+        service: operations.SchedulerLifecycleService, record: RunRecord
+    ) -> RunRecord:
+        raise operations.OrchestrationError(
+            code=operations._BUNDLE_JOURNAL_READ_UNAVAILABLE,
+            message="temporarily unavailable",
+            run_id=record.run.id,
+        )
+
+    monkeypatch.setattr(operations.SchedulerLifecycleService, "refresh", failed_refresh)
+
+    status = status_operation(
+        run_id,
+        store,
+        scheduler=operations.LocalScheduler(operations.LocalTransport()),
+        transport=operations.LocalTransport(),
+        retry_sleeper=lambda delay: None,
+    )
+
+    assert status.error is not None
+    assert status.error.code == "SCHEDULER_QUERY_FAILED"
+    assert status.error.details["retryable"] is True
+    assert status.error.details["attempts"] == 2
+
+
+def test_wait_and_await_retry_only_retryable_status_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, run_id = _stored_record(tmp_path)
+    terminal = status_operation(run_id, store)
+    assert terminal.value is not None
+    retryable = OperationResult.failure(
+        "status",
+        OperationError(
+            "SCHEDULER_QUERY_FAILED",
+            "temporary journal read failure",
+            {"run_id": run_id, "retryable": True, "attempts": 2},
+        ),
+    )
+    calls = 0
+
+    def transient_status(
+        *args: object, **kwargs: object
+    ) -> OperationResult[StatusValue]:
+        nonlocal calls
+        calls += 1
+        if calls <= 2:
+            return retryable
+        return terminal
+
+    monkeypatch.setattr(operations, "status_operation", transient_status)
+    wait_delays: list[float] = []
+    waited = wait_operation(
+        run_id,
+        store,
+        sleeper=wait_delays.append,
+        query_failure_limit=3,
+    )
+
+    assert waited.ok
+    assert calls == 3
+    assert wait_delays == [2.0, 2.0]
+
+    calls = 0
+    await_delays: list[float] = []
+    awaited = await_runs_operation(
+        (run_id,),
+        store,
+        sleeper=await_delays.append,
+        query_failure_limit=3,
+    )
+
+    assert awaited.ok
+    assert calls == 3
+    assert await_delays == [15.0, 15.0]
+
+    nonretryable = OperationResult.failure(
+        "status",
+        OperationError(
+            "SCHEDULER_QUERY_FAILED",
+            "journal corruption",
+            {"run_id": run_id, "retryable": False, "attempts": 1},
+        ),
+    )
+    monkeypatch.setattr(
+        operations,
+        "status_operation",
+        lambda *args, **kwargs: nonretryable,
+    )
+    failed = wait_operation(run_id, store, sleeper=lambda delay: None)
+    assert failed.error is nonretryable.error
 
 
 def test_await_runs_waits_for_all_and_omits_task_details(tmp_path: Path) -> None:

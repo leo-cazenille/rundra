@@ -200,6 +200,12 @@ class V6PreparationManifestTransport(LogTransport):
         return CommandResult(command, 0, content, "", _CREATED, _CREATED)
 
 
+class UnavailableJournalTransport(LogTransport):
+    def run(self, command: Command) -> CommandResult:
+        self.calls.append(command)
+        return CommandResult(command, 255, "", "redacted", _CREATED, _CREATED)
+
+
 def _record() -> RunRecord:
     target = Target(
         "cluster",
@@ -238,6 +244,92 @@ def _record() -> RunRecord:
         scheduler_job_ids=("12345",),
         submitted_at=_CREATED + timedelta(seconds=1),
     )
+
+
+def test_bundle_journal_io_failure_is_typed_as_retryable(tmp_path: Path) -> None:
+    record = replace(
+        _record(),
+        scheduler_metadata={
+            "bundle_status_root": "/remote/work/runs/run/metadata/bundle-status"
+        },
+        task_scheduler_ids={_TASK_ID: "12345"},
+    )
+    store = JsonRunStore(tmp_path / "records")
+    store.create(record)
+    scheduler = SequenceScheduler(
+        deque((_observation(ExecutionState.RUNNING, "RUNNING"),))
+    )
+
+    with pytest.raises(OrchestrationError) as captured:
+        SchedulerLifecycleService(
+            store=store,
+            scheduler=scheduler,
+            transport=UnavailableJournalTransport(),
+        ).refresh(record)
+
+    assert captured.value.code == "BUNDLE_JOURNAL_READ_UNAVAILABLE"
+    assert store.load(record.run.id) == record
+
+
+def test_scheduler_wait_bounds_transient_bundle_journal_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = _record()
+    store = JsonRunStore(tmp_path / "records")
+    store.create(record)
+    terminal = replace(
+        record,
+        run=replace(
+            record.run,
+            state=ExecutionState.SUCCEEDED,
+            tasks=tuple(
+                replace(task, state=ExecutionState.SUCCEEDED)
+                for task in record.run.tasks
+            ),
+        ),
+    )
+    calls = 0
+
+    def transient_refresh(
+        service: SchedulerLifecycleService, current: RunRecord
+    ) -> RunRecord:
+        nonlocal calls
+        calls += 1
+        if calls <= 2:
+            raise OrchestrationError(
+                code="BUNDLE_JOURNAL_READ_UNAVAILABLE",
+                message="temporarily unavailable",
+                run_id=current.run.id,
+            )
+        return terminal
+
+    monkeypatch.setattr(SchedulerLifecycleService, "refresh", transient_refresh)
+    delays: list[float] = []
+    service = SchedulerLifecycleService(
+        store=store,
+        scheduler=SequenceScheduler(deque()),
+        sleeper=delays.append,
+    )
+
+    waited = service.wait(record, poll_interval=0.5, query_failure_limit=3)
+
+    assert waited.run.state is ExecutionState.SUCCEEDED
+    assert calls == 3
+    assert delays == [0.5, 0.5]
+
+    def persistent_refresh(
+        service: SchedulerLifecycleService, current: RunRecord
+    ) -> RunRecord:
+        raise OrchestrationError(
+            code="BUNDLE_JOURNAL_READ_UNAVAILABLE",
+            message="temporarily unavailable",
+            run_id=current.run.id,
+        )
+
+    monkeypatch.setattr(SchedulerLifecycleService, "refresh", persistent_refresh)
+    with pytest.raises(OrchestrationError) as persistent:
+        service.wait(record, poll_interval=0.5, query_failure_limit=2)
+    assert persistent.value.code == "SCHEDULER_QUERY_FAILED"
 
 
 def _prepared_record() -> RunRecord:

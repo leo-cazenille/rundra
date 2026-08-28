@@ -240,6 +240,13 @@ def build_parser() -> argparse.ArgumentParser:
     wait.add_argument("--timeout", type=float)
     wait.add_argument("--poll-interval", type=float, default=2.0)
     wait.add_argument(
+        "--query-failure-limit",
+        type=int,
+        default=3,
+        metavar="N",
+        help="stop after N consecutive transient scheduler-query failures (default: 3)",
+    )
+    wait.add_argument(
         "--notify",
         action="store_true",
         help="emit one terminal alert when the Run completes",
@@ -261,6 +268,13 @@ def build_parser() -> argparse.ArgumentParser:
     await_runs.add_argument("--until", choices=("all", "any"), default="all")
     await_runs.add_argument("--timeout", type=float)
     await_runs.add_argument("--poll-interval", type=float, default=15.0)
+    await_runs.add_argument(
+        "--query-failure-limit",
+        type=int,
+        default=3,
+        metavar="N",
+        help="stop after N consecutive transient scheduler-query failures (default: 3)",
+    )
     await_runs.add_argument("--fail-on-run-failure", action="store_true")
     await_runs.add_argument("--notify-file", type=Path, metavar="PATH")
     _add_store_option(await_runs)
@@ -861,6 +875,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             JsonRunStore(arguments.data_dir),
             timeout=arguments.timeout,
             poll_interval=arguments.poll_interval,
+            query_failure_limit=arguments.query_failure_limit,
             task_store=SqliteTaskStore(arguments.data_dir),
             progress=progress,
         )
@@ -871,6 +886,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             until=arguments.until,
             timeout=arguments.timeout,
             poll_interval=arguments.poll_interval,
+            query_failure_limit=arguments.query_failure_limit,
             fail_on_run_failure=arguments.fail_on_run_failure,
             task_store=SqliteTaskStore(arguments.data_dir),
         )

@@ -56,9 +56,10 @@
   Reserve `--progress` for interactive humans because captured TQDM redraws can
   consume transcript tokens. `--notify-file PATH` adds an atomic aggregate signal.
 - Workers waiting on preparation remain `QUEUED` before their status journals
-  exist. Rundra merges identical events that overlap during atomic journal
-  publication and reports contradictory outcomes as corruption. Do not bypass
-  a Rundra journal error by inferring success from scheduler output alone.
+  exist. Rundra retries bounded transient journal transport/read failures,
+  merges identical events that overlap during atomic publication, and reports
+  malformed or contradictory outcomes as corruption. Do not bypass a Rundra
+  journal error by inferring success from scheduler output alone.
 - ETA is intentionally absent until at least 20 Tasks and 10 percent of the Run
   have finished over at least 60 seconds. Treat any ETA as an estimate for the
   observed workload mix, not a deadline for heterogeneous Tasks.

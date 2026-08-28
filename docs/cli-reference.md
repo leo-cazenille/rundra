@@ -12,8 +12,8 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 | `targets` | none | `--targets-file`, `--json` | Validate and list configured targets. |
 | `doctor` | optional `EXPERIMENT` | launch path overrides, `--connect`, `--offline`, `--local-target-access`, `--prepare-location`, `--scheduler-inventory`, `--scheduler-probe`, `--probe-timeout`, `--no-write-probe`, `--agent`, `--json` | Audit installation, sandbox paths, target access, reversible staging, preparation caches, read-only scheduler inventory, and an optional bounded scheduler submission. |
 | `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--workers`, `--task-slots-per-worker`, `--verbose`, `--progress`, `--progress-interval`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
-| `wait` | `RUN_ID` or `--last` | `--timeout`, `--poll-interval`, `--notify`, `--notify-file PATH`, `--data-dir`, `--verbose`, `--progress`, `--progress-interval`, `--json` | Reconcile until terminal or a renewable timeout; optionally emit an alert or atomic terminal JSON file. |
-| `await` | one or more `RUN_ID` values | `--until all`/`any`, `--timeout`, `--poll-interval`, `--fail-on-run-failure`, `--notify-file PATH`, `--data-dir`, `--json` | Wait silently for an aggregate terminal condition and emit one compact final result. |
+| `wait` | `RUN_ID` or `--last` | `--timeout`, `--poll-interval`, `--query-failure-limit N`, `--notify`, `--notify-file PATH`, `--data-dir`, `--verbose`, `--progress`, `--progress-interval`, `--json` | Reconcile until terminal or a renewable timeout; optionally emit an alert or atomic terminal JSON file. |
+| `await` | one or more `RUN_ID` values | `--until all`/`any`, `--timeout`, `--poll-interval`, `--query-failure-limit N`, `--fail-on-run-failure`, `--notify-file PATH`, `--data-dir`, `--json` | Wait silently for an aggregate terminal condition and emit one compact final result. |
 | `agent-guide` | none | `--write PATH`, `--check PATH`, `--topic TOPIC`, `--list-topics`, `--json` | Print, install, check, or select bounded portable agent instructions. |
 | `help` | optional `COMMAND` | none | List commands and the common workflow, or show one command's detailed arguments and options. |
 | `submit` | `EXPERIMENT` | same as `run` | Submit asynchronously when the selected scheduler supports it. |
@@ -44,7 +44,11 @@ the selected all/any condition is satisfied.
 Worker-pool Tasks remain `QUEUED` while an `afterok` preparation dependency is
 pending, even though no bundle journals exist yet. Journal reconciliation is
 idempotent across identical canonical and temporary fragments and fails only
-for malformed or contradictory Task events. Status omits throughput and ETA
+for malformed or contradictory Task events. `status` retries one transient
+journal transport/read failure. `wait` and `await` tolerate three consecutive
+failed status snapshots by default; `--query-failure-limit N` changes that
+positive bound. A successful snapshot resets the counter. Structural journal
+errors are never retried. Status omits throughput and ETA
 until at least 20 Tasks and 10 percent of the Run have completed over a
 60-second observation window; heterogeneous Task durations can still make the
 resulting estimate noisy.

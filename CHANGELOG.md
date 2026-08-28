@@ -9,6 +9,13 @@ All notable user-visible changes are recorded here.
 - Human, agent, target, scheduler, schema, and release documentation now
   reflects the current 0.1 command surface and backend capabilities.
 
+### Fixed
+
+- `status` retries transient bundled-journal transport failures once, while
+  `wait` and `await` tolerate a configurable bounded number of consecutive
+  failed snapshots instead of aborting a healthy long Run after one SSH/read
+  interruption. Malformed and contradictory journals still fail immediately.
+
 ## [0.1.6] - 2026-08-28
 
 ### Added

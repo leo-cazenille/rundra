@@ -16,7 +16,7 @@ GUIDE_TOPICS = {
     "launch": "Validate and plan before submit. Use explicit seeds, review task count/resources/concurrency, retain the returned Run ID and data directory, and submit only once.",
     "large-runs": "Use worker-pool execution only when plan.target.scheduler.capabilities.compact_worker_pool is true. Runs with at least 1,000 Tasks automatically use compact durable Task state; inspect individuals with paginated tasks JSON, use bounded wait calls without progress, retain archive retrieval, and pass an exact confirm-tasks value after plan review. OpenPBS worker targets require requeue_limit 0 because scheduler rerun recovery is not supported.",
     "htcondor": "Use targets version 9 and require the operator to confirm shared_workspace: true only when the access point and execute nodes see the workspace at the same absolute path. HTCondor supports detached Task clusters and arrays, but not Rundra compact workers, preparation dependencies, file transfer, or scheduler rerun recovery. Inspect plan.target.scheduler.capabilities instead of inferring support from the backend name.",
-    "lifecycle": "Use submit, await for one or several long Runs, status/tasks, fetch, then purge. Await emits one final compact result and supports all/any aggregate conditions, avoiding model-driven polling. Dependency-pending workers remain queued before journals exist; Rundra merges identical atomic journal fragments and rejects contradictory outcomes. ETA is omitted until at least 20 Tasks, 10% completion, and 60 seconds of evidence. Agents should use explicit Run IDs rather than --last.",
+    "lifecycle": "Use submit, await for one or several long Runs, status/tasks, fetch, then purge. Await emits one final compact result and supports all/any aggregate conditions, avoiding model-driven polling. Dependency-pending workers remain queued before journals exist; Rundra retries bounded transient journal reads, merges identical atomic fragments, and rejects malformed or contradictory outcomes immediately. ETA is omitted until at least 20 Tasks, 10% completion, and 60 seconds of evidence. Agents should use explicit Run IDs rather than --last.",
     "results": "Prefer fetch auto. Set project-v5 fetch_mode: copy when downstream analysis requires ordinary files instead of a shared reference manifest. Compact archive fetch verifies exact Task coverage; add --extract only when individual files are required. Keep derived outputs separate.",
     "scratch": "Treat target-v10+ execution_storage as an operator-owned Slurm contract. Plan reports CPU/GPU variables and copy-back; doctor --scheduler-probe verifies the CPU scratch path inside one bounded allocation. Rundra stages source, config, and verified images locally, copies every Task output back before success, and never owns or deletes the scheduler-provided scratch root.",
     "partitions": "Target v11 may declare ordered Slurm partition_routes by CPU/GPU class and maximum walltime. Plan stays offline and selects the shortest compatible route. Use doctor --connect --scheduler-inventory --json for read-only operator onboarding; it submits no job. Never guess a partition or bypass a configured route with native options.",
@@ -83,9 +83,10 @@ GUIDE = f"""{START_MARKER}
   Reserve `--progress` for interactive humans because captured TQDM redraws can
   consume transcript tokens. `--notify-file PATH` adds an atomic aggregate signal.
 - Workers waiting on preparation remain `QUEUED` before their status journals
-  exist. Rundra merges identical events that overlap during atomic journal
-  publication and reports contradictory outcomes as corruption. Do not bypass
-  a Rundra journal error by inferring success from scheduler output alone.
+  exist. Rundra retries bounded transient journal transport/read failures,
+  merges identical events that overlap during atomic publication, and reports
+  malformed or contradictory outcomes as corruption. Do not bypass a Rundra
+  journal error by inferring success from scheduler output alone.
 - ETA is intentionally absent until at least 20 Tasks and 10 percent of the Run
   have finished over at least 60 seconds. Treat any ETA as an estimate for the
   observed workload mix, not a deadline for heterogeneous Tasks.

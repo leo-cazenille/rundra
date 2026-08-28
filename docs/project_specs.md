@@ -1710,6 +1710,13 @@ The equivalent MCP `await_runs` request allows a client harness to remain blocke
 resume a model only after the aggregate condition or timeout. This foreground operation
 adds no daemon, callback endpoint, scheduler-native parsing, or credential storage.
 
+Bundle-journal transport and read failures are distinct from malformed or
+contradictory journal content. `status` retries one transient read failure.
+Long-lived `wait` and `await` operations tolerate a configurable positive
+number of consecutive failed status snapshots, defaulting to three, and reset
+that counter after every successful snapshot. Exhaustion returns a structured
+`SCHEDULER_QUERY_FAILED`; structural corruption remains immediately fatal.
+
 For synchronous arrays, progress contains six lifecycle units plus one unit per
 planned Task. Terminal Task observations advance the bar and its detail reports
 terminal/total, running, queued, failed, and distinct allocated-node counts.

@@ -103,6 +103,8 @@ _TERMINAL_STATES = frozenset(
 _MIN_ETA_SAMPLE_COUNT = 20
 _MIN_ETA_SAMPLE_FRACTION = 0.10
 _MIN_ETA_WINDOW_SECONDS = 60
+_BUNDLE_JOURNAL_READ_UNAVAILABLE = "BUNDLE_JOURNAL_READ_UNAVAILABLE"
+_DEFAULT_QUERY_FAILURE_LIMIT = 3
 _PREBUILT_IMAGE_PREPARATION_RESOURCES = ResourceRequest(
     cpus_per_task=1,
     memory_bytes=2 * 1024**3,
@@ -423,6 +425,7 @@ class SchedulerLifecycleService:
         *,
         timeout: float | None = None,
         poll_interval: float = 2.0,
+        query_failure_limit: int = _DEFAULT_QUERY_FAILURE_LIMIT,
     ) -> RunRecord:
         """Poll until terminal, leaving an active Run intact on client timeout."""
         _require_record(record)
@@ -430,8 +433,11 @@ class SchedulerLifecycleService:
             raise ValueError("Scheduler wait timeout must be non-negative or None")
         if type(poll_interval) not in (int, float) or poll_interval <= 0:
             raise ValueError("Scheduler poll interval must be positive")
+        if type(query_failure_limit) is not int or query_failure_limit < 1:
+            raise ValueError("Scheduler query failure limit must be positive")
         deadline = None if timeout is None else self._monotonic() + float(timeout)
         current = record
+        consecutive_query_failures = 0
         self._report_wait(current)
         while current.run.state not in _TERMINAL_STATES:
             previous = _progress_state(current)
@@ -439,12 +445,45 @@ class SchedulerLifecycleService:
                 current = self.refresh(current)
             except RunStoreError:
                 raise
+            except OrchestrationError as error:
+                if error.code != _BUNDLE_JOURNAL_READ_UNAVAILABLE:
+                    raise OrchestrationError(
+                        code="SCHEDULER_QUERY_FAILED",
+                        message=f"Run {record.run.id} scheduler query failed: {error}",
+                        run_id=record.run.id,
+                    ) from error
+                consecutive_query_failures += 1
+                if consecutive_query_failures >= query_failure_limit:
+                    raise OrchestrationError(
+                        code="SCHEDULER_QUERY_FAILED",
+                        message=(
+                            f"Run {record.run.id} scheduler query failed after "
+                            f"{consecutive_query_failures} transient bundled-journal "
+                            "read failures"
+                        ),
+                        run_id=record.run.id,
+                    ) from error
+                now = self._monotonic()
+                if deadline is not None and now >= deadline:
+                    raise OrchestrationError(
+                        code="SCHEDULER_TIMEOUT",
+                        message=(
+                            f"Run {record.run.id} did not finish before the wait timeout"
+                        ),
+                        run_id=record.run.id,
+                    ) from error
+                delay = float(poll_interval)
+                if deadline is not None:
+                    delay = min(delay, max(0.0, deadline - now))
+                self._sleeper(delay)
+                continue
             except Exception as error:
                 raise OrchestrationError(
                     code="SCHEDULER_QUERY_FAILED",
                     message=f"Run {record.run.id} scheduler query failed: {error}",
                     run_id=record.run.id,
                 ) from error
+            consecutive_query_failures = 0
             if _progress_state(current) != previous:
                 self._report_wait(current)
             if current.run.state in _TERMINAL_STATES:
@@ -2610,26 +2649,39 @@ def _apply_bundle_journals(
     journal_started: dict[TaskId, tuple[int, str]] = {}
     journal_finished: dict[TaskId, tuple[int, int, str]] = {}
     if terminal_references:
-        result = transport.run(
-            Command(
-                (
-                    "/bin/sh",
-                    "-c",
+        try:
+            result = transport.run(
+                Command(
                     (
-                        'status=$1; shift; for native do aggregate="$status/$native.tsv"; '
-                        'if [ -f "$aggregate" ]; then cat -- "$aggregate"; continue; fi; '
-                        'for path in "$status/$native".lane-*.tsv '
-                        '"$status/$native".lane-*.tsv.*; do '
-                        '[ -f "$path" ] && cat -- "$path"; done; done; :'
-                    ),
-                    "rundra-bundle-status",
-                    status_value,
-                    *terminal_references,
+                        "/bin/sh",
+                        "-c",
+                        (
+                            "status=$1; shift; for native do "
+                            'aggregate="$status/$native.tsv"; '
+                            'if [ -f "$aggregate" ]; then cat -- "$aggregate"; '
+                            "continue; fi; "
+                            'for path in "$status/$native".lane-*.tsv '
+                            '"$status/$native".lane-*.tsv.*; do '
+                            '[ -f "$path" ] && cat -- "$path"; done; done; :'
+                        ),
+                        "rundra-bundle-status",
+                        status_value,
+                        *terminal_references,
+                    )
                 )
             )
-        )
+        except Exception as error:
+            raise OrchestrationError(
+                code=_BUNDLE_JOURNAL_READ_UNAVAILABLE,
+                message="Bundled Task status journals are temporarily unavailable",
+                run_id=record.run.id,
+            ) from error
         if result.exit_code != 0:
-            raise ValueError("Could not read bundled Task status journals")
+            raise OrchestrationError(
+                code=_BUNDLE_JOURNAL_READ_UNAVAILABLE,
+                message="Bundled Task status journals are temporarily unavailable",
+                run_id=record.run.id,
+            )
         known = {task.id for task in record.run.tasks}
         for line in result.stdout.splitlines():
             fields = line.split("\t")
