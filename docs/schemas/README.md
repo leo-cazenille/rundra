@@ -21,7 +21,7 @@ instead. Use the fields, not object-key order or human output, as the interface.
 
 | Operation or document | Checked example | Primary payload |
 |---|---|---|
-| CLI surface | [`cli-surface-v21.json`](cli-surface-v21.json) | current program, commands, positionals, options |
+| CLI surface | [`cli-surface-v23.json`](cli-surface-v23.json) | current program, commands, positionals, options |
 | MCP launcher surface | [`rundr-mcp-surface-v1.json`](rundr-mcp-surface-v1.json) | stdio and authenticated Streamable HTTP options |
 | `validate` | [`validate-success-v1.json`](validate-success-v1.json) | `experiment` |
 | `plan` | [`plan-success-v1.json`](plan-success-v1.json) | `plan`, plus launch resolution |
@@ -31,6 +31,7 @@ instead. Use the fields, not object-key order or human output, as the interface.
 | `submit` | [`submit-success-v1.json`](submit-success-v1.json) | submitted `run` |
 | `status` | [`status-success-v1.json`](status-success-v1.json) | aggregate and Task status |
 | `wait` | composed and contract-tested | status, terminal/timeout flags, elapsed duration |
+| `await` | composed and contract-tested | bounded aggregate state for one or several Runs |
 | `tasks` | composed and contract-tested | bounded v4 Task-state page |
 | `list` | [`list-success-v1.json`](list-success-v1.json) | ordered `runs` summaries |
 | `logs` | [`logs-success-v1.json`](logs-success-v1.json) | one Task's stdout/stderr and paths |
@@ -162,7 +163,9 @@ The version-20 CLI surface adds the cache-only `--offline` audit to `doctor`.
 Version 19 remains available as the preceding public surface contract.
 
 The version-21 CLI surface adds `doctor --prepare-location`; plan v8, doctor
-v3, and targets v2 expose derived scheduler capabilities.
+v3, and targets v2 expose derived scheduler capabilities. Version 22 adds the
+aggregate `await` command, and version 23 adds read-only
+`doctor --scheduler-inventory`.
 
 Scheduler capability fields are added only to those new versions. Older plan,
 doctor, and target-list documents retain their previous shapes.

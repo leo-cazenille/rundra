@@ -8,15 +8,25 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 | Command | Positional | Options | Semantics |
 |---|---|---|---|
 | `validate` | `EXPERIMENT` | `--json` | Validate experiment YAML without executing. |
-| `plan` | `EXPERIMENT` | `--config`, `--seed`/`--seeds`/`--random-seed`, `--target`, `--targets-file`, `--project-file`, `--profile`, preparation options, `--execution-strategy`, `--retrieval`, `--workers`, `--task-slots-per-worker`, `--json` | Resolve and inspect execution without target contact or state changes. |
+| `plan` | `EXPERIMENT` | launch options, `--source-root`, preparation options, `--execution-strategy`, `--retrieval`, `--workers`, `--task-slots-per-worker`, `--json` | Resolve and inspect execution without target contact or state changes. |
 | `targets` | none | `--targets-file`, `--json` | Validate and list configured targets. |
-| `doctor` | optional `EXPERIMENT` | launch path overrides, `--connect`, `--local-target-access`, `--prepare-location`, `--scheduler-inventory`, `--scheduler-probe`, `--probe-timeout`, `--no-write-probe`, `--agent`, `--json` | Audit installation, sandbox paths, target access, reversible staging, preparation caches, read-only scheduler inventory, and an optional bounded scheduler submission. |
+| `doctor` | optional `EXPERIMENT` | launch path overrides, `--connect`, `--offline`, `--local-target-access`, `--prepare-location`, `--scheduler-inventory`, `--scheduler-probe`, `--probe-timeout`, `--no-write-probe`, `--agent`, `--json` | Audit installation, sandbox paths, target access, reversible staging, preparation caches, read-only scheduler inventory, and an optional bounded scheduler submission. |
 | `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--workers`, `--task-slots-per-worker`, `--verbose`, `--progress`, `--progress-interval`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
 | `wait` | `RUN_ID` or `--last` | `--timeout`, `--poll-interval`, `--notify`, `--notify-file PATH`, `--data-dir`, `--verbose`, `--progress`, `--progress-interval`, `--json` | Reconcile until terminal or a renewable timeout; optionally emit an alert or atomic terminal JSON file. |
 | `await` | one or more `RUN_ID` values | `--until all`/`any`, `--timeout`, `--poll-interval`, `--fail-on-run-failure`, `--notify-file PATH`, `--data-dir`, `--json` | Wait silently for an aggregate terminal condition and emit one compact final result. |
 | `agent-guide` | none | `--write PATH`, `--check PATH`, `--topic TOPIC`, `--list-topics`, `--json` | Print, install, check, or select bounded portable agent instructions. |
 | `help` | optional `COMMAND` | none | List commands and the common workflow, or show one command's detailed arguments and options. |
 | `submit` | `EXPERIMENT` | same as `run` | Submit asynchronously when the selected scheduler supports it. |
+| `resume` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Recover an interrupted submission without duplication. |
+| `resolve-submission` | `RUN_ID` or `--last` | `--not-submitted`, `--confirm RUN_ID`, `--data-dir`, `--json` | Close an unknown submission only after proving no scheduler job exists. |
+| `status` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Reconcile scheduler state and return portable Run/Task status. |
+| `tasks` | `RUN_ID` or `--last` | `--offset`, `--limit`, `--data-dir`, `--json` | Return one bounded Task-state page. |
+| `list` | none | `--offset`, `--limit`, `--include-tasks`, `--data-dir`, `--json` | Page through compact Run summaries. |
+| `logs` | `RUN_ID` or `--last` | `--task`, `--preparation`, `--data-dir`, `--json` | Read framework-managed Task or preparation logs. |
+| `fetch` | `RUN_ID` or `--last` | `--destination`, repeatable `--task`, `--mode`, `--extract`, progress options, `--data-dir`, `--json` | Retrieve all or selected artifacts idempotently. |
+| `inspect` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Return the complete persisted RunRecord. |
+| `cancel` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Reconcile and cancel active scheduler work. |
+| `purge` | `RUN_ID` or `--last` | `--workspace`, `--confirm RUN_ID`, `--dry-run`, `--data-dir`, `--json` | Preview or delete terminal Run data. |
 
 `--verbose` prints lifecycle details and `--progress` displays a TQDM phase
 bar. They may be combined. Both write only to stderr, preserving the final
@@ -61,19 +71,11 @@ filesystem is also mounted on the client. Shared staging implies this audit;
 ordinary rsync targets do not, so remote-only laptops are not required to see
 cluster paths locally. A failed required local probe makes `ready` false and
 the generated Codex profile includes the missing paths.
-| `status` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Reconcile scheduler state and return portable Run/Task status. |
-| `tasks` | `RUN_ID` or `--last` | `--offset`, `--limit`, `--data-dir`, `--json` | Return one bounded page from materialized Run tasks or a compact version-4 TaskSpace sidecar. |
-| `list` | none | `--offset`, `--limit`, `--include-tasks`, `--data-dir`, `--json` | Page through compact persisted Run summaries; include per-Task details only when explicitly requested. |
-| `logs` | `RUN_ID` or `--last` | `--task`, `--data-dir`, `--json` | Read one Task's framework-managed stdout/stderr. |
-| `fetch` | `RUN_ID` or `--last` | optional `--destination`; repeatable `--task`; `--mode`; `--verbose`, `--progress`, `--data-dir`, `--json` | Idempotently retrieve all or selected Task artifacts. An omitted mode uses the persisted launch default; auto references jointly visible shared workspaces and copies others. |
 
 New Runs persist the absolute destination resolved by `run` or `submit`.
 `fetch` reuses that path when `--destination` is omitted; an explicit fetch
 destination always overrides it. Legacy records without persisted retrieval
 intent retain their historical derived fallback.
-| `inspect` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Return the complete persisted RunRecord. |
-| `cancel` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Reconcile and cancel only active scheduler work; repeat safely. |
-| `purge` | `RUN_ID` or `--last` | `--workspace`, `--confirm RUN_ID`, `--dry-run`, `--data-dir`, `--json` | Preview or delete terminal Run outputs and workspaces with explicit confirmation. |
 
 `--seeds START:STOP` is an inclusive integer range. Seed selectors are mutually
 exclusive. If no seed is supplied, launch resolution uses a configured seed or
@@ -105,14 +107,14 @@ It limits submitted scheduler jobs and array elements, not only simultaneously
 running elements. On Slurm, materialized `run` and `submit` operations above
 this limit may use a bounded worker array whose elements execute logical Tasks
 sequentially, with isolated outputs, per-Task timeouts, and atomic exit
-journals. OpenPBS uses bounded scheduler arrays and does not implement Rundra's
-Slurm worker-pool strategy.
+journals. OpenPBS supports compact workers through its own bounded scheduler
+arrays but requires `requeue_limit: 0`.
 
-For Slurm worker-pool execution with at least 1,000 logical Tasks, `run` and
+For compact worker-pool execution with at least 1,000 logical Tasks, `run` and
 `submit` automatically replace the accepted materialized definition with a
 version-4 `CompactRun`. Per-Task scheduler, execution, exit, and retrieval state
 lives in `<RUN_ID>.tasks.sqlite3`; the JSON RunRecord contains no Task array or
-unbounded Task maps. `status`, `wait`, `cancel`, `tasks`, and `fetch` use this
+unbounded Task maps. `status`, `wait`, `await`, `cancel`, `tasks`, and `fetch` use this
 sidecar automatically when invoked with the same `--data-dir`.
 
 Compact archive fetch verifies every copied shard checksum and index, then
@@ -180,8 +182,8 @@ and `doctor`.
 
 `plan` deliberately has no `--destination` or `--data-dir` because it creates
 no snapshot, retrieval, or RunRecord. Local `submit` returns
-`ASYNC_UNAVAILABLE`; SSH/Slurm and SSH/OpenPBS submission persist scheduler
-identities before returning so later processes can operate by Run ID.
+`ASYNC_UNAVAILABLE`; SSH/Slurm, SSH/OpenPBS, and SSH/HTCondor submission persist
+scheduler identities before returning so later processes can operate by Run ID.
 
 ## Machine output and exits
 

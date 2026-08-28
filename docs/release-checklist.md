@@ -1,21 +1,16 @@
-# v0.1.4 release checklist
+# Release checklist
 
-This checklist turns the validated `0.1.4` source tree into the v0.1.4 release.
-Checking it does not itself authorize publishing, pushing, tagging, or changing
-external services.
-
-Release status: `0.1.4.dev0` was mistakenly uploaded to TestPyPI from a manual
-workflow dispatch. It is a distinct prerelease and does not prevent publishing
-the stable `0.1.4` candidate. The release workflow now requires a stable
-`X.Y.Z` project version for TestPyPI and additionally requires an exact matching
-`vX.Y.Z` tag for production PyPI publication.
+This reusable checklist turns a validated stable `X.Y.Z` source tree into a
+release. Checking it does not itself authorize publishing, pushing, tagging, or
+changing external services. Manual workflow dispatch publishes to TestPyPI; a
+published GitHub release from exact tag `vX.Y.Z` publishes to PyPI.
 
 ## Scope and contracts
 
 - [ ] Confirm the release contains only the documented local, SSH/Slurm,
-  SSH/OpenPBS, and optional MCP paths and the exclusions in the specification.
-- [ ] Review [`CHANGELOG.md`](../CHANGELOG.md), confirm the `0.1.4` date and
-  contents, and leave a new empty Unreleased section.
+  SSH/OpenPBS, SSH/HTCondor, and optional MCP paths and exclusions.
+- [ ] Review [`CHANGELOG.md`](../CHANGELOG.md), confirm the candidate version,
+  date, and contents, and leave a new empty Unreleased section.
 - [ ] Review the [CLI reference](cli-reference.md),
   [stability policy](stability.md), and every checked
   [version-1 contract](schemas/README.md).
@@ -62,14 +57,14 @@ tools/check_distribution.sh dist/*.whl dist/*.tar.gz
 ## Version and publication
 
 - [ ] Confirm `pyproject.toml`, `uv.lock`, `rundr --version`, and artifact
-  metadata all report `0.1.4`.
+  metadata all report the same stable candidate version.
 - [ ] Rebuild from the exact intended commit and repeat the clean wheel smoke
   test against the final artifacts.
 - [ ] Confirm the GitHub repository and PyPI project names are `rundra`, while
   the console command remains `rundr`.
 - [ ] Commit the release metadata and changelog, obtain project-owner approval,
-  then create/push the signed or annotated `v0.1.4` tag according to repository
-  policy.
+  then create/push the matching signed or annotated `vX.Y.Z` tag according to
+  repository policy.
 - [ ] Publish the exact validated sdist and wheel to PyPI only with explicit
   authorization; verify their hashes and installed `rundr` behavior.
 

@@ -124,13 +124,17 @@ A scheduler backend may optimize such a task set into a native job array, but th
 
 The long-term architecture should support a common experiment interface across heterogeneous execution environments.
 
-Potential future scheduler backends include:
+Implemented scheduler backends are:
 
 - Slurm;
-- PBS Pro;
+- OpenPBS;
+- HTCondor.
+
+Potential future scheduler backends include:
+
+- PBS Pro variants not covered by the OpenPBS adapter;
 - LSF;
 - SGE;
-- HTCondor;
 - other batch systems encountered on scientific clusters.
 
 Potential future transports and staging mechanisms include:
@@ -928,17 +932,18 @@ Responsibilities:
 - expose accounting information where available;
 - map native scheduler states to portable states.
 
-Initial implementations:
+Implemented schedulers:
 
 - `LocalScheduler`
 - `SlurmScheduler`
+- `OpenPBSScheduler`
+- `HTCondorScheduler`
 
 Future implementations may include:
 
-- PBS Pro;
+- PBS Pro variants not covered by OpenPBS;
 - LSF;
 - SGE;
-- HTCondor.
 
 A Scheduler consumes a nonempty normalized `SchedulerGroup`, not an
 `ExperimentSpec` or planner model directly. Each `SchedulerUnit` contains only
@@ -1456,8 +1461,9 @@ The installed agent-guide section remains self-contained and links to the
 canonical PyPI project overview for additional installation and workflow
 documentation. Because that page describes the latest release, installed help
 and version output remain authoritative for local behavior.
-Agents can request only the relevant `setup`, `launch`, `large-runs`,
-`lifecycle`, `results`, `preparation`, or `recovery` guidance through
+Agents can request only the relevant `setup`, `upgrade`, `launch`, `large-runs`,
+`htcondor`, `lifecycle`, `results`, `scratch`, `partitions`, `preparation`,
+`provenance`, or `recovery` guidance through
 `agent-guide --topic` or MCP `get_guidance`, avoiding repeated full-guide
 transmission.
 
@@ -2052,7 +2058,7 @@ per-Run workspace from its target and Run ID, is idempotent, and updates the
 artifact manifest; refetching an already successful retrieval keeps its
 successful state. Asynchronous
 `submit` and idempotent `cancel` are available for supported SSH scheduler
-targets using Slurm or OpenPBS; local `submit` remains the structured
+targets using Slurm, OpenPBS, or HTCondor; local `submit` remains the structured
 `ASYNC_UNAVAILABLE` capability error because no detached local process owner
 exists.
 
@@ -3224,7 +3230,7 @@ proposed independently of the routine version-update schedule.
 
 Containerized scheduler boundaries remain separate from commit gates. The
 Docker Slurm lifecycle suite runs nightly and manually, while Docker OpenPBS
-runs weekly and manually. Privileged Slurm cgroup validation remains
+and HTCondor run weekly and manually. Privileged Slurm cgroup validation remains
 manual-only. Live Shoal tests always require explicit local authorization and
 must never become an automatic GitHub Actions trigger. Scheduler-system
 availability is not a merge prerequisite.

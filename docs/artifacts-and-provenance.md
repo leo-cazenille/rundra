@@ -136,6 +136,13 @@ retrieval is `FAILED`; correct the transfer and retry `fetch` without changing
 the scientific execution state. Failed experiments can still have stdout,
 stderr, and partial raw-result artifacts.
 
+For compact archive retrieval, verified shard coverage and archive extraction
+are separate transactions. A successful shard fetch remains retrieved even if
+an explicit `--extract` is interrupted. Run inspection records
+`extraction_state` as `PENDING`, `FAILED`, or `SUCCEEDED` and retains the exact
+`extraction_destination`, so extraction can be retried without rolling back
+verified Task retrieval state.
+
 ## Raw and derived outputs
 
 Rundra manages raw execution products selected by `outputs.include`. It does not

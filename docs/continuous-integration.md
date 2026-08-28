@@ -41,13 +41,14 @@ or registry outage must not prevent an otherwise valid merge.
 | --- | --- | --- | --- |
 | `docker-slurm-system` | nightly at 02:23 UTC | yes | Slurm lifecycle, scale, failure, cancellation, and retrieval |
 | `docker-pbs-system` | Wednesdays at 03:41 UTC | yes | OpenPBS arrays, failure, cancellation, and retrieval |
+| `docker-htcondor-system` | Thursdays at 04:17 UTC | yes | HTCondor submission, lifecycle, cancellation, and retrieval |
 | `Docker Slurm cgroup system` | none | yes | privileged cgroup-v2 memory enforcement |
 | Shoal system tests | none | local explicit opt-ins only | live reference-cluster acceptance evidence |
 
 The OpenPBS workflow caches the shared Slurm/Apptainer base-image layers. The
 OpenPBS layer itself is built from the pinned source in the checked Dockerfile.
-Both scheduler lifecycle workflows upload a 14-day diagnostic artifact after a
-failure.
+The Slurm and OpenPBS lifecycle workflows upload a 14-day diagnostic artifact
+after a failure.
 
 ## Dependency updates
 

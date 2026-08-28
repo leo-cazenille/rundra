@@ -1,9 +1,9 @@
 # v0.1 interface stability
 
-This document defines the compatibility boundary for the forthcoming Rundra
-v0.1 release. The command-line interface and documented serialized formats are
-the supported integration surface. Rundra does not expose a supported Python
-API in v0.1.
+This document defines the compatibility boundary for the published Rundra 0.1
+release line. The command-line interface and documented serialized formats are
+the primary supported integration surface. The result readers documented below
+are the only supported Python API in the 0.1 line.
 
 ## Frozen v0.1 surfaces
 
@@ -34,17 +34,17 @@ Human-readable prose, whitespace, and layout are not stable. The physical
 RunStore directory layout and remote workspace layout are implementation
 details; use CLI operations and Run IDs rather than discovering files.
 
-## Python imports are internal
+## Python imports
 
-All imports below `rundra.*`, including domain dataclasses, ports, adapters,
-orchestration services, result objects, and configuration loaders, are internal
-in v0.1. Their names, signatures, modules, and composition may change without a
-deprecation period. The root package intentionally exports no Python API.
+`rundra.artifacts.open_result_set` and `open_result_shard`, together with the
+objects they return for documented read operations, are the narrow supported
+Python result-reading API. Their behavior is described in
+[artifact and provenance semantics](artifacts-and-provenance.md).
 
-Tests import these modules to exercise implementation boundaries; that does not
-make them supported application interfaces. A future Python API will sit above
-the orchestration layer, receive its own documentation and compatibility
-policy, and will not be inferred from current internal imports.
+All other imports below `rundra.*`, including domain dataclasses, ports,
+adapters, orchestration services, CLI result objects, and configuration loaders,
+are internal. Tests importing them do not make them supported application
+interfaces.
 
 ## Compatibility changes
 
