@@ -24,6 +24,10 @@ _manifest_tasks = cast(
     Callable[[dict[str, Any]], list[dict[str, Any]]],
     _NAMESPACE["_manifest_tasks"],
 )
+_checkpoint_targets = cast(
+    Callable[[float], tuple[float, ...]],
+    _NAMESPACE["checkpoint_targets"],
+)
 
 
 def test_materialized_task_manifest_is_preserved() -> None:
@@ -70,3 +74,9 @@ def test_compact_task_manifest_expands_parameter_major_order() -> None:
     ]
     assert tasks[0]["parameter_set"]["choices"] == {"regime": "ballistic"}
     assert tasks[3]["parameter_set"]["choices"] == {"regime": "long_tumble"}
+
+
+def test_checkpoint_targets_follow_simulation_duration() -> None:
+    assert _checkpoint_targets(119.2)[-1] == 120.0
+    assert _checkpoint_targets(299.0)[-1] == 300.0
+    assert _checkpoint_targets(595.0)[-1] == 600.0

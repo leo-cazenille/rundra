@@ -116,6 +116,15 @@ def nearest(curve: dict[float, float], target: float) -> tuple[float, float]:
     return time, curve[time]
 
 
+def checkpoint_targets(maximum_time: float) -> tuple[float, ...]:
+    targets = [1.0, 5.0, 10.0, 30.0, 60.0, 120.0]
+    if maximum_time >= 240.0:
+        targets.append(300.0)
+    if maximum_time >= 480.0:
+        targets.append(600.0)
+    return tuple(targets)
+
+
 def _input_roots(root: Path) -> tuple[Path, Path]:
     reference = root if root.is_file() else root / "rundra-reference.json"
     if reference.is_file():
@@ -258,12 +267,13 @@ def analyze(root: Path, destination: Path, *, jobs: int = 1) -> dict[str, Any]:
         }
         for condition, condition_runs in runs.items()
     }
+    targets = checkpoint_targets(common_times[-1])
     checkpoints: dict[str, dict[str, dict[str, float]]] = {}
     slopes: dict[str, float] = {}
     for condition, curve in ensemble.items():
         means = {time: value[0] for time, value in curve.items()}
         checkpoints[condition] = {}
-        for target in (1.0, 5.0, 10.0, 30.0, 60.0, 120.0):
+        for target in targets:
             time, mean = nearest(means, target)
             checkpoints[condition][str(target)] = {
                 "time": time,
@@ -281,7 +291,7 @@ def analyze(root: Path, destination: Path, *, jobs: int = 1) -> dict[str, Any]:
         )
 
     paired_ratios: dict[str, dict[str, float]] = {}
-    for target in (5.0, 10.0, 30.0, 60.0, 120.0):
+    for target in targets[1:]:
         ratios = []
         for ballistic, tumble in zip(
             runs["ballistic"], runs["long_tumble"], strict=True
