@@ -250,6 +250,14 @@ and profile `workers` and `task_slots_per_worker` values so the selected target'
 conservative defaults apply. Pass either option explicitly when cross-target
 execution needs a deliberate non-default scale.
 
+Local targets with an execution policy support synchronous materialized worker
+pools. Rundra starts at most `workers * task_slots_per_worker` local subprocesses,
+also bounded by `max_active_tasks` and `max_concurrent_jobs`, and waits for every
+Task before `run` returns. Local `submit` remains unavailable because no durable
+external scheduler owns the subprocesses. Local pools materialize Task state and
+therefore do not advertise the compact worker-pool capability used for very large
+remote Runs.
+
 ## Target-v7 worker memory ceiling
 
 Target configuration version 7 optionally limits the aggregate memory of each

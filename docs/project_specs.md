@@ -4082,3 +4082,19 @@ pools, scheduler rerun recovery, scheduler file transfer, DAGMan, and pool
 selection are explicitly unsupported. Agents must inspect capability metadata
 and choose another backend or local preparation rather than assuming these
 features from the scheduler name.
+
+## M32 bounded local worker pools
+
+Local scheduler targets may execute materialized multi-Task Runs through a
+bounded in-process worker pool. The target execution policy owns worker, slot,
+active-Task, memory, and job ceilings exactly as it does for remote schedulers.
+Each local slot runs one argument-vector subprocess at a time, each Task keeps a
+distinct scheduler identity and isolated runtime/output directories, and the
+adapter retains one terminal observation per Task for ordinary reconciliation.
+
+Local pools are synchronous: `rundr run` remains attached until all subprocesses
+finish, while `rundr submit` remains unavailable because no external service can
+own local subprocesses after the client exits. Local pools do not use compact
+TaskSpace state, scheduler reruns, bundle journals, or result shards. Runs above
+the compact threshold remain materialized and are still bounded by the target's
+hard Task limit.
