@@ -14,6 +14,8 @@ All notable user-visible changes are recorded here.
 - Local targets can execute materialized multi-Task Runs through bounded
   synchronous worker pools controlled by target worker, slot, active-Task, and
   concurrent-job limits.
+- Push and pull-request CI now installs the built wheel into a clean Python 3.12
+  environment and executes a 40-worker local Run through its `rundr` entry point.
 - Codex doctor audits use a private two-command nonce handshake to prove that
   the selected Run store survives sandbox process boundaries. Doctor JSON v4
   returns the exact verification argv and actionable persistent-path fallback.

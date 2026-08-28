@@ -1,6 +1,7 @@
 # Rundra
 
 [![CI](https://github.com/leo-cazenille/rundra/actions/workflows/ci.yml/badge.svg)](https://github.com/leo-cazenille/rundra/actions/workflows/ci.yml)
+[![Local deployment](https://github.com/leo-cazenille/rundra/actions/workflows/local-deployment.yml/badge.svg)](https://github.com/leo-cazenille/rundra/actions/workflows/local-deployment.yml)
 [![Docker Slurm system](https://github.com/leo-cazenille/rundra/actions/workflows/docker-slurm-system.yml/badge.svg)](https://github.com/leo-cazenille/rundra/actions/workflows/docker-slurm-system.yml)
 [![Docker OpenPBS system](https://github.com/leo-cazenille/rundra/actions/workflows/docker-pbs-system.yml/badge.svg)](https://github.com/leo-cazenille/rundra/actions/workflows/docker-pbs-system.yml)
 [![Docker HTCondor system](https://github.com/leo-cazenille/rundra/actions/workflows/docker-htcondor-system.yml/badge.svg)](https://github.com/leo-cazenille/rundra/actions/workflows/docker-htcondor-system.yml)

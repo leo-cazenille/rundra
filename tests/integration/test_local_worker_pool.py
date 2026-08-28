@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -9,8 +10,14 @@ _ROOT = Path(__file__).parents[2]
 
 
 def _rundr(*arguments: str, timeout: float = 120) -> dict[str, object]:
+    deployed = os.environ.get("RUNDRA_LOCAL_DEPLOYMENT_EXECUTABLE")
+    command = (
+        (deployed, *arguments, "--json")
+        if deployed is not None
+        else (sys.executable, "-m", "rundra", *arguments, "--json")
+    )
     completed = subprocess.run(
-        (sys.executable, "-m", "rundra", *arguments, "--json"),
+        command,
         cwd=_ROOT,
         capture_output=True,
         check=False,

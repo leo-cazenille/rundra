@@ -35,6 +35,16 @@ Configure the default branch's GitHub protection rule to require `quality` and
 `package`. Do not require scheduled scheduler-system jobs: an external Docker
 or registry outage must not prevent an otherwise valid merge.
 
+## Local deployment workflow
+
+The `local-deployment` workflow runs on every push to `main`, every pull
+request, and manual dispatch. It builds the wheel, installs that wheel and its
+runtime dependencies into a clean Python 3.12 environment, verifies the
+installed `rundr` console script, and invokes the 40-Task local worker-pool
+integration test through that installed executable. This catches packaging,
+entry-point, local staging, bounded concurrency, Run persistence, and retrieval
+regressions without Docker or cluster credentials.
+
 ## Scheduler-system workflows
 
 | Workflow | Automatic trigger | Manual trigger | Purpose |
