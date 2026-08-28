@@ -4,7 +4,7 @@ Store site details in `~/.config/rundra/targets.yaml`, not project configuration
 
 ```bash
 rundr doctor experiment.yaml
-rundr doctor experiment.yaml --connect --json
+rundr doctor experiment.yaml --connect
 rundr plan experiment.yaml --seeds 0:9
 ```
 

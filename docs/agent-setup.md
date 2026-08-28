@@ -17,9 +17,9 @@ in the user target file:
 ```yaml
 transport:
   type: ssh
-  host: fishvision
+  host: cluster-login
   executable: /usr/bin/ssh
-  config_file: /var/local/codex/shoal/ssh/config
+  config_file: /absolute/path/to/ssh/config
 ```
 
 The config path is local to the Rundra client. Rundra passes it consistently to
@@ -56,14 +56,14 @@ audit because sandbox permissions are commonly fixed at session startup.
 Check static setup without contacting the cluster:
 
 ```bash
-uv run rundr doctor examples/pogosim-shoal/experiment.yaml
+rundr doctor experiment.yaml
 ```
 
 After the sandbox has network and authentication access, request the live
 staging probe:
 
 ```bash
-uv run rundr doctor examples/pogosim-shoal/experiment.yaml --connect --json
+rundr doctor experiment.yaml --connect --json
 ```
 
 The live probe uses batch-mode SSH and creates a uniquely named private target

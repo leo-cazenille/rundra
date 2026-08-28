@@ -28,11 +28,11 @@ An experiment combines an executable command, a YAML configuration, explicit
 resources, and one or more integer seeds:
 
 ```bash
-rundr validate experiment.yaml --json
-rundr plan experiment.yaml --seeds 0:3 --json
+rundr validate experiment.yaml
+rundr plan experiment.yaml --seeds 0:3
 rundr submit experiment.yaml --seeds 0:3
-rundr wait --last --progress
-rundr fetch --last
+rundr wait RUN_ID --progress
+rundr fetch RUN_ID
 ```
 
 `rundr run` performs submission, waiting, and retrieval synchronously. Remote
@@ -51,7 +51,10 @@ target paths are safely visible through the same filesystem.
 
 ## Automation
 
-All important lifecycle commands support structured JSON. The optional MCP
+All important lifecycle commands support structured JSON through `--json`.
+Agents should retain explicit Run IDs and use `rundr await RUN_ID... --json`
+instead of interactive progress output or repeated model-driven polling.
+The optional MCP
 server exposes the same operation layer over stdio or authenticated Streamable
 HTTP, including submission recovery and paginated discovery. Network transport
 requires an environment-sourced bearer token and an explicit host policy; TLS

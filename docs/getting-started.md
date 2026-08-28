@@ -34,10 +34,14 @@ The all-local native path needs no external execution tool. Other paths need:
 | local/Apptainer | `apptainer` | same machine |
 | SSH/Slurm/rsync/Apptainer | OpenSSH and rsync | rsync, Slurm client commands, Apptainer, and the experiment executable inside the image |
 | SSH/OpenPBS/rsync/Apptainer | OpenSSH and rsync | rsync, OpenPBS client commands, Apptainer, and the experiment executable inside the image |
+| SSH/HTCondor/shared/Apptainer | OpenSSH | HTCondor client commands, Apptainer, and a workspace shared at the same absolute path |
 
 Slurm execution requires `sbatch`, `squeue`, `scancel`, and `scontrol`. Rundra
 uses `sacct` when available and otherwise falls back to `scontrol` for retained
 jobs. OpenPBS execution requires `qsub`, `qstat`, and `qdel`.
+HTCondor execution requires `condor_submit`, `condor_q`, `condor_history`, and
+`condor_rm`. A target may select `singularity` as its Apptainer-compatible
+executable when that is the site-provided command.
 
 ## Configuration locations
 
@@ -53,8 +57,10 @@ Persisted RunRecords default to `~/.local/share/rundra/runs`. This is a client
 path, not a directory that must exist on every remote login or controller node.
 Use `--data-dir` or the user launch file's `data_dir` to select another store.
 
-All configuration documents require `version: 1`, reject unknown fields, and
-must not contain credentials. Relative paths in project and user launch files
+Every configuration document has an explicit schema version, rejects unknown
+fields, and must not contain credentials. Experiment and user-launch documents
+remain version 1; project preparation and target policy use newer versions when
+their features require them. Relative paths in project and user launch files
 are resolved against the file that declares them.
 
 ## Local target
@@ -86,7 +92,7 @@ local filesystem path in use; exclude an in-project workspace such as
 ## SSH scheduler target
 
 Implemented remote stacks combine SSH, Slurm or OpenPBS, rsync or shared
-staging, and Apptainer:
+staging, and Apptainer. HTCondor uses explicit shared staging:
 
 ```yaml
 version: 1

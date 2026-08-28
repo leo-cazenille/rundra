@@ -5,7 +5,7 @@ aggregate memory, sharding, and confirmation threshold in `plan`.
 
 ```bash
 rundr submit experiment.yaml --seeds 0:9999 --confirm-tasks 20000
-rundr wait RUN_ID
+rundr wait RUN_ID --progress
 rundr fetch RUN_ID --destination retrieved/sweep
 ```
 

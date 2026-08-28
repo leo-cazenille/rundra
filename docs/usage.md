@@ -20,10 +20,10 @@ uv run rundr plan examples/minimal/experiment.yaml \
   --targets-file examples/minimal/targets.yaml
 ```
 
-`plan` does not accept `--destination`, `--source-root`, or `--data-dir` because
-it creates no Run, workspace, transfer, or record. Those values matter only to
-`run` and `submit`. A plan does report the selected staging strategy and its
-workspace root.
+`plan` does not accept `--destination` or `--data-dir` because it creates no
+Run, workspace, transfer, or record. It accepts `--source-root` to describe
+working-tree preparation without snapshotting it. A plan reports the selected
+staging strategy and workspace root.
 
 For agents, request JSON and parse fields rather than human text:
 
@@ -157,7 +157,7 @@ RUN_ID=$(python3 -c \
 ```
 
 `submit` persists scheduler identities before it returns. A later process can
-reconcile the Run; no daemon or original shell is required:
+reconcile the Run; no daemon or original shell is required.
 
 For a target-built definition image, Rundra submits the bounded preparation job
 and the scientific job with a framework-owned `afterok` dependency. It does not
@@ -171,7 +171,7 @@ framework-owned limit of one CPU, 2 GiB memory, and 15 minutes. No compiled
 output or synthetic build step is recorded.
 
 ```bash
-uv run rundr status "$RUN_ID" \
+uv run rundr await "$RUN_ID" \
   --data-dir "$REMOTE_ROOT/records" --json | python3 -m json.tool
 
 uv run rundr logs "$RUN_ID" --task 1 \
@@ -184,10 +184,11 @@ uv run rundr fetch "$RUN_ID" \
   --json | python3 -m json.tool
 ```
 
-Poll `status` explicitly until the selected work is terminal before expecting
-complete logs and outputs. Synchronous `run` performs that waiting and result
-retrieval in one command. To cancel the still-active elements of a submitted
-Run, use:
+For agents, `await` blocks one foreground harness process and returns one final
+compact document, avoiding repeated model-driven status polling. Humans can use
+`wait "$RUN_ID" --progress` for an interactive display. Synchronous `run`
+performs waiting and result retrieval in one command. To cancel the still-active
+elements of a submitted Run, use:
 
 ```bash
 uv run rundr cancel "$RUN_ID" \

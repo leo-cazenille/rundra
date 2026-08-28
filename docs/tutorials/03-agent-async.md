@@ -3,10 +3,12 @@
 ```bash
 rundr plan experiment.yaml --seeds 0:99 --json
 rundr submit experiment.yaml --seeds 0:99 --json
-rundr wait RUN_ID --timeout 300 --json
-rundr fetch RUN_ID --destination retrieved/config --json
+rundr await RUN_ID --json
+rundr fetch RUN_ID --json
 ```
 
-A timed-out wait is successful and contains current state. Renew until terminal.
-Fetching remains separately retryable. Install instructions with
-`rundr agent-guide --write AGENTS.md`.
+`await` keeps the harness blocked and emits one compact final document instead
+of waking the model to poll. Add `--timeout` only when the harness imposes a
+deadline; a timed-out result contains the current aggregate state. Fetching
+reuses the destination persisted at submission and remains separately retryable.
+Install or refresh instructions with `rundr agent-guide --write AGENTS.md`.

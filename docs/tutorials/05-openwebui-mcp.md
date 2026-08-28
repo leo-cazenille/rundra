@@ -45,8 +45,9 @@ In Open WebUI 0.6.31 or newer on fishvision:
 6. Verify tool discovery, save, and restrict access to trusted users or groups.
 
 Test `list_targets`, then `plan_experiment` before approving a small
-`submit_experiment`. Use `wait_run`, `get_status`, and `fetch_results` for the
-remaining lifecycle. If submission is interrupted, use `resume_submission`
+`submit_experiment`. Use `await_runs` so the client harness, rather than the
+model, waits for completion; use `get_status` for an intentional snapshot and
+`fetch_results` after completion. If submission is interrupted, use `resume_submission`
 with the retained Run ID rather than submitting a duplicate. If the outcome
 remains unknown, inspect the scheduler outside MCP through an approved
 read-only route. Only after proving that no job exists, call
