@@ -73,6 +73,11 @@ _SUPPORTED_BACKEND_STACKS = frozenset(
 )
 
 
+def builtin_targets_source() -> Path:
+    """Return the packaged safe local target definition."""
+    return Path(__file__).parents[1] / "defaults" / "targets.yaml"
+
+
 @dataclass(frozen=True, slots=True)
 class TargetsConfig:
     version: int

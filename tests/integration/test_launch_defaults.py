@@ -132,6 +132,54 @@ defaults:
             _restore_writes(run_root / "input")
 
 
+def test_one_argument_run_uses_packaged_local_defaults(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    for name in ("experiment.yaml", "config.yaml", "main.py"):
+        shutil.copy2(_EXAMPLE / name, project / name)
+    home = tmp_path / "home"
+    home.mkdir()
+
+    environment = {**os.environ, "HOME": str(home)}
+    planned = subprocess.run(
+        ["rundr", "plan", "experiment.yaml", "--json"],
+        cwd=project,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    result = subprocess.run(
+        ["rundr", "run", "experiment.yaml", "--json"],
+        cwd=project,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    workspace = home / ".local/share/rundra/workspaces"
+    try:
+        assert planned.returncode == 0, planned.stderr or planned.stdout
+        planned_launch = json.loads(planned.stdout)["launch"]
+        assert planned_launch["values"]["config"] == str(project / "config.yaml")
+        assert planned_launch["values"]["target"] == "local"
+        assert planned_launch["sources"]["config"] == "built_in"
+        assert planned_launch["sources"]["target"] == "built_in"
+        assert result.returncode == 0, result.stderr or result.stdout
+        document = json.loads(result.stdout)
+        assert document["run"]["state"] == "SUCCEEDED"
+        assert document["launch"]["values"]["source_root"] == str(project)
+        assert document["launch"]["sources"]["seed"] == "generated"
+        assert (project / "retrieved/config/results/result.json").is_file()
+        assert workspace.is_dir()
+        assert not (project / ".rundra").exists()
+    finally:
+        for run_root in workspace.glob("runs/run_*"):
+            _restore_writes(run_root / "source")
+            _restore_writes(run_root / "input")
+
+
 def _restore_writes(root: Path) -> None:
     if not root.exists():
         return

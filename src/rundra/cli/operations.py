@@ -36,7 +36,11 @@ from rundra.config.launch import (
     resolve_launch,
 )
 from rundra.config.sweeps import load_sweep_config
-from rundra.config.targets import load_targets, load_targets_config
+from rundra.config.targets import (
+    builtin_targets_source,
+    load_targets,
+    load_targets_config,
+)
 from rundra.domain.models import (
     Artifact,
     ArtifactKind,
@@ -1175,6 +1179,7 @@ def resolve_plan_inputs_operation(
                 config=config,
                 seed=seed,
                 target=target,
+                source_root=source_root,
                 targets_file=targets_file,
                 workers=workers,
                 task_slots_per_worker=task_slots_per_worker,
@@ -1183,10 +1188,14 @@ def resolve_plan_inputs_operation(
             project=project,
             user=user,
             builtins=LaunchValues(
+                config=experiment_source.expanduser().resolve().parent / "config.yaml",
+                target="local",
+                source_root=experiment_source.expanduser().resolve().parent,
                 targets_file=Path("~/.config/rundra/targets.yaml").expanduser()
             ),
             profile=profile,
         )
+        resolved = _select_builtin_local_target(resolved)
     except ConfigError as error:
         return OperationResult.failure("plan", _config_error(error))
     except LaunchResolutionError as error:
@@ -1362,7 +1371,13 @@ def resolve_run_inputs_operation(
         use_defaults = not fully_explicit or project is not None or profile is not None
         user = discover_user_launch(user_config_source) if use_defaults else None
         builtins = LaunchValues(
-            source_root=(project.project_root if project is not None else Path.cwd()),
+            config=experiment_source.expanduser().resolve().parent / "config.yaml",
+            target="local",
+            source_root=(
+                project.project_root
+                if project is not None
+                else experiment_source.expanduser().resolve().parent
+            ),
             targets_file=Path("~/.config/rundra/targets.yaml").expanduser(),
             data_dir=Path("~/.local/share/rundra/runs").expanduser(),
         )
@@ -1373,9 +1388,12 @@ def resolve_run_inputs_operation(
             builtins=builtins,
             profile=profile,
         )
+        resolved = _select_builtin_local_target(resolved)
         if resolved.values.destination is None and resolved.values.config is not None:
             destination_root = (
-                project.project_root if project is not None else Path.cwd()
+                project.project_root
+                if project is not None
+                else experiment_source.expanduser().resolve().parent
             )
             derived_destination = (
                 destination_root / "retrieved" / resolved.values.config.stem
@@ -1497,6 +1515,20 @@ def resolve_run_inputs_operation(
             workers=values.workers,
             task_slots_per_worker=values.task_slots_per_worker,
         ),
+    )
+
+
+def _select_builtin_local_target(resolved: ResolvedLaunch) -> ResolvedLaunch:
+    """Bind the built-in local target to its packaged definition as one layer."""
+    if (
+        resolved.values.target != "local"
+        or resolved.sources.get("target") != "built_in"
+    ):
+        return resolved
+    return ResolvedLaunch(
+        replace(resolved.values, targets_file=builtin_targets_source()),
+        {**resolved.sources, "targets_file": "built_in"},
+        resolved.profile,
     )
 
 

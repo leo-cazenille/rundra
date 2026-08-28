@@ -45,6 +45,7 @@ from rundra.cli.progress import (
     create_progress_reporter,
 )
 from rundra.cli.render import render_human, render_json
+from rundra.config.targets import builtin_targets_source
 from rundra.persistence import (
     JsonRunStore,
     PurgeReceiptStore,
@@ -444,7 +445,8 @@ def _add_json_option(parser: argparse.ArgumentParser) -> None:
 
 
 def _default_targets_file() -> Path:
-    return Path("~/.config/rundra/targets.yaml").expanduser()
+    configured = Path("~/.config/rundra/targets.yaml").expanduser()
+    return configured if configured.exists() else builtin_targets_source()
 
 
 def _default_data_dir() -> Path:

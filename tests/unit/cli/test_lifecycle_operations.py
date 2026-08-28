@@ -35,6 +35,7 @@ from rundra.cli.operations import (
     wait_operation,
 )
 from rundra.cli.render import result_document
+from rundra.config.targets import builtin_targets_source
 from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import (
     Artifact,
@@ -1307,17 +1308,26 @@ def test_run_input_resolution_rejects_seed_range_conflicts(tmp_path: Path) -> No
     assert result.error.code == "SEED_CONFLICT"
 
 
-def test_run_input_resolution_reports_all_unresolved_required_values(
+def test_run_input_resolution_uses_zero_configuration_local_defaults(
     tmp_path: Path,
 ) -> None:
+    experiment = tmp_path / "experiment.yaml"
     result = resolve_run_inputs_operation(
-        tmp_path / "experiment.yaml",
+        experiment,
         user_config_source=tmp_path / "absent-user.yaml",
+        seed_factory=lambda: 17,
     )
 
-    assert result.error is not None
-    assert result.error.code == "LAUNCH_VALUE_REQUIRED"
-    assert result.error.details == {"fields": ("config", "target")}
+    assert result.ok and result.value is not None
+    assert result.value.config == tmp_path / "config.yaml"
+    assert result.value.target == "local"
+    assert result.value.source_root == tmp_path
+    assert result.value.destination == tmp_path / "retrieved/config"
+    assert result.value.seed == 17
+    assert result.value.resolution.sources["config"] == "built_in"
+    assert result.value.resolution.sources["target"] == "built_in"
+    assert result.value.resolution.sources["targets_file"] == "built_in"
+    assert result.value.targets_file == builtin_targets_source()
 
 
 def test_fully_explicit_run_inputs_do_not_depend_on_optional_defaults(

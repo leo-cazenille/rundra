@@ -1,0 +1,9 @@
+version: 1
+
+targets:
+  local:
+    transport: {type: local}
+    scheduler: {type: local}
+    staging: {type: local}
+    container: {type: native}
+    workspace: ~/.local/share/rundra/workspaces
