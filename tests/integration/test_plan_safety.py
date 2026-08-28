@@ -137,7 +137,7 @@ targets:
 
     assert result.error is None
     document = result_document(result)
-    assert document["format_version"] == 3
+    assert document["format_version"] == 10
     assert document["plan"]["version"] == 3
     units = document["plan"]["units"]
     assert len(units) == 4

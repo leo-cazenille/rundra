@@ -84,7 +84,8 @@ targets:
     document = json.loads(captured.out)
 
     assert exit_code == 0
-    assert document["format_version"] == 2
+    assert document["format_version"] == 10
+    assert document["plan"]["version"] == 2
     preparation = document["plan"]["preparation"]
     assert preparation["source"]["mode"] == "git"
     assert preparation["image"]["sha256"] == digest

@@ -9,7 +9,7 @@ def test_public_schema_registry_is_internally_consistent() -> None:
         schema.current in schema.supported for schema in PUBLIC_SCHEMA_VERSIONS.values()
     )
     assert PUBLIC_SCHEMA_VERSIONS["run_record"].current == 7
-    assert PUBLIC_SCHEMA_VERSIONS["plan"].current == 9
+    assert PUBLIC_SCHEMA_VERSIONS["plan"].current == 10
     assert PUBLIC_SCHEMA_VERSIONS["targets_config"].current == 11
 
 

@@ -61,7 +61,8 @@ targets:
 
     assert result.ok
     document = result_document(result)
-    assert document["format_version"] == 4
+    assert document["format_version"] == 10
+    assert document["plan"]["version"] == 4
     assert document["plan"]["task_space"]["task_count"] == 20_000
     assert document["plan"]["task_space"]["preview_count"] == 10
     assert document["plan"]["scheduling"] == {
@@ -141,7 +142,8 @@ targets:
 
     assert result.ok
     document = result_document(result)
-    assert document["format_version"] == 8
+    assert document["format_version"] == 10
+    assert document["plan"]["version"] == 8
     scheduling = document["plan"]["scheduling"]
     assert scheduling["worker_count"] == 8
     assert scheduling["task_slots_per_worker"] == 40
