@@ -70,12 +70,13 @@ GUIDE = f"""{START_MARKER}
   before submitting work.
 - Treat help output as guidance only. Use `--json` or Rundra MCP tools for
   structured automation; do not parse human-oriented help text.
-- Prefer `rundr submit EXPERIMENT`, then `rundr wait RUN_ID`, then
-  `rundr fetch RUN_ID` for long Runs. Fetch reuses the absolute destination
-  persisted by submit; use `--destination PATH` only to override it, such as on
-  another workstation. Use `rundr run` only when keeping the client attached
-  is appropriate.
-- For unattended agents, use `rundr await RUN_ID... --json`: it emits one final
+- Prefer `rundr submit EXPERIMENT`, then `rundr await RUN_ID... --json`, then
+  `rundr fetch RUN_ID --json` for long Runs. Fetch reuses the absolute
+  destination persisted by submit; use `--destination PATH` only to override
+  it, such as on another workstation. Use `rundr run` only when keeping the
+  client attached is appropriate.
+- `rundr wait RUN_ID --progress` is useful for a human watching an interactive
+  terminal. Unattended agents should use `await`: it emits one final
   compact document when all Runs finish. Use `--until any` only for intentional
   first-completion workflows and `--timeout` when the harness imposes a deadline.
   The harness should block on this process rather than wake the model to poll.

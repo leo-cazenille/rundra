@@ -11,11 +11,12 @@ The authoritative project specification is:
 
 Read the relevant parts of that document before making architectural changes.
 
-The initial implementation targets:
+The implemented execution targets include:
 
 - local execution and remote execution over SSH;
-- Slurm as the first scheduler backend;
-- Apptainer as the first container runtime;
+- Slurm, OpenPBS, and HTCondor scheduler backends with explicit capability
+  differences;
+- native local execution and Apptainer-compatible container runtimes;
 - rsync and shared filesystems for staging;
 - reproducible experiment runs defined by executable + YAML config + seed;
 - structured JSON interfaces suitable for both humans and LLM agents.
@@ -109,10 +110,12 @@ Treat remote clusters as security boundaries.
 
 ## CLI conventions
 
-The intended high-level interface includes operations such as:
+The high-level interface includes operations such as:
 
 - `run`
 - `submit`
+- `wait`
+- `await`
 - `plan`
 - `status`
 - `list`
@@ -130,21 +133,19 @@ All commands that return programmatically useful information should support
 
 ## First implementation constraints
 
-Unless `docs/project_specs.md` says otherwise, prioritize the reference path:
+Unless `docs/project_specs.md` says otherwise, preserve the reference path:
 
 local client
 → SSH
 → remote workspace
-→ Slurm
+→ configured scheduler
 → Apptainer
 → shared filesystem / rsync
 → result retrieval
 
-Do not prematurely implement PBS, LSF, Kubernetes, Globus, MCP, REST services,
-or distributed databases.
-
-However, interfaces introduced in the first implementation must not make those
-extensions unnecessarily difficult.
+Do not add another scheduler, storage service, workflow engine, or persistent
+service without a concrete requirement and an explicit execution plan. Preserve
+the existing backend boundaries when extending supported adapters.
 
 ## Testing requirements
 
@@ -285,14 +286,18 @@ Do not use SSH port forwarding or agent forwarding.
 - See https://pypi.org/project/rundra/ for installation and overview
   documentation. That page describes the latest release; `rundr version` and
   the installed `rundr help` output are authoritative for the local version.
+- After upgrading Rundra, use `rundr agent-guide --topic upgrade`, refresh this
+  managed section with `rundr agent-guide --write AGENTS.md`, and rerun doctor
+  before submitting work.
 - Treat help output as guidance only. Use `--json` or Rundra MCP tools for
   structured automation; do not parse human-oriented help text.
-- Prefer `rundr submit EXPERIMENT`, then `rundr wait RUN_ID`, then
-  `rundr fetch RUN_ID` for long Runs. Fetch reuses the absolute destination
-  persisted by submit; use `--destination PATH` only to override it, such as on
-  another workstation. Use `rundr run` only when keeping the client attached
-  is appropriate.
-- For unattended agents, use `rundr await RUN_ID... --json`: it emits one final
+- Prefer `rundr submit EXPERIMENT`, then `rundr await RUN_ID... --json`, then
+  `rundr fetch RUN_ID --json` for long Runs. Fetch reuses the absolute
+  destination persisted by submit; use `--destination PATH` only to override
+  it, such as on another workstation. Use `rundr run` only when keeping the
+  client attached is appropriate.
+- `rundr wait RUN_ID --progress` is useful for a human watching an interactive
+  terminal. Unattended agents should use `await`: it emits one final
   compact document when all Runs finish. Use `--until any` only for intentional
   first-completion workflows and `--timeout` when the harness imposes a deadline.
   The harness should block on this process rather than wake the model to poll.

@@ -16,6 +16,8 @@ def test_agent_guide_print_write_update_and_check(tmp_path: Path) -> None:
 
     assert printed.ok and printed.value is not None
     assert printed.value.content == GUIDE
+    assert "rundr await RUN_ID... --json" in printed.value.content
+    assert "wait RUN_ID --progress" in printed.value.content
     assert "https://pypi.org/project/rundra/" in printed.value.content
     assert "installed `rundr help`" in printed.value.content
     assert "rundr doctor --agent codex --json" in printed.value.content
