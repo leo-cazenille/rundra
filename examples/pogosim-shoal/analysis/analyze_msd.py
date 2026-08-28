@@ -151,6 +151,46 @@ def _shard_members(shard_root: Path) -> dict[str, ShardInput]:
     return results
 
 
+def _manifest_tasks(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    materialized = manifest.get("tasks")
+    if isinstance(materialized, list):
+        return materialized
+    task_space = manifest.get("task_space")
+    parameter_sets = manifest.get("parameter_sets")
+    if not isinstance(task_space, dict) or not isinstance(parameter_sets, list):
+        raise RuntimeError("Unsupported Rundra task manifest")
+    seed_range = task_space.get("seeds")
+    if not isinstance(seed_range, dict):
+        raise RuntimeError("Compact task manifest has no seed range")
+    start = seed_range.get("start")
+    stop = seed_range.get("stop")
+    step = seed_range.get("step")
+    if not all(type(value) is int for value in (start, stop, step)) or step <= 0:
+        raise RuntimeError("Compact task manifest has an invalid seed range")
+    seeds = list(range(start, stop + 1, step))
+    tasks: list[dict[str, Any]] = []
+    for parameter_ordinal, item in enumerate(parameter_sets):
+        if not isinstance(item, dict) or item.get("ordinal") != parameter_ordinal:
+            raise RuntimeError("Compact parameter sets are not ordinally complete")
+        parameter_set = item.get("parameter_set")
+        if not isinstance(parameter_set, dict):
+            raise RuntimeError("Compact parameter set is invalid")
+        for seed_ordinal, seed in enumerate(seeds):
+            ordinal = parameter_ordinal * len(seeds) + seed_ordinal
+            task_id = f"task_{ordinal:06d}"
+            tasks.append(
+                {
+                    "task_id": task_id,
+                    "seed": seed,
+                    "parameter_set": parameter_set,
+                    "output": f"output/{task_id}",
+                }
+            )
+    if len(tasks) != task_space.get("task_count"):
+        raise RuntimeError("Compact task manifest cardinality is inconsistent")
+    return tasks
+
+
 def discovered_runs(root: Path) -> dict[str, list[tuple[int, ResultInput]]]:
     metadata_root, output_root = _input_roots(root)
     manifest_path = metadata_root / "tasks.json"
@@ -158,7 +198,7 @@ def discovered_runs(root: Path) -> dict[str, list[tuple[int, ResultInput]]]:
     shard_root = output_root / ".rundra-shards"
     shards = _shard_members(shard_root) if shard_root.is_dir() else {}
     conditions: dict[str, list[tuple[int, ResultInput]]] = defaultdict(list)
-    for task in manifest["tasks"]:
+    for task in _manifest_tasks(manifest):
         choices = task["parameter_set"]["choices"]
         regime = choices.get("regime")
         if regime not in {"ballistic", "long_tumble"}:
