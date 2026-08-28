@@ -300,6 +300,10 @@ class SchedulerLifecycleService:
                 == {task.id for task in record.run.tasks}
                 else None
             )
+        scheduler_metadata = dict(record.scheduler_metadata)
+        if state in _TERMINAL_STATES:
+            scheduler_metadata["running_tasks"] = 0
+            scheduler_metadata["active_workers"] = 0
         return replace(
             record,
             run=(
@@ -308,6 +312,7 @@ class SchedulerLifecycleService:
                 else record.run
             ),
             native_state=native_state or record.native_state,
+            scheduler_metadata=scheduler_metadata,
         )
 
     def _refresh_preparation(self, record: RunRecord) -> RunRecord:

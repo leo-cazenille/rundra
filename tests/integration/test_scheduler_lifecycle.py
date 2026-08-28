@@ -564,6 +564,7 @@ def test_refresh_repairs_terminal_aggregate_from_durable_task_facts(
         native_state="MIXED",
         task_native_states={task.id: "BUNDLED_TASK_SUCCEEDED"},
         task_exit_codes={task.id: 0},
+        scheduler_metadata={"active_workers": 2, "running_tasks": 1},
     )
     store = JsonRunStore(tmp_path / "records")
     store.create(stale)
@@ -575,6 +576,8 @@ def test_refresh_repairs_terminal_aggregate_from_durable_task_facts(
 
     assert repaired.run.state is ExecutionState.SUCCEEDED
     assert repaired.native_state == "BUNDLED_TASK_SUCCEEDED"
+    assert repaired.scheduler_metadata["active_workers"] == 0
+    assert repaired.scheduler_metadata["running_tasks"] == 0
     assert scheduler.query_calls == 0
     assert store.load(stale.run.id) == repaired
 
