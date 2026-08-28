@@ -8,6 +8,7 @@ import tempfile
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from fnmatch import fnmatchcase
 from pathlib import Path, PurePath, PurePosixPath
 from uuid import uuid4
 
