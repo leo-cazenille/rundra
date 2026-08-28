@@ -161,6 +161,51 @@ an isolated workspace, retrieves declared outputs, and stores the RunRecord in
 `~/.local/share/rundra/runs`. The repository contains a checked version of
 this workflow in [`examples/minimal`](examples/minimal).
 
+### 5. Run inside an Apptainer or Singularity container
+
+To execute the same experiment in a prebuilt SIF image, add a container target
+to `~/.config/rundra/targets.yaml`:
+
+```yaml
+version: 1
+targets:
+  local-container:
+    transport: {type: local}
+    scheduler: {type: local}
+    staging: {type: local}
+    container: {type: apptainer}
+    workspace: .rundra
+```
+
+Declare the immutable image in `experiment.yaml`. Use an absolute path and make
+sure the image contains every runtime dependency, including Python and PyYAML
+for this example:
+
+```yaml
+container:
+  image: /absolute/path/to/python-with-pyyaml.sif
+  gpu: false
+```
+
+Plan and run against the container target:
+
+```bash
+rundr doctor experiment.yaml --target local-container
+rundr plan experiment.yaml --target local-container --seed 17
+rundr run experiment.yaml --target local-container --seed 17
+```
+
+Rundra invokes either a compatible `apptainer` or `singularity` executable,
+runs the command inside the SIF, and records the runtime and image identity in
+the Run provenance. On a remote scheduler, the same experiment-level
+`container` block is portable; only the target definition changes.
+
+Rundra can also build and cache a SIF from an Apptainer definition instead of
+requiring a prebuilt image. See the checked
+[`python-multiprocessing` self-building example](examples/python-multiprocessing/README.md)
+for its `python.def`, version-4 project preparation recipe, target build policy,
+and local and Slurm launch commands.
+
 ## Everyday workflow
 
 Use `run` for short synchronous work. For long or remote experiments, submit
