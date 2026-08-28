@@ -165,6 +165,11 @@ keep the client attached while the image builds. During the short interval befor
 scientific identities are durable, `status` reports the separate preparation
 state and `logs --preparation` remains available.
 
+A prebuilt image recipe may omit the application `build`. When target-side
+source or image preparation is still required, Rundra schedules it with a
+framework-owned limit of one CPU, 2 GiB memory, and 15 minutes. No compiled
+output or synthetic build step is recorded.
+
 ```bash
 uv run rundr status "$RUN_ID" \
   --data-dir "$REMOTE_ROOT/records" --json | python3 -m json.tool

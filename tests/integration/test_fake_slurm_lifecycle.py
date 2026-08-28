@@ -24,6 +24,7 @@ from rundra.domain.models import (
 from rundra.domain.preparation import (
     DefinitionBuildPolicy,
     PreparationConfig,
+    PreparationImage,
     PreparationImageDefinition,
     PreparationPlan,
     PreparationSourceWorkingTree,
@@ -340,6 +341,87 @@ def test_target_only_auto_definition_build_uses_fake_slurm_dependency(
     assert submitted.preparation.image_recipe_key == remote.image_recipe_key
     assert submitted.preparation.image_sha256 is None
     assert submitted.container_digest is None
+    assert submitted.scheduler_job_ids == ("42",)
+    assert any("afterok:41" in command.argv for command in transport.commands)
+
+
+def test_prebuilt_image_without_application_build_uses_bounded_preparation(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "run.py").write_text("print('gpu smoke')\n", encoding="utf-8")
+    preparation = PreparationPlan(
+        PreparationConfig(
+            PreparationSourceWorkingTree(),
+            PreparationImage(
+                PurePosixPath("test.sif"),
+                "library://example/test:1",
+                "ab" * 32,
+            ),
+            None,
+        ),
+        source_mode="working_tree",
+        source_root=source,
+    )
+    original = _request(tmp_path)
+    target = original.plan.target
+    prepared_source = PreparedSource(
+        source,
+        "cd" * 32,
+        "snapshot_working_tree",
+        "working-tree",
+    )
+    remote = create_remote_preparation_spec(
+        preparation,
+        prepared_source,
+        target,
+        "ef" * 32,
+    )
+    provenance = remote_preparation_record(remote, target)
+    assert original.experiment.container is not None
+    experiment = replace(
+        original.experiment,
+        container=replace(
+            original.experiment.container,
+            image=provenance.image_path,
+        ),
+    )
+    request = RunExecutionRequest(
+        create_plan(
+            experiment,
+            original.plan.units[0].config,
+            target,
+            seeds=(17,),
+            preparation=preparation,
+        ),
+        experiment,
+        source,
+        tmp_path / "retrieved",
+        preparation=provenance,
+        remote_preparation=remote,
+    )
+    transport = DefinitionBuildTransport(PurePosixPath(provenance.image_path))
+    service = OrchestrationService(
+        store=JsonRunStore(tmp_path / "records"),
+        stager=FakeRemoteStager(),
+        runtime=FakeRuntime(),
+        scheduler=SlurmScheduler(
+            transport,
+            timezone=UTC,
+            log_directory=PurePosixPath("/remote/.scheduler-logs"),
+        ),
+        transport=transport,
+        run_id_factory=lambda: _RUN_ID,
+        clock=lambda: _NOW,
+        framework_version="0.1.0.dev0",
+    )
+
+    submitted = service.submit_one(request).record
+
+    assert submitted.preparation is not None
+    assert submitted.preparation.builder_scheduler_id == "41"
+    assert submitted.preparation.build_cache_key is None
     assert submitted.scheduler_job_ids == ("42",)
     assert any("afterok:41" in command.argv for command in transport.commands)
 

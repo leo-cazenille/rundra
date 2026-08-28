@@ -144,6 +144,12 @@ because their SIF digest is not known in advance. `plan --json` reports the
 original `requested_location` and policy-derived `selected_location`; this
 selection reads configuration only and does not probe caches or the target.
 
+For a prebuilt image recipe without an application `build`, target preparation
+uses a framework-owned bound of one CPU, 2 GiB memory, and 15 minutes. This
+allows source sealing and verified image resolution to remain scheduler-side
+without requiring a synthetic build recipe. Explicit application and definition
+builds continue to use their declared resource requests.
+
 Project schema v4 additionally requires `definition.context.include`, a list of
 exact safe snapshot-relative files or directories. The definition itself is
 always included. Only these inputs identify the definition-image recipe, while

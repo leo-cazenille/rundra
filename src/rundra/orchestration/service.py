@@ -5,7 +5,7 @@ import json
 import os
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from math import ceil
 from pathlib import Path, PurePath, PurePosixPath
 from time import monotonic, sleep
@@ -103,6 +103,11 @@ _TERMINAL_STATES = frozenset(
 _MIN_ETA_SAMPLE_COUNT = 20
 _MIN_ETA_SAMPLE_FRACTION = 0.10
 _MIN_ETA_WINDOW_SECONDS = 60
+_PREBUILT_IMAGE_PREPARATION_RESOURCES = ResourceRequest(
+    cpus_per_task=1,
+    memory_bytes=2 * 1024**3,
+    walltime=timedelta(minutes=15),
+)
 
 
 def _preparation_status(state: ExecutionState) -> str:
@@ -132,7 +137,9 @@ def _remote_preparation_resources(
     build: PreparationBuild | None,
 ) -> ResourceRequest | None:
     if type(image) is not PreparationImageDefinition:
-        return None if build is None else build.resources
+        return (
+            _PREBUILT_IMAGE_PREPARATION_RESOURCES if build is None else build.resources
+        )
     if build is None:
         return image.resources
     assert image.resources.memory_bytes is not None

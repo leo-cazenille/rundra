@@ -1460,8 +1460,6 @@ def _remote_preparation_inputs(
     target_storage: PreparationStorageConfig,
 ) -> tuple[Path, ExperimentSpec, PreparationRecord, RemotePreparationSpec]:
     image = plan.recipe.image
-    if plan.recipe.build is None and type(image) is not PreparationImageDefinition:
-        raise PreparationError("Remote preparation requires bounded build resources")
     source = prepare_source_snapshot(
         plan,
         source_root=source_root,

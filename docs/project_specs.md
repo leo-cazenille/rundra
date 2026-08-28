@@ -1608,6 +1608,9 @@ The target preparation design extends this lifecycle with one bounded Slurm
 job on a remote cache miss. Compilation must not run in an SSH login process,
 and experiment jobs use a framework-owned `afterok` dependency. Preparation
 state and scheduler identity remain separate from scientific Task identities.
+Prebuilt-image recipes without an application build use a framework-owned
+preparation request of one CPU, 2 GiB memory, and 15 minutes for source sealing
+and verified image resolution; they do not require or record a synthetic build.
 After a synchronous prepared run, the version-2 record finalizes whether the
 target image was pulled, copied from a verified candidate, or reused and
 whether compiled outputs were built or reused.
