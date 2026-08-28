@@ -304,9 +304,7 @@ profiles:
         project=project,
     )
     explicit_scale = resolve_launch(
-        cli=LaunchValues(
-            target="cluster-b", workers=2, task_slots_per_worker=16
-        ),
+        cli=LaunchValues(target="cluster-b", workers=2, task_slots_per_worker=16),
         project=project,
     )
 
@@ -318,9 +316,7 @@ profiles:
     assert same_target.values.workers == 8
     assert same_target.values.task_slots_per_worker == 40
     assert same_target.sources["workers"] == "project"
-    assert same_target.sources["task_slots_per_worker"] == (
-        "project_profile:cluster_a"
-    )
+    assert same_target.sources["task_slots_per_worker"] == ("project_profile:cluster_a")
     assert explicit_scale.values.workers == 2
     assert explicit_scale.values.task_slots_per_worker == 16
     assert explicit_scale.sources["workers"] == "cli"

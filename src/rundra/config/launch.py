@@ -512,9 +512,7 @@ def resolve_launch(
     if project is not None:
         project_defaults = project.defaults
         profile_values = (
-            project.profiles[selected_profile]
-            if selected_profile is not None
-            else None
+            project.profiles[selected_profile] if selected_profile is not None else None
         )
         project_target = (
             profile_values.target
@@ -531,6 +529,7 @@ def resolve_launch(
                 profile_values = _without_worker_scale(profile_values)
         layers.append(("project", project_defaults))
         if selected_profile is not None:
+            assert profile_values is not None
             layers.append(
                 (
                     f"project_profile:{selected_profile}",
