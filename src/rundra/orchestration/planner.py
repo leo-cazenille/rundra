@@ -194,7 +194,9 @@ def create_scalable_plan(
             message="worker scale options require worker-pool execution",
         )
     capabilities = scheduler_capabilities(target.scheduler.kind)
-    if selected == WORKER_POOL and not capabilities.compact_worker_pool:
+    if selected == WORKER_POOL and not (
+        capabilities.compact_worker_pool or capabilities.materialized_worker_pool
+    ):
         raise PlanningError(
             code="UNSUPPORTED_EXECUTION_STRATEGY",
             message="worker-pool execution is unsupported by the selected scheduler",

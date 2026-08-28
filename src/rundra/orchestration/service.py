@@ -85,6 +85,7 @@ from rundra.ports import (
     Transport,
 )
 from rundra.provenance import GitProvenance, ProvenanceProvider
+from rundra.scheduler_registry import scheduler_capabilities
 
 _CONTAINER_SOURCE = PurePosixPath("/workspace/source")
 _CONTAINER_INPUTS = PurePosixPath("/workspace/input")
@@ -1313,12 +1314,19 @@ class OrchestrationService:
             for limit in (request.max_concurrent_jobs, request.max_workers)
             if limit is not None
         )
-        planned_bundled = request.plan.strategy in {
-            SLURM_ARRAY,
-            SCHEDULER_ARRAY,
-        } and (
-            request.task_slots_per_worker > 1
-            or (worker_limits and len(units) > min(worker_limits))
+        planned_bundled = (
+            request.plan.strategy
+            in {
+                SLURM_ARRAY,
+                SCHEDULER_ARRAY,
+            }
+            and scheduler_capabilities(
+                request.plan.target.scheduler.kind
+            ).bundled_worker_pool
+            and (
+                request.task_slots_per_worker > 1
+                or (worker_limits and len(units) > min(worker_limits))
+            )
         )
         if planned_bundled:
             updated = replace(

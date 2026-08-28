@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Lock
+from time import sleep
 
 import pytest
 
@@ -12,9 +14,19 @@ from rundra.adapters.local import (
     LocalTransport,
     LocalTransportError,
 )
+from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import Command, ResourceRequest, TaskId
 from rundra.domain.states import ExecutionState
-from rundra.ports import Scheduler, SchedulerGroup, SchedulerUnit, Transport
+from rundra.ports import (
+    ArrayScheduler,
+    CapabilityCheck,
+    CommandResult,
+    Scheduler,
+    SchedulerArrayRequest,
+    SchedulerGroup,
+    SchedulerUnit,
+    Transport,
+)
 
 
 def _unit(command: Command, ordinal: int = 0) -> SchedulerUnit:
@@ -160,3 +172,53 @@ def test_local_scheduler_timestamps_come_from_the_transport_result() -> None:
 
     assert result is not None
     assert before <= result.started_at <= result.finished_at <= datetime.now(UTC)
+
+
+class _TrackingTransport:
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self.active = 0
+        self.peak = 0
+
+    def check(self) -> CapabilityCheck:
+        return CapabilityCheck("tracking")
+
+    def run(self, command: Command) -> CommandResult:
+        started_at = datetime.now(UTC)
+        with self._lock:
+            self.active += 1
+            self.peak = max(self.peak, self.active)
+        sleep(0.03)
+        with self._lock:
+            self.active -= 1
+        return CommandResult(command, 0, "", "", started_at, datetime.now(UTC))
+
+
+def test_local_array_scheduler_enforces_worker_slot_capacity(tmp_path: Path) -> None:
+    transport = _TrackingTransport()
+    references = iter(f"local-array-{index}" for index in range(8))
+    scheduler = LocalScheduler(transport, reference_factory=references.__next__)
+    units = tuple(
+        _unit(Command((sys.executable, "-c", "pass")), ordinal=index)
+        for index in range(8)
+    )
+    request = SchedulerArrayRequest(
+        SchedulerGroup(units),
+        tuple(
+            ArrayTaskMapping(unit.task_id, index, index)
+            for index, unit in enumerate(units)
+        ),
+        tmp_path / "tasks.sh",
+        max_concurrent_jobs=8,
+        max_workers=2,
+        task_slots_per_worker=2,
+    )
+
+    submission = scheduler.submit_array(request)
+    observations = scheduler.query(submission.references)
+
+    assert isinstance(scheduler, ArrayScheduler)
+    assert transport.peak == 4
+    assert len(submission.references) == 8
+    assert len(submission.task_native_ids) == 8
+    assert all(item.state is ExecutionState.SUCCEEDED for item in observations)

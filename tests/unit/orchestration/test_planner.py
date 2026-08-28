@@ -102,11 +102,12 @@ def test_create_plan_is_deterministic_inspectable_and_does_not_create_a_run() ->
     assert first.version == 1
     assert first.experiment_name == "example"
     assert first.target == _target()
-    assert first.strategy == "one_unit_per_task"
-    assert first.array_mapping == ()
+    assert first.strategy == "scheduler_array"
+    assert tuple(item.task_id for item in first.array_mapping) == tuple(
+        unit.task_id for unit in first.units
+    )
     assert [group.task_ids for group in first.groups] == [
-        (first.units[0].task_id,),
-        (first.units[1].task_id,),
+        tuple(unit.task_id for unit in first.units)
     ]
     assert first.staging_backend == "local"
     assert [str(unit.task_id) for unit in first.units] == [
@@ -211,6 +212,7 @@ def test_execution_plan_rejects_unstable_ids_duplicate_seeds_and_configs() -> No
         "target": plan.target,
         "groups": plan.groups,
         "array_mapping": plan.array_mapping,
+        "strategy": plan.strategy,
     }
 
     with pytest.raises(ValueError, match="contiguous ordinal Task IDs"):
@@ -283,11 +285,17 @@ def test_execution_plan_rejects_invalid_group_partitions_and_strategies() -> Non
     }
 
     with pytest.raises(ValueError, match="partition Task IDs in plan order"):
-        ExecutionPlan(groups=(ExecutionGroup((TaskId.from_ordinal(1),)),), **common)
+        ExecutionPlan(
+            groups=(ExecutionGroup((TaskId.from_ordinal(1),)),),
+            strategy=local.strategy,
+            **common,
+        )
     with pytest.raises(ValueError, match="singleton execution groups"):
         ExecutionPlan(
             groups=(ExecutionGroup(tuple(unit.task_id for unit in local.units)),),
-            **common,
+            array_mapping=(),
+            strategy="one_unit_per_task",
+            **{key: value for key, value in common.items() if key != "array_mapping"},
         )
     with pytest.raises(ValueError, match="requires a Slurm target"):
         ExecutionPlan(groups=local.groups, strategy="slurm_array", **common)
@@ -299,8 +307,8 @@ def test_execution_plan_rejects_invalid_group_partitions_and_strategies() -> Non
             experiment_name=local.experiment_name,
             target=slurm_target,
             units=local.units,
-            groups=local.groups,
-            array_mapping=(),
+            groups=tuple(ExecutionGroup((unit.task_id,)) for unit in local.units),
+            array_mapping=local.array_mapping,
             strategy="slurm_array",
         )
     with pytest.raises(ValueError, match="unsupported"):

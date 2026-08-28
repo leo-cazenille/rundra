@@ -17,6 +17,8 @@ class SchedulerCapabilities:
     arrays: bool
     dependencies: bool
     compact_worker_pool: bool
+    materialized_worker_pool: bool
+    bundled_worker_pool: bool
     scheduler_requeue_recovery: bool
     scheduler_probe: bool
     array_strategy: str
@@ -29,6 +31,8 @@ class SchedulerCapabilities:
                 self.arrays,
                 self.dependencies,
                 self.compact_worker_pool,
+                self.materialized_worker_pool,
+                self.bundled_worker_pool,
                 self.scheduler_requeue_recovery,
                 self.scheduler_probe,
             )
@@ -52,23 +56,57 @@ _BACKENDS: Final = MappingProxyType(
     {
         "local": SchedulerBackendDescriptor(
             SchedulerCapabilities(
-                False, False, False, False, False, False, "one_unit_per_task"
+                detached_submission=False,
+                arrays=True,
+                dependencies=False,
+                compact_worker_pool=False,
+                materialized_worker_pool=True,
+                bundled_worker_pool=False,
+                scheduler_requeue_recovery=False,
+                scheduler_probe=False,
+                array_strategy="scheduler_array",
             ),
             (),
         ),
         "slurm": SchedulerBackendDescriptor(
-            SchedulerCapabilities(True, True, True, True, True, True, "slurm_array"),
+            SchedulerCapabilities(
+                detached_submission=True,
+                arrays=True,
+                dependencies=True,
+                compact_worker_pool=True,
+                materialized_worker_pool=True,
+                bundled_worker_pool=True,
+                scheduler_requeue_recovery=True,
+                scheduler_probe=True,
+                array_strategy="slurm_array",
+            ),
             ("sbatch", "squeue", "scancel", "scontrol", "sinfo"),
         ),
         "pbs": SchedulerBackendDescriptor(
             SchedulerCapabilities(
-                True, True, True, True, False, True, "scheduler_array"
+                detached_submission=True,
+                arrays=True,
+                dependencies=True,
+                compact_worker_pool=True,
+                materialized_worker_pool=True,
+                bundled_worker_pool=True,
+                scheduler_requeue_recovery=False,
+                scheduler_probe=True,
+                array_strategy="scheduler_array",
             ),
             ("qsub", "qstat", "qdel"),
         ),
         "htcondor": SchedulerBackendDescriptor(
             SchedulerCapabilities(
-                True, True, False, False, False, True, "scheduler_array"
+                detached_submission=True,
+                arrays=True,
+                dependencies=False,
+                compact_worker_pool=False,
+                materialized_worker_pool=False,
+                bundled_worker_pool=False,
+                scheduler_requeue_recovery=False,
+                scheduler_probe=True,
+                array_strategy="scheduler_array",
             ),
             (
                 "condor_submit",

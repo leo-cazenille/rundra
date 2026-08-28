@@ -1784,6 +1784,7 @@ def run_operation(
             task_store is not None
             and scaling_plan is not None
             and scaling_plan.strategy == "worker-pool"
+            and scheduler_capabilities(target.scheduler.kind).compact_worker_pool
             and task_total >= _COMPACT_EXECUTION_THRESHOLD
         )
         if direct_compact:
@@ -2100,6 +2101,7 @@ def submit_operation(
             task_store is not None
             and scaling_plan is not None
             and scaling_plan.strategy == "worker-pool"
+            and scheduler_capabilities(target.scheduler.kind).compact_worker_pool
             and task_total >= _COMPACT_EXECUTION_THRESHOLD
         )
         if direct_compact:

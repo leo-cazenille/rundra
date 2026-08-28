@@ -6,6 +6,7 @@ import stat
 import subprocess
 import tempfile
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePath, PurePosixPath
@@ -23,6 +24,7 @@ from rundra.ports import (
     CommandResult,
     FetchRequest,
     FetchResult,
+    SchedulerArrayRequest,
     SchedulerGroup,
     SchedulerObservation,
     SchedulerReference,
@@ -135,29 +137,62 @@ class LocalScheduler:
                 "M1 LocalScheduler requires exactly one execution unit"
             )
         unit = group.units[0]
-        reference_value = self._reference_factory()
-        if type(reference_value) is not str or not reference_value:
-            raise LocalSchedulerError(
-                "Local scheduler reference factory must return a nonempty string"
-            )
-        reference = SchedulerReference(reference_value)
-        if reference in self._observations:
-            raise LocalSchedulerError(
-                f"Local scheduler reference already exists: {reference.native_id}"
-            )
+        reference = self._allocate_references(1)[0]
         result = self._transport.run(unit.command)
-        state = (
-            ExecutionState.SUCCEEDED if result.exit_code == 0 else ExecutionState.FAILED
-        )
-        self._observations[reference] = SchedulerObservation(
-            reference=reference,
-            state=state,
-            native_state="EXITED",
-            exit_code=result.exit_code,
-            metadata={"transport": "local"},
-            result=result,
-        )
+        self._observations[reference] = _local_observation(reference, result)
         return SchedulerSubmission(reference, {unit.task_id: reference.native_id})
+
+    def submit_array(self, request: SchedulerArrayRequest) -> SchedulerSubmission:
+        """Execute mapped Tasks synchronously with bounded local concurrency."""
+        if type(request) is not SchedulerArrayRequest:
+            raise TypeError("LocalScheduler submit_array requires an array request")
+        units = request.group.units
+        references = self._allocate_references(len(units))
+        worker_count = request.max_workers or request.max_concurrent_jobs or len(units)
+        capacity = worker_count * request.task_slots_per_worker
+        if request.max_concurrent_jobs is not None:
+            capacity = min(capacity, request.max_concurrent_jobs)
+        capacity = min(capacity, len(units))
+        try:
+            with ThreadPoolExecutor(
+                max_workers=capacity,
+                thread_name_prefix="rundra-local",
+            ) as executor:
+                results = tuple(
+                    executor.submit(self._transport.run, unit.command) for unit in units
+                )
+                for reference, future in zip(references, results, strict=True):
+                    self._observations[reference] = _local_observation(
+                        reference, future.result()
+                    )
+        except Exception as error:
+            raise LocalSchedulerError(
+                f"Local array execution failed: {type(error).__name__}"
+            ) from error
+        return SchedulerSubmission(
+            references[0],
+            {
+                unit.task_id: reference.native_id
+                for unit, reference in zip(units, references, strict=True)
+            },
+            references[1:],
+        )
+
+    def _allocate_references(self, count: int) -> tuple[SchedulerReference, ...]:
+        references: list[SchedulerReference] = []
+        for _ in range(count):
+            value = self._reference_factory()
+            if type(value) is not str or not value:
+                raise LocalSchedulerError(
+                    "Local scheduler reference factory must return a nonempty string"
+                )
+            reference = SchedulerReference(value)
+            if reference in self._observations or reference in references:
+                raise LocalSchedulerError(
+                    f"Local scheduler reference already exists: {reference.native_id}"
+                )
+            references.append(reference)
+        return tuple(references)
 
     def query(
         self, references: tuple[SchedulerReference, ...]
@@ -333,6 +368,20 @@ class LocalStager:
                 )
             )
         return FetchResult(tuple(artifacts))
+
+
+def _local_observation(
+    reference: SchedulerReference, result: CommandResult
+) -> SchedulerObservation:
+    state = ExecutionState.SUCCEEDED if result.exit_code == 0 else ExecutionState.FAILED
+    return SchedulerObservation(
+        reference=reference,
+        state=state,
+        native_state="EXITED",
+        exit_code=result.exit_code,
+        metadata={"transport": "local"},
+        result=result,
+    )
 
 
 def _source_directory(value: PurePath) -> Path:

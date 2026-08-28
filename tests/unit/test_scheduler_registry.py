@@ -12,6 +12,10 @@ from rundra.scheduler_registry import (
 
 def test_builtin_scheduler_capabilities_are_explicit() -> None:
     assert not scheduler_capabilities("local").detached_submission
+    assert scheduler_capabilities("local").arrays
+    assert scheduler_capabilities("local").materialized_worker_pool
+    assert not scheduler_capabilities("local").compact_worker_pool
+    assert not scheduler_capabilities("local").bundled_worker_pool
     assert scheduler_capabilities("slurm").scheduler_requeue_recovery
     assert scheduler_capabilities("pbs").compact_worker_pool
     assert not scheduler_capabilities("pbs").scheduler_requeue_recovery
