@@ -12,6 +12,7 @@ import math
 import statistics
 import tarfile
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -214,24 +215,36 @@ def discovered_runs(root: Path) -> dict[str, list[tuple[int, ResultInput]]]:
     }
 
 
-def analyze(root: Path, destination: Path) -> dict[str, Any]:
+def analyze(root: Path, destination: Path, *, jobs: int = 1) -> dict[str, Any]:
+    if jobs <= 0:
+        raise ValueError("Analysis jobs must be positive")
     discovered = discovered_runs(root)
     runs: dict[str, list[dict[float, float]]] = {}
     schemas: dict[str, list[str]] = {}
     robot_counts: dict[str, list[int]] = {}
-    for condition in ("ballistic", "long_tumble"):
-        items = discovered.get(condition, [])
-        if not items:
-            raise RuntimeError(f"No runs found for {condition}")
-        condition_runs: list[dict[float, float]] = []
-        counts: list[int] = []
-        for _, path in items:
-            curve, schema, count = run_msd(path)
-            condition_runs.append(curve)
-            schemas.setdefault(condition, schema)
-            counts.append(count)
-        runs[condition] = condition_runs
-        robot_counts[condition] = counts
+    executor = ProcessPoolExecutor(max_workers=jobs) if jobs > 1 else None
+    try:
+        for condition in ("ballistic", "long_tumble"):
+            items = discovered.get(condition, [])
+            if not items:
+                raise RuntimeError(f"No runs found for {condition}")
+            paths = [path for _, path in items]
+            results = (
+                executor.map(run_msd, paths, chunksize=8)
+                if executor is not None
+                else map(run_msd, paths)
+            )
+            condition_runs: list[dict[float, float]] = []
+            counts: list[int] = []
+            for curve, schema, count in results:
+                condition_runs.append(curve)
+                schemas.setdefault(condition, schema)
+                counts.append(count)
+            runs[condition] = condition_runs
+            robot_counts[condition] = counts
+    finally:
+        if executor is not None:
+            executor.shutdown()
 
     common_times = sorted(
         set.intersection(*(set(curve) for values in runs.values() for curve in values))
@@ -309,9 +322,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Analyze the Pogosim MSD sweep")
     parser.add_argument("--input", type=Path, default=Path("retrieved/msd-120s"))
     parser.add_argument("--output", type=Path, default=Path("derived/msd-120s"))
+    parser.add_argument("--jobs", type=int, default=1)
     arguments = parser.parse_args()
     print(
-        json.dumps(analyze(arguments.input, arguments.output), indent=2, sort_keys=True)
+        json.dumps(
+            analyze(arguments.input, arguments.output, jobs=arguments.jobs),
+            indent=2,
+            sort_keys=True,
+        )
     )
 
 
