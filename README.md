@@ -5,216 +5,129 @@
 [![Docker OpenPBS system](https://github.com/leo-cazenille/rundra/actions/workflows/docker-pbs-system.yml/badge.svg)](https://github.com/leo-cazenille/rundra/actions/workflows/docker-pbs-system.yml)
 [![Docker HTCondor system](https://github.com/leo-cazenille/rundra/actions/workflows/docker-htcondor-system.yml/badge.svg)](https://github.com/leo-cazenille/rundra/actions/workflows/docker-htcondor-system.yml)
 
-Rundra is planned as a portable experiment-execution framework for
-reproducible scientific computing and agentic research. The authoritative
-product and architecture specification is in
-[`docs/project_specs.md`](docs/project_specs.md).
+Rundra runs reproducible scientific experiments on a workstation or a shared
+compute cluster. An experiment combines an executable command, a configuration,
+an explicit random seed, requested resources, and declared outputs. Rundra turns
+that description into durable Runs and Tasks that can be planned, submitted,
+monitored, retrieved, inspected, cancelled, and purged through one interface.
 
-The project, GitHub repository, Python package, and PyPI distribution are named
-`rundra`; the command-line executable is `rundr`.
+Rundra is useful when you want to:
 
-## Development status
+- run the same experiment locally and through a batch scheduler;
+- launch many seeds or parameter combinations without writing scheduler scripts;
+- build or acquire a pinned Apptainer image and cache prepared applications;
+- retain exact source, configuration, image, resource, and scheduler provenance;
+- retrieve large result sets safely, including compact archive retrieval;
+- automate experiments through stable JSON output or MCP tools.
 
-M0 through M6 implementation and release hardening are complete. Version
-`0.1.5` is published on PyPI. Source development is preparing version `0.1.6`.
-The checked
-Shoal path has passed separately gated CPU, GPU, controlled-failure, and
-three-element Slurm-array system tests. M6.1 audits every public CLI operation,
-common `--json` placement, deterministic output, structured usage errors, and
-process exit semantics. M6.2 statically validates executable target stacks,
-container/GPU/resource compatibility, and scheduler-native options before
-execution, while making `plan` safety and staging behavior explicit.
-M6.3 hardens Run persistence with per-Run writer locking, mandatory optimistic
-updates, retryable conflict reporting, and concurrent status/fetch/cancel stress
-coverage; readers remain lock-free over atomically replaced JSON records.
-M6.4 audits every subprocess and the SSH/sbatch shell boundaries, restricts SSH
-destinations and Slurm native tokens, rejects symlinked fetch destinations,
-redacts adapter diagnostics, and enforces the no-credential invariant at both
-configuration and RunStore boundaries without weakening normal SSH host-key
-verification.
-M6.5 completes the user/agent documentation set with source installation and
-target setup, executable local/remote lifecycle examples, troubleshooting,
-versioned JSON contract inventory, artifact/provenance semantics, and explicit
-Shoal system-test opt-ins. The specification now distinguishes implemented
-provenance from optional fields that remain unavailable in v0.1.
-M6.6 completes the release validation matrix: default tests remain
-infrastructure-free, source distributions and wheels install cleanly, and all
-nine explicitly opted-in Shoal tests pass, including disconnected asynchronous
-status/log/fetch/cancel, repeat operations, concurrent isolation, and active
-cancellation with partial retrieval.
-M6.7 restores the final adapter dependency boundary, adds executable
-architecture and CLI-surface guards, freezes the documented v0.1 serialized
-contracts, marks Python imports unstable, and supplies the changelog and
-authorization-aware release checklist.
+The Python package is `rundra`; the command is `rundr`. Version `0.1.6` is an
+alpha release and requires Python 3.12.
 
-Rundra has
-portable domain and configuration models,
-deterministic planning, isolated local staging, durable versioned Run records,
-shell-free local execution, Apptainer command construction, Git provenance,
-artifact retrieval, and common human/JSON lifecycle interfaces. The checked
-minimal experiment runs through the same planner, ports, orchestration service,
-and persistence path intended for later remote execution.
+## Quick start
 
-M3 adds deterministic inspectable sbatch scripts, parsable submission, durable
-job references, `squeue`/`sacct` reconciliation, synchronous waiting,
-asynchronous `submit`, cancellation, and normalized remote logs. Portable
-resource fields and a narrow `resources.native.slurm` allowlist are translated
-without allowing native options to override framework-managed directives.
-Normal tests use scripted transports and do not invoke an installed Slurm.
+### 1. Install Rundra
 
-M2.1 adds a typed OpenSSH transport adapter that honors normal user SSH
-configuration, agent authentication, jump-host configuration, and host-key
-verification. SSH/Slurm/rsync/Apptainer targets are now wired through `run` and
-`submit`; site behavior is validated only by separately enabled system tests.
-
-M2.2 centralizes the unavoidable remote-shell serialization boundary. Literal
-arguments, environment values, and working directories are POSIX-shell quoted;
-diagnostics expose only structurally redacted command summaries.
-
-M2.3–M2.6 add validated isolated remote workspace allocation and rsync upload
-of live working trees plus exact effective configuration. Successfully uploaded
-source/input snapshots are sealed read-only. Independent idempotent rsync
-retrieval collects output, logs, and metadata while keeping transfer state
-separate from computation state.
-
-The default integration suite validates this remote transport/staging path with
-executable SSH and rsync shims. It requires neither a network connection nor an
-installed scheduler. Real-cluster checks remain explicitly opt-in.
-
-A non-secret Shoal target template and its configuration guidance are in
-[`docs/shoal.md`](docs/shoal.md). The template is setup documentation, not a
-portable site default; recorded bounded validation evidence is documented
-separately in that guide.
-
-M1E adds strict project launch profiles, optional user defaults, deterministic
-resolution precedence, concise `run`/`plan` commands, and generated seeds that
-are displayed and durably recorded before execution.
-
-Local execution is synchronous and local `submit` remains unavailable. Slurm,
-OpenPBS, and HTCondor targets support durable asynchronous `submit`, new-process
-`status`/`logs`, and idempotent `cancel`. An explicit `native` runtime supports
-only an all-local target and an experiment without a container request; remote
-experiments use the `apptainer` runtime.
-
-Implementation progress is tracked in
-[`.agent/plans/v0.1.md`](.agent/plans/v0.1.md).
-
-User documentation:
-
-- [changelog](CHANGELOG.md);
-- [installation, configuration, and target setup](docs/getting-started.md);
-- [v0.1 CLI reference](docs/cli-reference.md);
-- [local and remote execution, lifecycle commands, and troubleshooting](docs/usage.md);
-- [artifact, provenance, and reproducibility semantics](docs/artifacts-and-provenance.md);
-- [versioned JSON contracts for agents](docs/schemas/README.md);
-- [portable agent instructions](docs/agent-instructions.md);
-- [task-oriented tutorials](docs/tutorials/01-local-first-run.md);
-- [interface stability and internal Python API policy](docs/stability.md);
-- [release checklist](docs/release-checklist.md);
-- [continuous integration and system-test triggers](docs/continuous-integration.md);
-- [Shoal setup and explicitly opted-in system tests](docs/shoal.md).
-
-## Development setup
-
-The latest published package is available on PyPI. Development requires Python
-3.12 and uses
-[`uv`](https://docs.astral.sh/uv/) for environment and dependency management.
-See the [installation and target setup guide](docs/getting-started.md) for a
-source tool installation and backend requirements.
+Install the command as an isolated tool:
 
 ```bash
-uv sync
-uv run rundr --help
+uv tool install --python 3.12 rundra
+rundr --version
+rundr help
 ```
 
-Run the required development checks with:
+Upgrade an existing installation with `uv tool upgrade rundra`. Contributors
+working from this repository should instead run:
 
 ```bash
-tools/check.sh
+uv sync --locked
+uv run rundr --version
 ```
 
-This is also the `main`-push and pull-request quality gate. Packaging is
-checked separately as documented in
-[Continuous integration](docs/continuous-integration.md).
+The commands below use the installed `rundr` executable. Prefix them with
+`uv run` when running from a source checkout.
 
-Do not install project dependencies globally or use a different package
-manager.
+### 2. Configure a local target
 
-## Minimal local example
-
-Install the checked local target at the standard user location once:
+Targets describe where and how Rundra executes work. Create the standard target
+file:
 
 ```bash
 mkdir -p ~/.config/rundra
-cp examples/minimal/targets.yaml ~/.config/rundra/targets.yaml
+cat > ~/.config/rundra/targets.yaml <<'YAML'
+version: 1
+targets:
+  local:
+    transport: {type: local}
+    scheduler: {type: local}
+    staging: {type: local}
+    container: {type: native}
+    workspace: .rundra
+YAML
 ```
 
-The adjacent `examples/minimal/rundra.yaml` profile supplies the config, target,
-source root, and destination. Plan or run it concisely:
+This target executes directly on the current machine, without SSH, a batch
+scheduler, or a container runtime. Add `.rundra/` to the project's ignore file
+when the workspace is inside the repository.
 
-```bash
-uv run rundr plan examples/minimal/experiment.yaml
-uv run rundr run examples/minimal/experiment.yaml
+### 3. Create a first experiment
+
+Create an empty project directory and add `experiment.yaml`:
+
+```yaml
+version: 1
+
+experiment:
+  name: random-samples
+
+command:
+  argv: [python3, main.py, --config, "{config}", --seed, "{seed}"]
+
+resources:
+  nodes: 1
+  tasks: 1
+  cpus_per_task: 1
+  gpus_per_task: 0
+  memory: 512MiB
+  walltime: "00:05:00"
+
+outputs:
+  include: [results/**]
 ```
 
-Long runs can expose lifecycle transitions, a TQDM phase bar, or both without
-changing their final stdout result:
+Add `config.yaml`:
 
-```bash
-uv run rundr run examples/minimal/experiment.yaml --verbose
-uv run rundr run examples/minimal/experiment.yaml --progress
-uv run rundr run examples/minimal/experiment.yaml --verbose --progress
+```yaml
+sample_count: 3
 ```
 
-When no seed is configured, Rundra generates a non-negative 63-bit integer
-before planning, displays it, passes it to the application, and stores it in the
-RunRecord. An independent `plan` and `run` generate different values. Replay a
-reported seed explicitly when reproducibility is required:
+Add `main.py`:
 
-```bash
-uv run rundr run examples/minimal/experiment.yaml --seed 17
+```python
+import argparse
+import json
+import random
+from pathlib import Path
+
+import yaml
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--config", required=True, type=Path)
+parser.add_argument("--seed", required=True, type=int)
+args = parser.parse_args()
+
+config = yaml.safe_load(args.config.read_text(encoding="utf-8"))
+rng = random.Random(args.seed)
+result = {
+    "seed": args.seed,
+    "samples": [rng.random() for _ in range(config["sample_count"])],
+}
+
+output = Path("../output/results/result.json")
+output.parent.mkdir(parents=True, exist_ok=True)
+output.write_text(json.dumps(result, sort_keys=True) + "\n", encoding="utf-8")
 ```
 
-The fully explicit agent-oriented form remains supported:
-
-```bash
-uv run rundr run examples/minimal/experiment.yaml \
-  --config examples/minimal/config.yaml \
-  --seed 17 \
-  --target local \
-  --targets-file examples/minimal/targets.yaml \
-  --source-root examples/minimal \
-  --destination examples/minimal/retrieved
-```
-
-For the same source, effective config, seed, Python 3.12 environment, and
-runtime, repeated runs must produce byte-identical
-`retrieved/results/result.json`. The integration suite runs this example twice
-and checks that criterion. It does not claim byte identity across different
-Python/runtime versions.
-
-For a multi-CPU application, the checked
-[Python multiprocessing example](examples/python-multiprocessing/README.md)
-reserves four CPUs per logical Task, launches four bounded child processes,
-and demonstrates placement of multiple such Tasks across Slurm compute nodes.
-
-Use `--random-seed` to override a fixed seed supplied by a project profile or
-user default. Explicit `--seeds START:STOP` uses an inclusive range in `plan`:
-`0:2` produces Tasks for seeds 0, 1, and 2. Task order follows seed-request
-order, IDs are stable zero-based ordinals, and duplicate seeds are rejected.
-M5.1 fixes these logical semantics. M5.2 makes grouping inspectable:
-for two or more homogeneous Tasks on a Slurm target, `plan --json` reports
-`strategy: "slurm_array"`, one ordered Task group, and an explicit Task
-ID/seed/zero-based-array-index mapping. M5.3–M5.6 add bounded safely quoted
-array manifests, submission, per-Task reconciliation/logs/results/retrieval,
-cancellation, deterministic aggregation, and real-cluster partial-failure
-evidence.
-
-## Launch configuration
-
-Rundra automatically checks for `rundra.yaml` beside the experiment. Use
-`--project-file` for any other location and `--profile` to select a non-default
-profile. Relative project paths are resolved against the project file:
+Finally, add the adjacent project file `rundra.yaml`:
 
 ```yaml
 version: 1
@@ -227,66 +140,225 @@ profiles:
     destination: retrieved
 ```
 
-Optional user defaults live in `~/.config/rundra/config.yaml`; target backend
-definitions remain in their separate target file:
+### 4. Plan and launch
+
+Planning is offline and does not create a Run or consume resources:
+
+```bash
+rundr validate experiment.yaml
+rundr plan experiment.yaml --seed 17
+```
+
+Review the command, seed, resources, staging behavior, target, and destination.
+Then execute the Run:
+
+```bash
+rundr run experiment.yaml --seed 17
+cat retrieved/results/result.json
+```
+
+Rundra snapshots source inputs, copies the effective configuration, executes in
+an isolated workspace, retrieves declared outputs, and stores the RunRecord in
+`~/.local/share/rundra/runs`. The repository contains a checked version of
+this workflow in [`examples/minimal`](examples/minimal).
+
+## Everyday workflow
+
+Use `run` for short synchronous work. For long or remote experiments, use the
+detached lifecycle:
+
+```bash
+rundr submit experiment.yaml --seeds 0:9 --json
+rundr await RUN_ID --json
+rundr fetch RUN_ID
+rundr inspect RUN_ID --json
+```
+
+| Command | Purpose |
+|---|---|
+| `doctor` | Check configuration, permissions, connectivity, and optional scheduler access. |
+| `validate` | Validate the portable experiment schema. |
+| `plan` | Resolve Tasks, resources, preparation, storage, and target behavior without execution. |
+| `run` | Submit, wait, and retrieve while the client remains attached. |
+| `submit` | Register and durably submit a Run, then return. |
+| `await` | Wait for one or several Runs and emit one compact terminal result. |
+| `status` | Reconcile and display Run state. |
+| `tasks` | Page through individual Task state. |
+| `logs` | Read framework-managed preparation or Task logs. |
+| `fetch` | Retrieve or reference declared outputs. |
+| `cancel` | Cancel active preparation and scientific work. |
+| `purge` | Safely remove terminal Run data after exact-ID confirmation. |
+
+Run `rundr help` or `rundr help COMMAND` for the installed command surface.
+
+## Configuration model
+
+Rundra separates portable experiments from machine- and user-specific launch
+configuration.
+
+| File | Contains | Default location |
+|---|---|---|
+| Experiment | Command, resources, outputs, optional container request | Any `experiment.yaml` |
+| Project launch file | Project defaults and named profiles | `rundra.yaml` beside the experiment |
+| User launch file | User-specific defaults and Run store | `~/.config/rundra/config.yaml` |
+| Target file | Named backend stacks, workspaces, and site policy | `~/.config/rundra/targets.yaml` |
+
+Launch precedence is command line, selected project profile, project defaults,
+user defaults, then built-ins. `plan --json` reports every resolved value and
+its source under `launch`. Credentials never belong in these files.
+
+## Target configuration
+
+### Local targets
+
+The quick-start target uses the complete local/native stack. To run a local
+Apptainer image, change `container.type` to `apptainer` and declare the image
+in the experiment. Local execution is synchronous; `submit` is intentionally
+unavailable because Rundra does not create unmanaged background processes.
+
+### Remote scheduler targets
+
+A minimal SSH, Slurm, rsync, and Apptainer target looks like this:
 
 ```yaml
 version: 1
-defaults:
-  target: local
-  targets_file: targets.yaml
-  data_dir: records
+targets:
+  cluster:
+    transport:
+      type: ssh
+      host: cluster-login
+    scheduler: {type: slurm}
+    staging: {type: rsync}
+    container: {type: apptainer}
+    workspace: /shared/users/alice/rundra-work
 ```
 
-Paths in user defaults are relative to the user configuration file. Resolution
-precedence is CLI → selected project profile → project defaults → user defaults
-→ built-ins. `plan --json` and `run --json` expose the effective values and the
-source selected for each field under `launch`.
+The workspace must be an absolute path visible from the login/controller side
+and compute nodes. Keep SSH identities, proxy jumps, ports, and host verification
+in normal OpenSSH configuration.
 
-When no layer declares a destination, Rundra derives
-`retrieved/<config-stem>` below the project root, or below the current working
-directory when no project file is present. An explicit or configured
-destination remains an exact path.
-
-## Inspecting without execution
-
-The checked example can be inspected without executing an experiment:
+Rundra supports Slurm, OpenPBS, and HTCondor. Their capabilities are not
+identical. Discover them through structured output instead of inferring behavior
+from the scheduler name:
 
 ```bash
-uv run rundr validate examples/minimal/experiment.yaml
-uv run rundr plan examples/minimal/experiment.yaml \
-  --config examples/minimal/config.yaml \
-  --seeds 0:1 \
-  --target local \
-  --targets-file examples/minimal/targets.yaml
-uv run rundr targets --targets-file examples/minimal/targets.yaml
+rundr targets --json
+rundr doctor experiment.yaml --connect --json
+rundr plan experiment.yaml --profile cluster --json
 ```
 
-Human plans summarize resources, native options, execution strategy, staging,
-and the offline safety boundary. With `--json`, the plan additionally exposes
-normalized `resources` and `native_options`, structured `staging` and
-`validation`, and a `safety` object confirming that planning contacts no target,
-creates no workspace or Run, and submits nothing. Capability validation here is
-static: live SSH, scheduler, rsync, and Apptainer availability is checked only
-when execution or an explicit preflight is requested.
+Target-owned policies can bound worker concurrency and retries. Newer target
+schemas also support Slurm partition routing and scheduler-provided CPU/GPU
+scratch storage. HTCondor requires an explicitly verified shared workspace.
+See the [target setup guide](docs/getting-started.md),
+[scheduler capability matrix](docs/scheduler-capabilities.md), and
+[CLI reference](docs/cli-reference.md) before configuring a production target.
 
-Lifecycle commands use `~/.local/share/rundra/runs` by default; pass
-`--data-dir` to select another record store. Synchronous `run` executes one
-seed or an inclusive seed range, while `source_root` and `destination` may come
-from the same launch-resolution layers.
+Do not use scheduler-native options to bypass account, partition, QOS, memory,
+GPU, concurrency, or site-storage policy.
 
-Configs can opt into generic deterministic parameter sweeps with a strict
-`_rundr` block and `batch_options`, `batch_options_range`, or
-`batch_hierarchical_options` markers. Rundra expands parameter sets x seeds
-into one Run, one Slurm array, and one immutable effective config per Task.
-See the [Pogosim sweep example](examples/pogosim-shoal/README.md).
+## Reproducibility and preparation
 
-Add `--json` to obtain the version-1 machine-readable contracts documented in
-[`docs/schemas/`](docs/schemas/). Authentication comes only from external
-transport mechanisms: credentials must never be placed in experiment files,
-target files, opaque scientific configuration, command arguments, or run data.
+Every stochastic Task has an explicit integer seed. If no seed is configured,
+Rundra generates and records one before execution; replay it with `--seed`.
+Inclusive seed ranges create multiple Tasks: `--seeds 0:2` means seeds 0, 1,
+and 2.
 
-`--json` may also precede the command, for example `rundr --json status
-RUN_ID`. Successful operations exit 0. Structured usage/operation failures
-exit 1. Exit 2 is reserved for `run` returning a durable failed or cancelled
-experiment result; querying that Run successfully with `status` still exits 0.
+An explicit `--source-root` snapshots the current working tree after normal
+exclusions and never builds in the developer's original tree. Prepared projects
+can instead pin a full Git commit, immutable SIF digest, application build
+recipe, or Apptainer definition recipe. Rundra caches verified preparation
+inputs and outputs by content identity.
+
+Inspect preparation before execution:
+
+```bash
+rundr plan experiment.yaml --json
+rundr doctor experiment.yaml --offline --json
+```
+
+Do not add `--offline` to a cold first Run. Offline readiness means every
+required immutable source and image input is already available in the selected
+cache.
+
+## Results and provenance
+
+Raw outputs remain separate from derived analysis. `fetch` defaults to `auto`:
+when client and target share storage, Rundra can publish a verified reference
+manifest instead of copying a large result tree. Use `--mode copy` when an
+analysis program requires ordinary local files. Compact Runs can retain indexed
+archives; add `--extract` only when individual files are necessary.
+
+RunRecords preserve the effective experiment and configuration, seeds, source
+identity, image digest, requested resources, target, scheduler identities,
+timestamps, Task outcomes, preparation state, and retrieved artifacts where
+available.
+
+## Using Rundra from an AI agent
+
+Rundra's JSON interfaces and bounded guidance are designed for agents. On a new
+machine, repository, or sandbox session:
+
+```bash
+rundr doctor --agent codex --json
+rundr agent-guide --write AGENTS.md
+rundr agent-guide --list-topics
+```
+
+Grant only the filesystem and network access reported by `doctor`, restart the
+agent sandbox if required, and rerun the diagnostic until `ready` is true. Then
+use:
+
+```bash
+rundr doctor experiment.yaml --connect --agent codex --json
+rundr plan experiment.yaml --json
+rundr submit experiment.yaml --json
+rundr await RUN_ID --json
+rundr fetch RUN_ID --json
+```
+
+Agent rules:
+
+- retain the explicit Run ID and `--data-dir` returned at submission;
+- use `await` rather than waking the model to poll every few minutes;
+- avoid `--progress` in captured transcripts because redraws consume tokens;
+- review Task count, seeds, resources, concurrency, target, and retrieval before
+  submission;
+- continue an interrupted submission with `rundr resume RUN_ID`, never by
+  creating a duplicate Run;
+- use Rundra lifecycle JSON instead of parsing scheduler-native output;
+- use `agent-guide --topic TOPIC` for bounded instructions;
+- refresh instructions after upgrades with `agent-guide --topic upgrade` and
+  `agent-guide --write AGENTS.md`.
+
+The optional MCP server exposes the same lifecycle to compatible clients.
+Install it with `uv tool install --python 3.12 'rundra[mcp]'`. See the
+[agent tutorial](docs/tutorials/03-agent-async.md),
+[JSON schemas](docs/schemas/README.md), and
+[portable agent instructions](docs/agent-instructions.md).
+
+## Security model
+
+Remote clusters are security boundaries. Rundra does not store credentials,
+disable SSH host verification, execute scientific work on login hosts, or allow
+user-native scheduler options to override framework-managed directives. Inspect
+a plan before expensive operations. Above a configured safety threshold, Rundra
+requires the exact `--confirm-tasks N` value.
+
+## Development
+
+The authoritative architecture is [`docs/project_specs.md`](docs/project_specs.md).
+Public changes are recorded in [`CHANGELOG.md`](CHANGELOG.md), and development
+uses Python 3.12 with `uv`:
+
+```bash
+uv sync --locked
+tools/check.sh
+```
+
+Default tests require no real cluster. Dockerized Slurm, OpenPBS, and HTCondor
+system suites and real-cluster acceptance tests are explicit opt-ins. See
+[`docs/continuous-integration.md`](docs/continuous-integration.md) and the
+[`release checklist`](docs/release-checklist.md).
+
+Rundra is licensed under Apache-2.0.
