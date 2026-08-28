@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 import subprocess
 from datetime import timedelta
 from pathlib import Path
@@ -38,7 +39,7 @@ targets:
 
     assert result.ok and result.value is not None
     assert result.value.ready
-    assert result.value.format_version == 3
+    assert result.value.format_version == 4
     assert any(check.name == "workspace" for check in result.value.checks)
     assert not (tmp_path / "workspace").exists()
 
@@ -77,8 +78,28 @@ def test_bootstrap_doctor_reports_paths_and_generates_codex_profile(
     data_dir = tmp_path / "records"
     cache = tmp_path / "cache"
 
-    result = doctor_operation(
+    pending = doctor_operation(
         targets, None, data_dir=data_dir, cache_root=cache, agent="codex"
+    )
+
+    assert pending.ok and pending.value is not None
+    assert not pending.value.ready
+    assert pending.value.durability is not None
+    assert pending.value.durability.status == "challenge_created"
+    verification_argv = pending.value.durability.verification_argv
+    assert verification_argv[:2] == ("rundr", "doctor")
+    token = verification_argv[-2]
+    challenge = data_dir / ".rundra-doctor-durability-challenge.json"
+    assert challenge.stat().st_mode & 0o777 == 0o600
+    assert token not in challenge.read_text(encoding="utf-8")
+
+    result = doctor_operation(
+        targets,
+        None,
+        data_dir=data_dir,
+        cache_root=cache,
+        agent="codex",
+        verify_run_store=token,
     )
 
     assert result.ok and result.value is not None
@@ -87,11 +108,70 @@ def test_bootstrap_doctor_reports_paths_and_generates_codex_profile(
     assert result.value.agent_config is not None
     assert "[permissions.rundra.filesystem]" in result.value.agent_config
     assert str(data_dir) in result.value.agent_config
-    assert not data_dir.exists()
+    assert data_dir.exists()
     assert not cache.exists()
     document = render_json(result)
-    assert '"format_version":3' in document
+    assert '"format_version":4' in document
     assert '"complete":true' in document
+    assert '"status":"verified"' in document
+
+    repeated = doctor_operation(
+        targets, None, data_dir=data_dir, cache_root=cache, agent="codex"
+    )
+    assert repeated.ok and repeated.value is not None
+    assert repeated.value.ready
+    assert repeated.value.durability is not None
+    assert repeated.value.durability.status == "verified"
+
+
+def test_codex_doctor_detects_ephemeral_run_store_between_commands(
+    tmp_path: Path,
+) -> None:
+    targets = _local_targets(tmp_path)
+    data_dir = tmp_path / "ephemeral-records"
+    pending = doctor_operation(targets, None, data_dir=data_dir, agent="codex")
+
+    assert pending.ok and pending.value is not None
+    assert pending.value.durability is not None
+    token = pending.value.durability.verification_argv[-2]
+    shutil.rmtree(data_dir)
+
+    verified = doctor_operation(
+        targets,
+        None,
+        data_dir=data_dir,
+        agent="codex",
+        verify_run_store=token,
+    )
+
+    assert verified.ok and verified.value is not None
+    assert not verified.value.ready
+    assert verified.value.durability is not None
+    assert verified.value.durability.status == "failed"
+    assert any(
+        action.code == "SELECT_PERSISTENT_RUN_STORE"
+        for action in verified.value.actions
+    )
+
+
+def test_codex_doctor_rejects_wrong_durability_token(tmp_path: Path) -> None:
+    targets = _local_targets(tmp_path)
+    data_dir = tmp_path / "records"
+    pending = doctor_operation(targets, None, data_dir=data_dir, agent="codex")
+    assert pending.ok and pending.value is not None
+
+    verified = doctor_operation(
+        targets,
+        None,
+        data_dir=data_dir,
+        agent="codex",
+        verify_run_store="0" * 64,
+    )
+
+    assert verified.ok and verified.value is not None
+    assert not verified.value.ready
+    assert verified.value.durability is not None
+    assert verified.value.durability.status == "failed"
 
 
 def test_doctor_rejects_scheduler_probe_without_write_probe(tmp_path: Path) -> None:
@@ -194,6 +274,7 @@ targets:
         "cluster",
         local_target_access=True,
         agent="codex",
+        data_dir=tmp_path / "records",
     )
 
     assert result.ok and result.value is not None
@@ -245,7 +326,18 @@ targets:
         encoding="utf-8",
     )
 
-    result = doctor_operation(targets, "cluster", agent="codex")
+    data_dir = tmp_path / "records"
+    pending = doctor_operation(targets, "cluster", agent="codex", data_dir=data_dir)
+    assert pending.ok and pending.value is not None
+    assert pending.value.durability is not None
+    token = pending.value.durability.verification_argv[-2]
+    result = doctor_operation(
+        targets,
+        "cluster",
+        agent="codex",
+        data_dir=data_dir,
+        verify_run_store=token,
+    )
 
     assert result.ok and result.value is not None
     assert result.value.ready

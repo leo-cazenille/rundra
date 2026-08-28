@@ -250,8 +250,11 @@ Do not use SSH port forwarding or agent forwarding.
 ## Rundra experiment execution
 
 - On a new machine or agent session, run `rundr doctor --agent codex --json`
-  before attempting an experiment. Apply only the reported permissions, start a
-  new agent session, and rerun the audit until `ready` is true.
+  before attempting an experiment. Execute any structured
+  `run_store_durability.verification_argv` as a separate command to detect
+  command-local filesystem overlays. Apply only the reported permissions, use
+  a persistent `--data-dir` when necessary, start a new agent session after
+  permission changes, and rerun the audit until `ready` is true.
 - Use Rundra for scientific execution; do not invoke SSH, rsync,
   scheduler-native, or Apptainer commands directly except while diagnosing an
   explicit Rundra error.

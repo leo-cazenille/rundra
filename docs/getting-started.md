@@ -56,6 +56,10 @@ Rundra keeps three concerns separate:
 Persisted RunRecords default to `~/.local/share/rundra/runs`. This is a client
 path, not a directory that must exist on every remote login or controller node.
 Use `--data-dir` or the user launch file's `data_dir` to select another store.
+Agent sandboxes can accept writes through a command-local overlay that vanishes
+when the process exits. `doctor --agent codex --json` therefore returns a
+separate verification argv on first use; run it before submission to prove the
+selected store persists across command invocations.
 
 Every configuration document has an explicit schema version, rejects unknown
 fields, and must not contain credentials. Experiment and user-launch documents

@@ -9,6 +9,12 @@ All notable user-visible changes are recorded here.
 - Human, agent, target, scheduler, schema, and release documentation now
   reflects the current 0.1 command surface and backend capabilities.
 
+### Added
+
+- Codex doctor audits use a private two-command nonce handshake to prove that
+  the selected Run store survives sandbox process boundaries. Doctor JSON v4
+  returns the exact verification argv and actionable persistent-path fallback.
+
 ### Fixed
 
 - `status` retries transient bundled-journal transport failures once, while

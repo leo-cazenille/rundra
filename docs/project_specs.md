@@ -1470,7 +1470,7 @@ Agents can request only the relevant `setup`, `upgrade`, `launch`, `large-runs`,
 `agent-guide --topic` or MCP `get_guidance`, avoiding repeated full-guide
 transmission.
 
-The version-2 doctor result is the first-run capability boundary for humans and
+The version-4 doctor result is the first-run capability boundary for humans and
 agents. Bare `rundr doctor` exercises the effective local Run store and
 preparation cache with private temporary files. Experiment mode additionally
 reports the exact source, config, destination, target, SSH, network, and socket
@@ -1482,6 +1482,15 @@ requirement failed, while `complete` means every requested check passed. The
 audit may generate agent-specific configuration text but never applies it,
 reads credential contents into output, fetches sources, pulls images, builds
 applications, or creates a scientific RunRecord.
+
+For `--agent codex`, same-process write/read success is insufficient to mark
+the Run store ready. Doctor atomically writes a private challenge containing
+only a nonce digest and returns an exact structured verification argv. A later
+doctor process must observe the challenge and present the nonce before it
+publishes a private durability receipt. If a command-scoped sandbox overlay
+discarded the first write, verification fails and recommends either persistent
+sandbox access or an explicit workspace-local `--data-dir`. This handshake
+does not probe remote storage, retain credentials, or create a RunRecord.
 
 An SSH target is remote-only unless topology is declared otherwise. Shared
 staging automatically audits client write access to the target workspace and

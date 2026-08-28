@@ -10,7 +10,7 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 | `validate` | `EXPERIMENT` | `--json` | Validate experiment YAML without executing. |
 | `plan` | `EXPERIMENT` | launch options, `--source-root`, preparation options, `--execution-strategy`, `--retrieval`, `--workers`, `--task-slots-per-worker`, `--json` | Resolve and inspect execution without target contact or state changes. |
 | `targets` | none | `--targets-file`, `--json` | Validate and list configured targets. |
-| `doctor` | optional `EXPERIMENT` | launch path overrides, `--connect`, `--offline`, `--local-target-access`, `--prepare-location`, `--scheduler-inventory`, `--scheduler-probe`, `--probe-timeout`, `--no-write-probe`, `--agent`, `--json` | Audit installation, sandbox paths, target access, reversible staging, preparation caches, read-only scheduler inventory, and an optional bounded scheduler submission. |
+| `doctor` | optional `EXPERIMENT` | launch path overrides, `--connect`, `--offline`, `--local-target-access`, `--prepare-location`, `--scheduler-inventory`, `--scheduler-probe`, `--probe-timeout`, `--no-write-probe`, `--agent`, `--verify-run-store TOKEN`, `--json` | Audit installation, durable sandbox storage, target access, reversible staging, preparation caches, read-only scheduler inventory, and an optional bounded scheduler submission. |
 | `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--workers`, `--task-slots-per-worker`, `--verbose`, `--progress`, `--progress-interval`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
 | `wait` | `RUN_ID` or `--last` | `--timeout`, `--poll-interval`, `--query-failure-limit N`, `--notify`, `--notify-file PATH`, `--data-dir`, `--verbose`, `--progress`, `--progress-interval`, `--json` | Reconcile until terminal or a renewable timeout; optionally emit an alert or atomic terminal JSON file. |
 | `await` | one or more `RUN_ID` values | `--until all`/`any`, `--timeout`, `--poll-interval`, `--query-failure-limit N`, `--fail-on-run-failure`, `--notify-file PATH`, `--data-dir`, `--json` | Wait silently for an aggregate terminal condition and emit one compact final result. |
@@ -57,14 +57,20 @@ Tasks; scheduler updates show terminal/total, running, queued, failed, and
 allocated-node counts.
 
 Bare `doctor` performs reversible local write probes in the effective Run store
-and preparation cache. With an experiment it also checks the source, config,
+and preparation cache. A Codex audit also creates a private Run-store challenge
+and returns `ready: false` plus `run_store_durability.verification_argv`. Execute
+that argv as a separate command. `--verify-run-store TOKEN` succeeds only when
+the challenge survived the command boundary, then writes a private durability
+receipt for later audits. A missing challenge identifies transient sandbox
+storage; grant persistent access or select a persistent `--data-dir`. With an
+experiment doctor also checks the source, config,
 and retrieval destination. `--connect` creates and removes a private target
 workspace and performs a one-token staging round trip. `--scheduler-probe`
 implies connection, submits at most one 1-CPU, 256-MiB, 60-second probe job, and
 cancels it on timeout. For a target-v10 Slurm scratch policy, that allocation
 also validates the configured CPU variable and performs a reversible scratch
 write, durable-workspace copy-back, and cleanup. `--no-write-probe` leaves write capabilities untested and cannot be
-combined with `--scheduler-probe`. Doctor JSON version 2 distinguishes `ready`
+combined with `--scheduler-probe`. Doctor JSON version 4 distinguishes `ready`
 from complete requested verification and can generate, but never apply, a
 Codex permission profile.
 

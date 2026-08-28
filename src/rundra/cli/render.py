@@ -118,6 +118,15 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
             ),
             "ready": value.ready,
             "complete": value.complete,
+            "run_store_durability": (
+                None
+                if value.durability is None
+                else {
+                    "status": value.durability.status,
+                    "data_dir": str(value.durability.data_dir),
+                    "verification_argv": list(value.durability.verification_argv),
+                }
+            ),
             "checks": [
                 {
                     "name": check.name,

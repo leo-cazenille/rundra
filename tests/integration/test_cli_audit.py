@@ -183,6 +183,37 @@ def test_successful_empty_list_has_human_and_json_views(tmp_path: Path) -> None:
     }
 
 
+def test_codex_doctor_verifies_run_store_across_cli_processes(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "records"
+    targets = _EXAMPLE / "targets.yaml"
+    first = _run(
+        "doctor",
+        "--targets-file",
+        str(targets),
+        "--data-dir",
+        str(data_dir),
+        "--agent",
+        "codex",
+        "--json",
+    )
+
+    assert first.returncode == 1
+    first_document = json.loads(first.stdout)
+    assert first_document["doctor"]["ready"] is False
+    durability = first_document["doctor"]["run_store_durability"]
+    assert durability["status"] == "challenge_created"
+
+    verification_argv = durability["verification_argv"]
+    second = _run(*verification_argv[1:])
+
+    assert second.returncode == 0
+    second_document = json.loads(second.stdout)
+    assert second_document["doctor"]["ready"] is True
+    assert second_document["doctor"]["run_store_durability"]["status"] == "verified"
+
+
 def test_exit_two_is_reserved_for_a_reconciled_failed_run(tmp_path: Path) -> None:
     source = tmp_path / "source"
     source.mkdir()

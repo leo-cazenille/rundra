@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import shlex
+import stat
 import subprocess
 import tempfile
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path, PurePath
 
@@ -47,6 +50,9 @@ from rundra.scheduler_registry import scheduler_for_target
 _TERMINAL = frozenset(
     {ExecutionState.SUCCEEDED, ExecutionState.FAILED, ExecutionState.CANCELLED}
 )
+_DURABILITY_CHALLENGE = ".rundra-doctor-durability-challenge.json"
+_DURABILITY_RECEIPT = ".rundra-doctor-durability-verified.json"
+_DURABILITY_DOCUMENT_LIMIT = 4096
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +72,13 @@ class DoctorAction:
 
 
 @dataclass(frozen=True, slots=True)
+class DoctorDurability:
+    status: str
+    data_dir: Path
+    verification_argv: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class DoctorValue:
     source: Path
     target: Target | None
@@ -78,7 +91,8 @@ class DoctorValue:
     agent: str
     agent_config: str | None
     scheduler_inventory: tuple[SchedulerPartition, ...] = ()
-    format_version: int = 3
+    durability: DoctorDurability | None = None
+    format_version: int = 4
 
     @property
     def ready(self) -> bool:
@@ -109,6 +123,7 @@ def doctor_operation(
     offline: bool = False,
     local_target_access: bool = False,
     agent: str = "generic",
+    verify_run_store: str | None = None,
 ) -> OperationResult[DoctorValue]:
     """Audit effective client, target, staging, and optional scheduler access."""
     if probe_timeout < 1 or probe_timeout > 600:
@@ -121,6 +136,8 @@ def doctor_operation(
         return _usage("--local-target-access requires a selected target")
     if offline and experiment_source is None:
         return _usage("--offline requires an experiment")
+    if verify_run_store is not None and not write_probe:
+        return _usage("--verify-run-store requires local write probes")
     connect = connect or scheduler_probe
     preparation_storage = preparation_storage or PreparationStorageConfig()
     source = targets_file.expanduser().resolve()
@@ -153,17 +170,35 @@ def doctor_operation(
             _path_requirement(user_config, "read", "user defaults", check)
         )
 
-    for name, path, purpose in (
-        ("run_store", data_dir or Path("~/.local/share/rundra/runs"), "persist Runs"),
-        (
-            "preparation_cache",
-            cache_root or Path("~/.cache/rundra"),
-            "cache preparation",
-        ),
-    ):
-        check = _directory_check(path, name, write_probe)
-        checks.append(check)
-        requirements.append(_path_requirement(path, "write", purpose, check))
+    run_store = data_dir or Path("~/.local/share/rundra/runs")
+    run_store_check = _directory_check(run_store, "run_store", write_probe)
+    checks.append(run_store_check)
+    durability: DoctorDurability | None = None
+    run_store_requirement_check = run_store_check
+    if agent == "codex" or verify_run_store is not None:
+        durability, durability_check = _run_store_durability_check(
+            run_store,
+            source,
+            verify_token=verify_run_store,
+            write_probe=write_probe,
+        )
+        checks.append(durability_check)
+        run_store_requirement_check = durability_check
+    requirements.append(
+        _path_requirement(
+            run_store,
+            "write",
+            "persist Runs across commands",
+            run_store_requirement_check,
+        )
+    )
+
+    preparation_cache = cache_root or Path("~/.cache/rundra")
+    cache_check = _directory_check(preparation_cache, "preparation_cache", write_probe)
+    checks.append(cache_check)
+    requirements.append(
+        _path_requirement(preparation_cache, "write", "cache preparation", cache_check)
+    )
 
     for name, candidate_path, purpose in (
         ("experiment", experiment_source, "read the experiment"),
@@ -357,6 +392,21 @@ def doctor_operation(
                 "rerun doctor with --offline --connect to verify target cache inputs",
             )
         )
+    if durability is not None and durability.status == "challenge_created":
+        actions.append(
+            DoctorAction(
+                "VERIFY_RUN_STORE_DURABILITY",
+                shlex.join(durability.verification_argv),
+            )
+        )
+    if durability is not None and durability.status == "failed":
+        actions.append(
+            DoctorAction(
+                "SELECT_PERSISTENT_RUN_STORE",
+                "grant persistent sandbox write access to the Run store or rerun "
+                "doctor with --data-dir inside a persistent writable workspace",
+            )
+        )
     config = _codex_config(requirements) if agent == "codex" else None
     return OperationResult.success(
         "doctor",
@@ -372,6 +422,7 @@ def doctor_operation(
             agent,
             config,
             inventory,
+            durability,
         ),
     )
 
@@ -454,6 +505,172 @@ def _directory_check(path: Path, name: str, write_probe: bool) -> DoctorCheck:
                 item.rmdir()
             except OSError:
                 break
+
+
+def _run_store_durability_check(
+    path: Path,
+    targets_file: Path,
+    *,
+    verify_token: str | None,
+    write_probe: bool,
+) -> tuple[DoctorDurability, DoctorCheck]:
+    directory = path.expanduser().resolve()
+    if not write_probe:
+        return (
+            DoctorDurability("unverified", directory),
+            DoctorCheck(
+                "run_store_durability",
+                "fail",
+                f"{directory} cross-command persistence was not verified",
+            ),
+        )
+    try:
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if verify_token is not None:
+            if not _valid_durability_token(verify_token):
+                raise OSError("invalid durability token")
+            challenge = _read_private_json(directory / _DURABILITY_CHALLENGE)
+            expected = challenge.get("token_sha256")
+            challenge_directory = challenge.get("data_dir")
+            if not isinstance(expected, str) or not secrets.compare_digest(
+                expected, sha256(verify_token.encode("ascii")).hexdigest()
+            ):
+                raise OSError("durability challenge mismatch")
+            if challenge_directory != str(directory):
+                raise OSError("durability challenge path mismatch")
+            _write_private_json(
+                directory / _DURABILITY_RECEIPT,
+                {
+                    "format_version": 1,
+                    "data_dir": str(directory),
+                    "verified_at": datetime.now(UTC).isoformat(),
+                },
+            )
+            (directory / _DURABILITY_CHALLENGE).unlink()
+            _fsync_directory(directory)
+            return (
+                DoctorDurability("verified", directory),
+                DoctorCheck(
+                    "run_store_durability",
+                    "pass",
+                    f"{directory} persisted a Run-store challenge across commands",
+                ),
+            )
+        receipt_path = directory / _DURABILITY_RECEIPT
+        if receipt_path.exists():
+            receipt = _read_private_json(receipt_path)
+            if (
+                receipt.get("format_version") == 1
+                and receipt.get("data_dir") == str(directory)
+                and isinstance(receipt.get("verified_at"), str)
+            ):
+                return (
+                    DoctorDurability("verified", directory),
+                    DoctorCheck(
+                        "run_store_durability",
+                        "pass",
+                        f"{directory} has a cross-command durability receipt",
+                    ),
+                )
+            raise OSError("invalid durability receipt")
+        token = secrets.token_hex(32)
+        _write_private_json(
+            directory / _DURABILITY_CHALLENGE,
+            {
+                "format_version": 1,
+                "data_dir": str(directory),
+                "token_sha256": sha256(token.encode("ascii")).hexdigest(),
+            },
+        )
+        argv = (
+            "rundr",
+            "doctor",
+            "--targets-file",
+            str(targets_file),
+            "--data-dir",
+            str(directory),
+            "--agent",
+            "codex",
+            "--verify-run-store",
+            token,
+            "--json",
+        )
+        return (
+            DoctorDurability("challenge_created", directory, argv),
+            DoctorCheck(
+                "run_store_durability",
+                "fail",
+                f"{directory} passed same-process writes but cross-command "
+                "persistence is not yet verified",
+            ),
+        )
+    except (OSError, ValueError, json.JSONDecodeError):
+        return (
+            DoctorDurability("failed", directory),
+            DoctorCheck(
+                "run_store_durability",
+                "fail",
+                f"{directory} failed the cross-command persistence verification",
+            ),
+        )
+
+
+def _valid_durability_token(value: str) -> bool:
+    return len(value) == 64 and all(
+        character in "0123456789abcdef" for character in value
+    )
+
+
+def _read_private_json(path: Path) -> dict[str, object]:
+    metadata = path.lstat()
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_size > _DURABILITY_DOCUMENT_LIMIT
+    ):
+        raise OSError("invalid durability document")
+    if hasattr(os, "getuid") and metadata.st_uid != os.getuid():
+        raise OSError("durability document has another owner")
+    if stat.S_IMODE(metadata.st_mode) & 0o077:
+        raise OSError("durability document is not private")
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise OSError("invalid durability document")
+    return document
+
+
+def _write_private_json(path: Path, document: dict[str, object]) -> None:
+    if path.exists() or path.is_symlink():
+        metadata = path.lstat()
+        if not stat.S_ISREG(metadata.st_mode):
+            raise OSError("durability document path is unsafe")
+        if hasattr(os, "getuid") and metadata.st_uid != os.getuid():
+            raise OSError("durability document has another owner")
+    descriptor, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temporary = Path(raw)
+    try:
+        os.fchmod(descriptor, 0o600)
+        payload = json.dumps(document, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+        with os.fdopen(descriptor, "wb") as stream:
+            descriptor = -1
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        _fsync_directory(path.parent)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        temporary.unlink(missing_ok=True)
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _guide_check(path: Path) -> DoctorCheck:
@@ -886,7 +1103,7 @@ def _actions(
     actions = [
         DoctorAction(f"FIX_{check.name.upper()}", check.message)
         for check in checks
-        if check.status == "fail"
+        if check.status == "fail" and check.name != "run_store_durability"
     ]
     if not connected and any(check.name == "remote_access" for check in checks):
         actions.append(DoctorAction("RUN_CONNECT_PROBE", "rerun with --connect"))

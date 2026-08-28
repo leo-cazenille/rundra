@@ -361,8 +361,12 @@ rundr agent-guide --list-topics
 ```
 
 Grant only the filesystem and network access reported by `doctor`, restart the
-agent sandbox if required, and rerun the diagnostic until `ready` is true. Then
-use:
+agent sandbox if required, and rerun the diagnostic until `ready` is true. The
+first Codex audit may return a `run_store_durability.verification_argv`; execute
+that argv as a separate command so Rundra can prove the Run store survives
+between sandboxed processes. If verification fails, grant persistent access to
+the reported store or use `--data-dir` inside the agent's persistent workspace.
+Then use:
 
 ```bash
 rundr doctor experiment.yaml --connect --agent codex --json

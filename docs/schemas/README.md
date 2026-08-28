@@ -12,7 +12,7 @@ positional, and option names; their semantics are in the
 
 Every CLI document has a `format_version`, an `operation` name, and an `ok`
 flag. Schema versions are operation-specific: current maxima are plan v9,
-RunRecord v7, status/tasks/logs/inspect v6, doctor v3, target-list and Run-list
+RunRecord v7, status/tasks/logs/inspect v6, doctor v4, target-list and Run-list
 v2, and await v1. A successful document contains an operation-specific value;
 a failed document contains `error.code`, `error.message`, and
 `error.details`. Use fields, not object-key order or human output, as the
@@ -22,7 +22,7 @@ interface.
 
 | Operation or document | Checked example | Primary payload |
 |---|---|---|
-| CLI surface | [`cli-surface-v24.json`](cli-surface-v24.json) | current program, commands, positionals, options |
+| CLI surface | [`cli-surface-v25.json`](cli-surface-v25.json) | current program, commands, positionals, options |
 | MCP launcher surface | [`rundr-mcp-surface-v1.json`](rundr-mcp-surface-v1.json) | stdio and authenticated Streamable HTTP options |
 | `validate` | [`validate-success-v1.json`](validate-success-v1.json) | `experiment` |
 | `plan` | [`plan-success-v1.json`](plan-success-v1.json) | `plan`, plus launch resolution |
@@ -63,6 +63,9 @@ but never reads credential contents into output.
 The representative contract is [`doctor-success-v2.json`](doctor-success-v2.json).
 The expanded command options are frozen in
 [`cli-surface-v13.json`](cli-surface-v13.json); versions 11 and 12 remain historical.
+Doctor version 4 adds structured cross-command Run-store durability status and
+a verification argv for agent sandboxes. Its challenge token is short-lived
+diagnostic state, not a credential or a persisted Run field.
 
 Version-3 parameterized documents add a `parameter_set` object to each Task,
 permit a seed to recur in different parameter sets, and stage a distinct

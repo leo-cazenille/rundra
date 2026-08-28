@@ -11,7 +11,7 @@ START_MARKER = "<!-- rundra-agent:start -->"
 END_MARKER = "<!-- rundra-agent:end -->"
 
 GUIDE_TOPICS = {
-    "setup": "Run doctor --agent codex --json first. Grant only reported paths and network access, restart the agent sandbox when required, then rerun doctor until ready is true.",
+    "setup": "Run doctor --agent codex --json first. If run_store_durability contains verification_argv, execute that argv as a separate command so command-local overlays are detected. Grant only reported paths and network access, select a persistent --data-dir when required, restart the sandbox when permissions change, then rerun doctor until ready is true.",
     "upgrade": "After installing a new Rundra release, run rundr version, review the release's Agent action required section in CHANGELOG.md or the PyPI changelog, refresh managed instructions with rundr agent-guide --write AGENTS.md, and rerun rundr doctor --agent codex --json before submitting work.",
     "launch": "Validate and plan before submit. Use explicit seeds, review task count/resources/concurrency, retain the returned Run ID and data directory, and submit only once.",
     "large-runs": "Use worker-pool execution only when plan.target.scheduler.capabilities.compact_worker_pool is true. Runs with at least 1,000 Tasks automatically use compact durable Task state; inspect individuals with paginated tasks JSON, use bounded wait calls without progress, retain archive retrieval, and pass an exact confirm-tasks value after plan review. OpenPBS worker targets require requeue_limit 0 because scheduler rerun recovery is not supported.",
@@ -29,8 +29,11 @@ GUIDE = f"""{START_MARKER}
 ## Rundra experiment execution
 
 - On a new machine or agent session, run `rundr doctor --agent codex --json`
-  before attempting an experiment. Apply only the reported permissions, start a
-  new agent session, and rerun the audit until `ready` is true.
+  before attempting an experiment. Execute any structured
+  `run_store_durability.verification_argv` as a separate command to detect
+  command-local filesystem overlays. Apply only the reported permissions, use
+  a persistent `--data-dir` when necessary, start a new agent session after
+  permission changes, and rerun the audit until `ready` is true.
 - Use Rundra for scientific execution; do not invoke SSH, rsync,
   scheduler-native, or Apptainer commands directly except while diagnosing an
   explicit Rundra error.

@@ -172,6 +172,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
     )
     doctor.add_argument("--agent", choices=("generic", "codex"), default="generic")
+    doctor.add_argument(
+        "--verify-run-store",
+        metavar="TOKEN",
+        help="verify a cross-command Run-store durability challenge",
+    )
     _add_json_option(doctor)
 
     run = subparsers.add_parser("run", help="execute one Run synchronously")
@@ -713,6 +718,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 local_target_access=arguments.local_target_access,
                 agent=arguments.agent,
                 offline=arguments.offline,
+                verify_run_store=arguments.verify_run_store,
             )
         else:
             resolved_doctor = resolve_run_inputs_operation(
@@ -758,6 +764,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     offline=arguments.offline,
                     local_target_access=arguments.local_target_access,
                     agent=arguments.agent,
+                    verify_run_store=arguments.verify_run_store,
                 )
     elif arguments.command == "run":
         resolved = resolve_run_inputs_operation(
