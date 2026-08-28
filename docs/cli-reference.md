@@ -244,6 +244,12 @@ values to request scale. Requests above a target ceiling fail rather than being
 silently clamped. Without a request, target defaults apply; permitting eight
 workers therefore does not reserve eight workers by default.
 
+Project-derived worker scale is bound to the target selected by that project.
+When an explicit `--target` selects a different target, Rundra discards project
+and profile `workers` and `task_slots_per_worker` values so the selected target's
+conservative defaults apply. Pass either option explicitly when cross-target
+execution needs a deliberate non-default scale.
+
 ## Target-v7 worker memory ceiling
 
 Target configuration version 7 optionally limits the aggregate memory of each

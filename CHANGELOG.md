@@ -17,6 +17,9 @@ All notable user-visible changes are recorded here.
 
 ### Fixed
 
+- Explicit cross-target launches no longer inherit target-specific `workers`
+  or `task_slots_per_worker` values from the project or its selected profile.
+  The selected target's defaults apply unless the CLI requests scale directly.
 - `status` retries transient bundled-journal transport failures once, while
   `wait` and `await` tolerate a configurable bounded number of consecutive
   failed snapshots instead of aborting a healthy long Run after one SSH/read

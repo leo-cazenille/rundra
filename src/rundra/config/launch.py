@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
 
@@ -510,12 +510,31 @@ def resolve_launch(
     if user is not None:
         layers.append(("user", user.defaults))
     if project is not None:
-        layers.append(("project", project.defaults))
+        project_defaults = project.defaults
+        profile_values = (
+            project.profiles[selected_profile]
+            if selected_profile is not None
+            else None
+        )
+        project_target = (
+            profile_values.target
+            if profile_values is not None and profile_values.target is not None
+            else project_defaults.target
+        )
+        if (
+            cli.target is not None
+            and project_target is not None
+            and cli.target != project_target
+        ):
+            project_defaults = _without_worker_scale(project_defaults)
+            if profile_values is not None:
+                profile_values = _without_worker_scale(profile_values)
+        layers.append(("project", project_defaults))
         if selected_profile is not None:
             layers.append(
                 (
                     f"project_profile:{selected_profile}",
-                    project.profiles[selected_profile],
+                    profile_values,
                 )
             )
     layers.append(("cli", cli))
@@ -525,6 +544,10 @@ def resolve_launch(
             if getattr(layer, field) is not None:
                 sources[field] = source_name
     return ResolvedLaunch(values, sources, selected_profile)
+
+
+def _without_worker_scale(values: LaunchValues) -> LaunchValues:
+    return replace(values, workers=None, task_slots_per_worker=None)
 
 
 def _launch_values(

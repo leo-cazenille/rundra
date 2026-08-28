@@ -276,6 +276,57 @@ defaults:
         resolved.sources["seed"] = "other"
 
 
+def test_explicit_cross_target_override_discards_project_worker_scale(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "rundra.yaml"
+    source.write_text(
+        """\
+version: 1
+default_profile: cluster_a
+defaults:
+  workers: 8
+profiles:
+  cluster_a:
+    target: cluster-a
+    task_slots_per_worker: 40
+""",
+        encoding="utf-8",
+    )
+    project = load_project_launch(source)
+
+    cross_target = resolve_launch(
+        cli=LaunchValues(target="cluster-b"),
+        project=project,
+    )
+    same_target = resolve_launch(
+        cli=LaunchValues(target="cluster-a"),
+        project=project,
+    )
+    explicit_scale = resolve_launch(
+        cli=LaunchValues(
+            target="cluster-b", workers=2, task_slots_per_worker=16
+        ),
+        project=project,
+    )
+
+    assert cross_target.values.target == "cluster-b"
+    assert cross_target.values.workers is None
+    assert cross_target.values.task_slots_per_worker is None
+    assert "workers" not in cross_target.sources
+    assert "task_slots_per_worker" not in cross_target.sources
+    assert same_target.values.workers == 8
+    assert same_target.values.task_slots_per_worker == 40
+    assert same_target.sources["workers"] == "project"
+    assert same_target.sources["task_slots_per_worker"] == (
+        "project_profile:cluster_a"
+    )
+    assert explicit_scale.values.workers == 2
+    assert explicit_scale.values.task_slots_per_worker == 16
+    assert explicit_scale.sources["workers"] == "cli"
+    assert explicit_scale.sources["task_slots_per_worker"] == "cli"
+
+
 def test_launch_resolution_rejects_an_unknown_requested_profile(
     tmp_path: Path,
 ) -> None:

@@ -2104,6 +2104,11 @@ explicit CLI argument
 → built-in default
 ```
 
+Worker scale is target-specific. If an explicit CLI target differs from the
+target selected by the project/profile layers, project-derived `workers` and
+`task_slots_per_worker` values do not cross that target boundary. The selected
+target's own defaults apply unless the CLI explicitly requests worker scale.
+
 An adjacent project file can define defaults and named profiles without
 embedding backend definitions:
 
