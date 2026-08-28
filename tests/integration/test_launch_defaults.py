@@ -90,6 +90,10 @@ defaults:
 
     try:
         assert planned.returncode == 0, planned.stderr or planned.stdout
+        assert human_plan.returncode == 0, human_plan.stderr or human_plan.stdout
+        assert f"Config: {project / 'config.yaml'} (project profile)" in (
+            human_plan.stdout
+        )
         preview_seed = json.loads(planned.stdout)["plan"]["units"][0]["seed"]
         assert type(preview_seed) is int and 0 <= preview_seed < 2**63
         planned_launch = json.loads(planned.stdout)["launch"]
@@ -158,6 +162,14 @@ def test_one_argument_run_uses_packaged_local_defaults(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
     )
+    human_plan = subprocess.run(
+        [_RUNDR, "plan", "experiment.yaml"],
+        cwd=project,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
     result = subprocess.run(
         [_RUNDR, "run", "experiment.yaml", "--json"],
         cwd=project,
@@ -171,7 +183,7 @@ def test_one_argument_run_uses_packaged_local_defaults(tmp_path: Path) -> None:
     try:
         assert planned.returncode == 0, planned.stderr or planned.stdout
         assert human_plan.returncode == 0, human_plan.stderr or human_plan.stdout
-        assert f"Config: {project / 'config.yaml'} (project profile)" in (
+        assert f"Config: {project / 'config.yaml'} (adjacent default)" in (
             human_plan.stdout
         )
         planned_launch = json.loads(planned.stdout)["launch"]

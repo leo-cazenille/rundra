@@ -1191,7 +1191,7 @@ def resolve_plan_inputs_operation(
                 config=experiment_source.expanduser().resolve().parent / "config.yaml",
                 target="local",
                 source_root=experiment_source.expanduser().resolve().parent,
-                targets_file=Path("~/.config/rundra/targets.yaml").expanduser()
+                targets_file=Path("~/.config/rundra/targets.yaml").expanduser(),
             ),
             profile=profile,
         )
