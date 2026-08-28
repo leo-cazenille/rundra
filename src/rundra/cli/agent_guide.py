@@ -12,6 +12,7 @@ END_MARKER = "<!-- rundra-agent:end -->"
 
 GUIDE_TOPICS = {
     "setup": "Run doctor --agent codex --json first. Grant only reported paths and network access, restart the agent sandbox when required, then rerun doctor until ready is true.",
+    "upgrade": "After installing a new Rundra release, run rundr version, review the release's Agent action required section in CHANGELOG.md or the PyPI changelog, refresh managed instructions with rundr agent-guide --write AGENTS.md, and rerun rundr doctor --agent codex --json before submitting work.",
     "launch": "Validate and plan before submit. Use explicit seeds, review task count/resources/concurrency, retain the returned Run ID and data directory, and submit only once.",
     "large-runs": "Use worker-pool execution only when plan.target.scheduler.capabilities.compact_worker_pool is true. Runs with at least 1,000 Tasks automatically use compact durable Task state; inspect individuals with paginated tasks JSON, use bounded wait calls without progress, retain archive retrieval, and pass an exact confirm-tasks value after plan review. OpenPBS worker targets require requeue_limit 0 because scheduler rerun recovery is not supported.",
     "htcondor": "Use targets version 9 and require the operator to confirm shared_workspace: true only when the access point and execute nodes see the workspace at the same absolute path. HTCondor supports detached Task clusters and arrays, but not Rundra compact workers, preparation dependencies, file transfer, or scheduler rerun recovery. Inspect plan.target.scheduler.capabilities instead of inferring support from the backend name.",
@@ -64,6 +65,9 @@ GUIDE = f"""{START_MARKER}
 - See https://pypi.org/project/rundra/ for installation and overview
   documentation. That page describes the latest release; `rundr version` and
   the installed `rundr help` output are authoritative for the local version.
+- After upgrading Rundra, use `rundr agent-guide --topic upgrade`, refresh this
+  managed section with `rundr agent-guide --write AGENTS.md`, and rerun doctor
+  before submitting work.
 - Treat help output as guidance only. Use `--json` or Rundra MCP tools for
   structured automation; do not parse human-oriented help text.
 - Prefer `rundr submit EXPERIMENT`, then `rundr wait RUN_ID`, then

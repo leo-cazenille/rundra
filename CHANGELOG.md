@@ -6,6 +6,15 @@ All notable user-visible changes are recorded here.
 
 ### Added
 
+- `rundr await` blocks on one or several Run IDs and emits one compact terminal
+  result, allowing agent harnesses to wait without model-driven polling.
+- HTCondor joins Slurm and OpenPBS as a scheduler backend for detached Task
+  clusters on explicitly shared workspaces.
+- Target schemas version 10 and 11 add scheduler-provided allocation scratch,
+  read-only Slurm partition inventory, and target-owned walltime/resource
+  routing.
+- Remote targets may select a compatible `singularity` executable while keeping
+  the portable Apptainer runtime contract.
 - Scheduler capabilities are derived from a central registry and exposed in
   target-shaped JSON for capability-driven agent planning.
 - OpenPBS supports compact worker-pool arrays with concurrent lanes,
@@ -17,13 +26,35 @@ All notable user-visible changes are recorded here.
 
 - Added `doctor --offline` cache-readiness checks so cold pinned Git or image
   caches fail before Run creation with actionable remediation codes.
-
+- Slurm lifecycle queries fall back to accounting when a completed job has
+  already disappeared from `squeue`.
+- OpenPBS cancellation preserves an acknowledged cancelled state, and compact
+  shard retrieval retries incomplete visibility instead of publishing partial
+  coverage.
+- Scientific jobs with an unsatisfied preparation dependency are cancelled
+  after preparation failure instead of remaining queued indefinitely.
+- Image-only remote preparation works without an application build recipe,
+  and scratch preparation preserves sealed framework metadata.
+- Parameter-sweep Tasks retain their routed resources, including walltime and
+  partition selection.
+- Singularity 3.8 launches use compatible execution flags.
+- Terminal compact Runs clear stale active worker and running Task counters.
+- Archive extraction has an independent durable transaction state, so an
+  interrupted `--extract` no longer masquerades as a completed extraction or
+  rolls back verified shard retrieval.
 - Worker status tolerates dependency-pending Runs without journals and merges
   identical events visible through overlapping atomic journal fragments.
 - Run aggregates self-heal from durable Task state, compact retries supersede
   older attempts, and undersampled or terminal Runs no longer retain noisy ETA.
 - CLI `--fetch-mode` survives launch-layer overlay and is persisted in new Run
   records.
+
+### Agent action required
+
+- Upgrade the installed tool, verify `rundr version`, refresh the managed
+  `AGENTS.md` section with `rundr agent-guide --write AGENTS.md`, and rerun
+  `rundr doctor --agent codex --json`. Existing target files remain explicit;
+  adopt newer target schema fields only when the site requires them.
 
 ## [0.1.4] - 2026-08-21
 

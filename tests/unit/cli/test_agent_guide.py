@@ -30,6 +30,7 @@ def test_agent_guide_exposes_bounded_topics() -> None:
     topics = agent_guide_operation(list_topics=True)
     large = agent_guide_operation(topic="large-runs")
     scratch = agent_guide_operation(topic="scratch")
+    upgrade = agent_guide_operation(topic="upgrade")
     unknown = agent_guide_operation(topic="missing")
 
     assert topics.ok and topics.value is not None
@@ -38,6 +39,8 @@ def test_agent_guide_exposes_bounded_topics() -> None:
     assert "worker-pool" in large.value.content
     assert scratch.ok and scratch.value is not None
     assert "scheduler-provided scratch root" in scratch.value.content
+    assert upgrade.ok and upgrade.value is not None
+    assert "agent-guide --write AGENTS.md" in upgrade.value.content
     assert unknown.error is not None
     assert unknown.error.code == "UNKNOWN_GUIDE_TOPIC"
 
