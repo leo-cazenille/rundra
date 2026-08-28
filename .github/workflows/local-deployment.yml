@@ -34,5 +34,8 @@ jobs:
           uv pip install --python "$deployment/bin/python" dist/*.whl
           "$deployment/bin/rundr" --version
           echo "RUNDRA_LOCAL_DEPLOYMENT_EXECUTABLE=$deployment/bin/rundr" >> "$GITHUB_ENV"
-      - name: Run the installed local worker-pool test
-        run: uv run pytest tests/integration/test_local_worker_pool.py
+      - name: Run the installed local deployment tests
+        run: >-
+          uv run pytest
+          tests/integration/test_local_worker_pool.py
+          tests/integration/test_launch_defaults.py

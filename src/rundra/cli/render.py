@@ -1087,7 +1087,25 @@ def _launch_document(value: LaunchResolutionValue) -> dict[str, Any]:
 def _with_launch(rendered: str, launch: LaunchResolutionValue | None) -> str:
     if launch is None:
         return rendered
-    lines = [rendered, "Launch resolution:"]
+    config = launch.values.get("config")
+    config_source = launch.sources.get("config")
+    source_label = (
+        "adjacent default"
+        if config_source == "built_in"
+        else "CLI"
+        if config_source == "cli"
+        else "user defaults"
+        if config_source == "user"
+        else "project profile"
+        if config_source is not None and config_source.startswith("project_profile:")
+        else "project defaults"
+        if config_source == "project"
+        else config_source or "unknown"
+    )
+    lines = [rendered]
+    if config is not None:
+        lines.append(f"Config: {config} ({source_label})")
+    lines.append("Launch resolution:")
     lines.extend(
         f"  {name}={launch.values[name]} ({launch.sources[name]})"
         for name in sorted(launch.values)

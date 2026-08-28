@@ -146,12 +146,22 @@ Planning is offline and does not create a Run or consume resources:
 
 ```bash
 rundr validate experiment.yaml
-rundr plan experiment.yaml --seed 17
+rundr plan experiment.yaml
+rundr run experiment.yaml
 ```
 
 Review the command, seed, resources, staging behavior, target, destination, and
 the source snapshot size before launching. The preview applies the same
 exclusions as staging and highlights the largest included top-level paths.
+For this zero-configuration form, Rundra uses the adjacent `config.yaml`, a
+generated and recorded seed, the experiment directory as source, the built-in
+local target, and `retrieved/config` as destination. Human output identifies
+the effective config path and whether it came from the CLI, project, user, or
+adjacent default.
+
+An adjacent `rundra.yaml` is optional. Add one when the project needs named
+profiles, preparation, a remote default target, or nonstandard paths; its
+values override the safe built-in conventions.
 
 Project-specific exclusions belong in the portable experiment file, at the
 top level alongside `resources` and `outputs`:
@@ -165,7 +175,9 @@ sync:
 ```
 
 These paths are relative to `--source-root` and are added to Rundra's built-in
-transient-file exclusions. Exclude generated or retrieved data rather than
+transient-file exclusions. Rundra always excludes `results`, `outputs`, `tmp`,
+`retrieved`, `downloads`, `*.sif`, and `*.simg`. Exclude other generated or
+retrieved data rather than
 placing a local workspace inside an included source tree.
 Then execute the Run:
 

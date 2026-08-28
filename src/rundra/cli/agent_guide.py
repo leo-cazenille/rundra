@@ -63,6 +63,10 @@ GUIDE = f"""{START_MARKER}
   work; agents must not parse `sinfo` output themselves.
 - Use `rundr help` to discover available operations and the common workflow.
   Use `rundr help COMMAND` for command-specific arguments and options.
+- `rundr.yaml` is optional for conventional local projects. With adjacent
+  `experiment.yaml` and `config.yaml`, Rundra uses its packaged local target,
+  generates and records a seed, and reports every built-in launch source.
+  Remote targets and preparation recipes remain explicit configuration.
 - Use `rundr agent-guide --list-topics` and `rundr agent-guide --topic TOPIC`
   for bounded workflow-specific guidance instead of rereading this full guide.
 - See https://pypi.org/project/rundra/ for installation and overview

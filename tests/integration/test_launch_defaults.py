@@ -10,6 +10,7 @@ from pathlib import Path
 from rundra.persistence import JsonRunStore
 
 _EXAMPLE = Path(__file__).parents[2] / "examples/minimal"
+_RUNDR = os.environ.get("RUNDRA_LOCAL_DEPLOYMENT_EXECUTABLE", "rundr")
 
 
 def test_one_argument_run_uses_project_profile_and_user_defaults(
@@ -63,7 +64,15 @@ defaults:
 
     environment = {**os.environ, "HOME": str(home)}
     planned = subprocess.run(
-        ["rundr", "plan", "experiment.yaml", "--json"],
+        [_RUNDR, "plan", "experiment.yaml", "--json"],
+        cwd=project,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    human_plan = subprocess.run(
+        [_RUNDR, "plan", "experiment.yaml"],
         cwd=project,
         env=environment,
         check=False,
@@ -71,7 +80,7 @@ defaults:
         text=True,
     )
     result = subprocess.run(
-        ["rundr", "run", "experiment.yaml", "--json"],
+        [_RUNDR, "run", "experiment.yaml", "--json"],
         cwd=project,
         env=environment,
         check=False,
@@ -142,7 +151,7 @@ def test_one_argument_run_uses_packaged_local_defaults(tmp_path: Path) -> None:
 
     environment = {**os.environ, "HOME": str(home)}
     planned = subprocess.run(
-        ["rundr", "plan", "experiment.yaml", "--json"],
+        [_RUNDR, "plan", "experiment.yaml", "--json"],
         cwd=project,
         env=environment,
         check=False,
@@ -150,7 +159,7 @@ def test_one_argument_run_uses_packaged_local_defaults(tmp_path: Path) -> None:
         text=True,
     )
     result = subprocess.run(
-        ["rundr", "run", "experiment.yaml", "--json"],
+        [_RUNDR, "run", "experiment.yaml", "--json"],
         cwd=project,
         env=environment,
         check=False,
@@ -161,6 +170,10 @@ def test_one_argument_run_uses_packaged_local_defaults(tmp_path: Path) -> None:
     workspace = home / ".local/share/rundra/workspaces"
     try:
         assert planned.returncode == 0, planned.stderr or planned.stdout
+        assert human_plan.returncode == 0, human_plan.stderr or human_plan.stdout
+        assert f"Config: {project / 'config.yaml'} (project profile)" in (
+            human_plan.stdout
+        )
         planned_launch = json.loads(planned.stdout)["launch"]
         assert planned_launch["values"]["config"] == str(project / "config.yaml")
         assert planned_launch["values"]["target"] == "local"
@@ -178,6 +191,30 @@ def test_one_argument_run_uses_packaged_local_defaults(tmp_path: Path) -> None:
         for run_root in workspace.glob("runs/run_*"):
             _restore_writes(run_root / "source")
             _restore_writes(run_root / "input")
+
+
+def test_zero_configuration_plan_reports_missing_adjacent_config(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    shutil.copy2(_EXAMPLE / "experiment.yaml", project / "experiment.yaml")
+    home = tmp_path / "home"
+    home.mkdir()
+
+    result = subprocess.run(
+        [_RUNDR, "plan", "experiment.yaml", "--json"],
+        cwd=project,
+        env={**os.environ, "HOME": str(home)},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    document = json.loads(result.stdout)
+    assert document["error"]["code"] == "CONFIG_NOT_FOUND"
+    assert document["error"]["details"]["source"] == str(project / "config.yaml")
 
 
 def _restore_writes(root: Path) -> None:

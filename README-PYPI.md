@@ -27,8 +27,14 @@ rundr-mcp --help
 An experiment combines an executable command, a YAML configuration, explicit
 resources, and one or more integer seeds:
 
+For a conventional local project, place `config.yaml` beside
+`experiment.yaml`; no `rundra.yaml` or target file is required. Rundra uses its
+packaged native local target and reports the effective config source.
+
 ```bash
 rundr validate experiment.yaml
+rundr plan experiment.yaml
+rundr run experiment.yaml
 rundr plan experiment.yaml --seeds 0:3
 rundr submit experiment.yaml --seeds 0:3
 rundr wait RUN_ID --progress

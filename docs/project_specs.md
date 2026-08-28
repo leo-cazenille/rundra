@@ -1122,13 +1122,12 @@ parent-traversing patterns are rejected.
 
 The concrete default patterns are `.git`, `.hg`, `.svn`, `.venv`, `venv`,
 `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.tox`, `.nox`,
-`.rundra`, `.agents`, `retrieved`, `tmp`, `downloads`, `*.py[cod]`, `*.sif`,
-and `*.simg`. Local staging, rsync staging, and mutable preparation snapshots
+`.rundra`, `.agents`, `results`, `outputs`, `retrieved`, `tmp`, `downloads`,
+`*.py[cod]`, `*.sif`, and `*.simg`. Local staging, rsync staging, and mutable preparation snapshots
 share this list so excluded content is neither transferred nor included in
 source identities. Pure planning estimates the included logical bytes and file
 count without contacting a target, reports the largest top-level contributors,
 and marks estimates involving symlinks or unreadable entries as non-exact.
-source/build cache identities.
 
 Local fetch treats patterns as relative to `output/`, rejects symlink results
 and destinations inside the Run workspace, and atomically replaces each copied
@@ -2150,9 +2149,16 @@ planner; the Task and RunRecord contain that concrete value. A non-submitting
 plan may generate and display a preview seed, but an independent later run will
 generate another seed unless the preview is passed explicitly.
 
+An adjacent project file is optional for conventional local execution. When no
+higher launch layer supplies values, Rundra selects adjacent `config.yaml`, the
+experiment directory as source root, the packaged native local target, and a
+generated recorded seed. Its workspace is
+`~/.local/share/rundra/workspaces`, outside the source tree. Remote transport
+and scheduler settings remain explicit user or project data.
+
 When no launch layer supplies a retrieval destination, Rundra derives
 `<project-root>/retrieved/<config-stem>`, or
-`<current-working-directory>/retrieved/<config-stem>` without a discovered
+`<experiment-directory>/retrieved/<config-stem>` without a discovered
 project file. Explicit CLI, profile, project, and user destinations retain
 their exact meaning.
 

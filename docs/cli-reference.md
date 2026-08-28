@@ -319,3 +319,12 @@ preparation. Use `--prepare-location local` to require client caches,
 and verified immutable image identity without fetching or pulling. A cold
 cache sets `ready` to false and returns an actionable source or image cache
 miss; warm the selected cache with one preparation run that omits `--offline`.
+
+## Zero-configuration local launch
+
+Without an adjacent `rundra.yaml`, launch commands conventionally resolve
+`config.yaml` beside the experiment, the experiment directory as source root,
+the packaged native local target, a generated recorded seed, and
+`retrieved/<config-stem>` as destination. Human output labels the effective
+config source. CLI, project, and user layers retain precedence over these
+built-ins; remote target details are never inferred.
