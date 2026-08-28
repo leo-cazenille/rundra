@@ -651,6 +651,28 @@ def test_compact_shard_fetch_ingests_all_tasks_without_materializing_selection(
     assert result.value.retrieval_state is RetrievalState.SUCCEEDED
     assert task_store.counts(record.run.id).retrieval[RetrievalState.SUCCEEDED] == 2
 
+    class InterruptedStager:
+        def fetch(self, request: FetchRequest) -> FetchResult:
+            raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        fetch_operation(
+            str(record.run.id),
+            store,
+            tmp_path / "fetched",
+            stager=InterruptedStager(),  # type: ignore[arg-type]
+            mode="archive",
+            extract=True,
+            task_store=task_store,
+        )
+
+    interrupted = store.load(record.run.id)
+    assert interrupted.run.retrieval_state is RetrievalState.SUCCEEDED
+    assert interrupted.scheduler_metadata["extraction_state"] == "PENDING"
+    assert interrupted.scheduler_metadata["extraction_destination"] == str(
+        tmp_path / "fetched"
+    )
+
 
 def test_compact_shard_fetch_retries_eventually_visible_complete_coverage(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -3306,6 +3306,17 @@ def _fetch_operation_locked(
                 "fetch", _run_store_operation_error(store_error, record.run.id)
             )
         record = pending
+    if extract and sharded:
+        extraction_pending = _with_extraction_state(
+            record, destination, RetrievalState.PENDING
+        )
+        try:
+            store.update(extraction_pending, expected=record)
+        except RunStoreError as store_error:
+            return OperationResult.failure(
+                "fetch", _run_store_operation_error(store_error, record.run.id)
+            )
+        record = extraction_pending
     workspace = _record_workspace(record)
     try:
         active_stager = stager or _record_stager(record)
@@ -3339,6 +3350,10 @@ def _fetch_operation_locked(
                         {} if record.is_compact else retrieval_states
                     ),
                 )
+                if extract and sharded:
+                    failed = _with_extraction_state(
+                        failed, destination, RetrievalState.FAILED
+                    )
                 store.update(failed, expected=record)
             except RunStoreError:
                 pass
@@ -3379,6 +3394,10 @@ def _fetch_operation_locked(
                         {} if record.is_compact else retrieval_states
                     ),
                 )
+                if extract and sharded:
+                    failed = _with_extraction_state(
+                        failed, destination, RetrievalState.FAILED
+                    )
                 store.update(failed, expected=record)
             except RunStoreError:
                 pass
@@ -3403,6 +3422,10 @@ def _fetch_operation_locked(
         task_retrieval_states=({} if record.is_compact else retrieval_states),
         artifacts=merged,
     )
+    if extract and sharded:
+        succeeded = _with_extraction_state(
+            succeeded, destination, RetrievalState.SUCCEEDED
+        )
     try:
         store.update(succeeded, expected=record)
     except RunStoreError as error:
@@ -3489,6 +3512,17 @@ def _fetch_compact_shards_locked(
             return OperationResult.failure(
                 "fetch", _run_store_operation_error(error, record.run.id)
             )
+    if extract:
+        extraction_pending = _with_extraction_state(
+            record, destination, RetrievalState.PENDING
+        )
+        try:
+            store.update(extraction_pending, expected=record)
+        except RunStoreError as error:
+            return OperationResult.failure(
+                "fetch", _run_store_operation_error(error, record.run.id)
+            )
+        record = extraction_pending
     workspace = _record_workspace(record)
     try:
         active_stager = stager or _record_stager(record)
@@ -3532,6 +3566,10 @@ def _fetch_compact_shards_locked(
                     retrieval_state=_compact_retrieval_state(task_store, record.run.id),
                 ),
             )
+            if extract:
+                failed = _with_extraction_state(
+                    failed, destination, RetrievalState.FAILED
+                )
             store.update(failed, expected=record)
         except RunStoreError:
             pass
@@ -3549,6 +3587,10 @@ def _fetch_compact_shards_locked(
         run=replace(record.run, retrieval_state=retrieval_state),
         artifacts=_merge_artifacts(record.artifacts, artifacts),
     )
+    if extract:
+        succeeded = _with_extraction_state(
+            succeeded, destination, RetrievalState.SUCCEEDED
+        )
     try:
         store.update(succeeded, expected=record)
     except RunStoreError as error:
@@ -3645,6 +3687,21 @@ def _compact_retrieval_state(
     if counts[RetrievalState.NOT_REQUESTED] == total:
         return RetrievalState.NOT_REQUESTED
     return RetrievalState.PENDING
+
+
+def _with_extraction_state(
+    record: RunRecord,
+    destination: Path,
+    state: RetrievalState,
+) -> RunRecord:
+    return replace(
+        record,
+        scheduler_metadata={
+            **record.scheduler_metadata,
+            "extraction_state": state.value,
+            "extraction_destination": str(destination),
+        },
+    )
 
 
 def _load_record(
