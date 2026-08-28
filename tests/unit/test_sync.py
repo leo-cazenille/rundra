@@ -54,3 +54,23 @@ def test_preview_source_snapshot_marks_symlink_estimate_non_exact(
     assert preview.file_count == 2
     assert preview.symlink_entries == 1
     assert preview.exact is False
+
+
+def test_default_sync_excludes_generated_result_and_container_content(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "main.py").write_bytes(b"123")
+    for directory in ("results", "outputs", "tmp"):
+        generated = source / directory
+        generated.mkdir()
+        (generated / "large.bin").write_bytes(b"x" * 100)
+    (source / "container.sif").write_bytes(b"x" * 100)
+    (source / "container.simg").write_bytes(b"x" * 100)
+
+    preview = preview_source_snapshot(source, ())
+
+    assert preview.file_count == 1
+    assert preview.size_bytes == 3
+    assert tuple(str(item.path) for item in preview.largest_entries) == ("main.py",)

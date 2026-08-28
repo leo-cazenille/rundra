@@ -20,6 +20,8 @@ DEFAULT_SYNC_EXCLUDES = (
     ".nox",
     ".rundra",
     ".agents",
+    "results",
+    "outputs",
     "retrieved",
     "tmp",
     "downloads",
