@@ -8,7 +8,6 @@ import tempfile
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
-from fnmatch import fnmatchcase
 from pathlib import Path, PurePath, PurePosixPath
 from uuid import uuid4
 
@@ -33,7 +32,7 @@ from rundra.ports import (
     StageRequest,
     Transport,
 )
-from rundra.sync import with_default_sync_excludes
+from rundra.sync import SyncExclusionError, is_sync_excluded, validated_sync_excludes
 
 _WRITE_BITS = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
 
@@ -407,16 +406,10 @@ def _existing_directory(value: PurePath, *, name: str) -> Path:
 
 
 def _validated_patterns(patterns: tuple[str, ...]) -> tuple[str, ...]:
-    normalized: list[str] = []
-    for pattern in patterns:
-        value = pattern.removeprefix("./").rstrip("/")
-        path = PurePosixPath(value)
-        if not value or path.is_absolute() or ".." in path.parts:
-            raise LocalStagerError(
-                f"Sync exclusion must be a nonempty safe relative exclusion: {pattern!r}"
-            )
-        normalized.append(value)
-    return with_default_sync_excludes(normalized)
+    try:
+        return validated_sync_excludes(patterns)
+    except SyncExclusionError as error:
+        raise LocalStagerError(str(error)) from error
 
 
 def _copy_ignore(
@@ -429,17 +422,12 @@ def _copy_ignore(
         excluded: set[str] = set()
         for name in names:
             relative = (current / name).relative_to(source)
-            candidate = PurePosixPath(relative.as_posix())
             if workspace_relative is not None and (
                 relative == workspace_relative or workspace_relative in relative.parents
             ):
                 excluded.add(name)
                 continue
-            if any(
-                fnmatchcase(candidate.as_posix(), pattern)
-                or fnmatchcase(candidate.name, pattern)
-                for pattern in patterns
-            ):
+            if is_sync_excluded(relative, patterns):
                 excluded.add(name)
         return excluded
 
