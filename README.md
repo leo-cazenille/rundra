@@ -20,8 +20,7 @@ Rundra is useful when you want to:
 - retrieve large result sets safely, including compact archive retrieval;
 - automate experiments through stable JSON output or MCP tools.
 
-The Python package is `rundra`; the command is `rundr`. Version `0.1.6` is an
-alpha release and requires Python 3.12.
+The Python package is `rundra`; the command is `rundr`.
 
 ## Quick start
 
@@ -164,15 +163,19 @@ this workflow in [`examples/minimal`](examples/minimal).
 
 ## Everyday workflow
 
-Use `run` for short synchronous work. For long or remote experiments, use the
-detached lifecycle:
+Use `run` for short synchronous work. For long or remote experiments, submit
+the Run, retain the displayed Run ID, and follow it interactively:
 
 ```bash
-rundr submit experiment.yaml --seeds 0:9 --json
-rundr await RUN_ID --json
+rundr submit experiment.yaml --seeds 0:9
+rundr wait RUN_ID --progress
 rundr fetch RUN_ID
-rundr inspect RUN_ID --json
+rundr inspect RUN_ID
 ```
+
+`wait --progress` displays Task completion and Run state until the Run finishes.
+It is intended for a human watching an interactive terminal. The detached Run
+continues on the scheduler if the waiting client is interrupted.
 
 | Command | Purpose |
 |---|---|
@@ -181,7 +184,8 @@ rundr inspect RUN_ID --json
 | `plan` | Resolve Tasks, resources, preparation, storage, and target behavior without execution. |
 | `run` | Submit, wait, and retrieve while the client remains attached. |
 | `submit` | Register and durably submit a Run, then return. |
-| `await` | Wait for one or several Runs and emit one compact terminal result. |
+| `wait` | Follow one Run, optionally with an interactive progress display. |
+| `await` | Block silently on one or several Runs for harness automation. |
 | `status` | Reconcile and display Run state. |
 | `tasks` | Page through individual Task state. |
 | `logs` | Read framework-managed preparation or Task logs. |
@@ -204,8 +208,8 @@ configuration.
 | Target file | Named backend stacks, workspaces, and site policy | `~/.config/rundra/targets.yaml` |
 
 Launch precedence is command line, selected project profile, project defaults,
-user defaults, then built-ins. `plan --json` reports every resolved value and
-its source under `launch`. Credentials never belong in these files.
+user defaults, then built-ins. `plan` reports resolved launch values and their
+sources. Credentials never belong in these files.
 
 ## Target configuration
 
@@ -238,13 +242,13 @@ and compute nodes. Keep SSH identities, proxy jumps, ports, and host verificatio
 in normal OpenSSH configuration.
 
 Rundra supports Slurm, OpenPBS, and HTCondor. Their capabilities are not
-identical. Discover them through structured output instead of inferring behavior
+identical. Inspect the configured target and plan instead of inferring behavior
 from the scheduler name:
 
 ```bash
-rundr targets --json
-rundr doctor experiment.yaml --connect --json
-rundr plan experiment.yaml --profile cluster --json
+rundr targets
+rundr doctor experiment.yaml --connect
+rundr plan experiment.yaml --profile cluster
 ```
 
 Target-owned policies can bound worker concurrency and retries. Newer target
@@ -273,8 +277,8 @@ inputs and outputs by content identity.
 Inspect preparation before execution:
 
 ```bash
-rundr plan experiment.yaml --json
-rundr doctor experiment.yaml --offline --json
+rundr plan experiment.yaml
+rundr doctor experiment.yaml --offline
 ```
 
 Do not add `--offline` to a cold first Run. Offline readiness means every
@@ -295,6 +299,12 @@ timestamps, Task outcomes, preparation state, and retrieved artifacts where
 available.
 
 ## Using Rundra from an AI agent
+
+Add `--json` to programmatically useful commands to receive deterministic JSON
+instead of human-oriented output. This format is intended for AI agents, MCP
+clients, scripts, and other automation. Agents should use `await` rather than
+interactive `wait --progress` so terminal redraws do not consume transcript
+tokens.
 
 Rundra's JSON interfaces and bounded guidance are designed for agents. On a new
 machine, repository, or sandbox session:
