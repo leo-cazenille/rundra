@@ -116,7 +116,9 @@ def preview_source_snapshot(
     workspace_relative: Path | None = None
     if workspace_root is not None:
         try:
-            workspace_relative = workspace_root.expanduser().resolve().relative_to(source)
+            workspace_relative = (
+                workspace_root.expanduser().resolve().relative_to(source)
+            )
         except ValueError:
             pass
     totals: dict[str, list[int]] = {}

@@ -579,9 +579,10 @@ class PlanValue:
             raise TypeError("PlanValue plan must be an ExecutionPlan")
         if self.launch is not None and type(self.launch) is not LaunchResolutionValue:
             raise TypeError("PlanValue launch must be LaunchResolutionValue or None")
-        if self.source_snapshot is not None and type(
-            self.source_snapshot
-        ) is not SourceSnapshotPreview:
+        if (
+            self.source_snapshot is not None
+            and type(self.source_snapshot) is not SourceSnapshotPreview
+        ):
             raise TypeError(
                 "PlanValue source_snapshot must be SourceSnapshotPreview or None"
             )
@@ -1020,9 +1021,7 @@ def plan_operation(
         if preparation is None or source_root is not None:
             effective_source_root = source_root or experiment_source.parent
             workspace_root = (
-                Path(str(target.workspace))
-                if target.staging.kind == "local"
-                else None
+                Path(str(target.workspace)) if target.staging.kind == "local" else None
             )
             source_snapshot = preview_source_snapshot(
                 effective_source_root,
