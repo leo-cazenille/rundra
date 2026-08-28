@@ -11,6 +11,7 @@ from pathlib import Path, PurePath, PurePosixPath
 from time import monotonic, sleep
 from typing import cast
 
+from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import (
     Artifact,
     ArtifactKind,
@@ -1439,7 +1440,10 @@ class OrchestrationService:
                 )
                 submission_references = compact_submission.references
                 task_native_ids = None
-            elif request.plan.strategy in {SLURM_ARRAY, SCHEDULER_ARRAY}:
+            elif request.plan.strategy in {
+                SLURM_ARRAY,
+                SCHEDULER_ARRAY,
+            } or _is_materialized_worker_pool_request(request):
                 scheduler_group = SchedulerGroup(
                     tuple(
                         SchedulerUnit(unit.task_id, unit.command, unit.resources)
@@ -1453,7 +1457,14 @@ class OrchestrationService:
                     )
                 array_request = SchedulerArrayRequest(
                     scheduler_group,
-                    request.plan.array_mapping,
+                    (
+                        request.plan.array_mapping
+                        if request.plan.array_mapping
+                        else tuple(
+                            ArrayTaskMapping(unit.task_id, unit.seed, index)
+                            for index, unit in enumerate(units)
+                        )
+                    ),
                     workspace.metadata
                     / (
                         "slurm-array-tasks.sh"
@@ -1864,12 +1875,13 @@ class OrchestrationService:
                 SCHEDULER_ARRAY,
             }
             and not direct_compact
+            and not _is_materialized_worker_pool_request(request)
         ):
             raise OrchestrationError(
                 code="UNSUPPORTED_TASK_COUNT",
                 message=(
-                    "Multi-Task execution requires a Slurm array or PBS "
-                    "scheduler array plan"
+                    "Multi-Task execution requires a Slurm array, scheduler "
+                    "array, or materialized worker-pool plan"
                 ),
             )
         if request.plan.experiment_name != request.experiment.name:
@@ -2950,6 +2962,16 @@ def _compact_parameter_units(request: RunExecutionRequest) -> tuple[ExecutionUni
 
 def _is_direct_compact_request(request: RunExecutionRequest) -> bool:
     return request.compact_plan is not None and request.plan == request.compact_plan
+
+
+def _is_materialized_worker_pool_request(request: RunExecutionRequest) -> bool:
+    capabilities = scheduler_capabilities(request.plan.target.scheduler.kind)
+    return (
+        len(request.plan.units) > 1
+        and request.max_workers is not None
+        and capabilities.materialized_worker_pool
+        and not capabilities.arrays
+    )
 
 
 def _compact_task_manifest(

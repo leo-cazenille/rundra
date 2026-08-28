@@ -57,14 +57,14 @@ _BACKENDS: Final = MappingProxyType(
         "local": SchedulerBackendDescriptor(
             SchedulerCapabilities(
                 detached_submission=False,
-                arrays=True,
+                arrays=False,
                 dependencies=False,
                 compact_worker_pool=False,
                 materialized_worker_pool=True,
                 bundled_worker_pool=False,
                 scheduler_requeue_recovery=False,
                 scheduler_probe=False,
-                array_strategy="scheduler_array",
+                array_strategy="one_unit_per_task",
             ),
             (),
         ),
