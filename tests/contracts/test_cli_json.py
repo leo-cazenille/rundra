@@ -78,10 +78,18 @@ def test_cli_json_matches_checked_contract(
 ) -> None:
     result = _run(*arguments)
     expected = json.loads((_ROOT / "docs" / "schemas" / contract).read_text())
+    actual = json.loads(result.stdout)
 
     assert result.returncode == (0 if expected["ok"] else 1)
     assert result.stderr == ""
-    assert json.loads(result.stdout) == expected
+    if expected["operation"] == "plan" and expected["ok"]:
+        snapshot = actual.pop("source_snapshot")
+        assert actual.pop("format_version") == 10
+        assert snapshot["file_count"] >= 1
+        assert snapshot["size_bytes"] >= 1
+        assert snapshot["source_root"]
+        actual["format_version"] = expected["format_version"]
+    assert actual == expected
 
 
 def test_plan_json_is_byte_for_byte_deterministic() -> None:

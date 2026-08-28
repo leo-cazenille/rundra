@@ -1125,6 +1125,9 @@ The concrete default patterns are `.git`, `.hg`, `.svn`, `.venv`, `venv`,
 `.rundra`, `.agents`, `retrieved`, `tmp`, `downloads`, `*.py[cod]`, `*.sif`,
 and `*.simg`. Local staging, rsync staging, and mutable preparation snapshots
 share this list so excluded content is neither transferred nor included in
+source identities. Pure planning estimates the included logical bytes and file
+count without contacting a target, reports the largest top-level contributors,
+and marks estimates involving symlinks or unreadable entries as non-exact.
 source/build cache identities.
 
 Local fetch treats patterns as relative to `output/`, rejects symlink results

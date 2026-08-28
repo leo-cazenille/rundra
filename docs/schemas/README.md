@@ -11,7 +11,7 @@ positional, and option names; their semantics are in the
 [CLI reference](../cli-reference.md).
 
 Every CLI document has a `format_version`, an `operation` name, and an `ok`
-flag. Schema versions are operation-specific: current maxima are plan v9,
+flag. Schema versions are operation-specific: current maxima are plan v10,
 RunRecord v7, status/tasks/logs/inspect v6, doctor v4, target-list and Run-list
 v2, and await v1. A successful document contains an operation-specific value;
 a failed document contains `error.code`, `error.message`, and
@@ -47,6 +47,13 @@ interface.
 | previous persisted state | [`run-record-v5.json`](run-record-v5.json) | canonical Run kind and retrieval destination |
 | previous persisted state | [`run-record-v6.json`](run-record-v6.json) | typed fetch mode and verified preparation identity |
 | current routed persisted state | composed and contract-tested | RunRecord v7 with target-owned Slurm routing identity |
+
+Plan envelope version 10 adds a top-level `source_snapshot` preview. For a
+working-tree source it reports the source root, included file count and logical
+bytes, effective exclusions, largest top-level contributors, and whether the
+estimate is exact. Acquired Git preparation sources report `null` because a
+pure plan does not fetch them. The nested `plan.version` continues to describe
+the execution-plan representation independently.
 
 Project-managed preparation uses format version 2. Version-2 plans and
 RunRecords add preparation source, image, build, cache, output-hash, and log

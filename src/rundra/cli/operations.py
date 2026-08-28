@@ -73,6 +73,13 @@ from rundra.domain.states import (
 )
 from rundra.domain.sweeps import ExpandedConfig, SweepExpansion
 from rundra.orchestration.models import ExecutionPlan, PlanningError
+from rundra.schema_versions import PLAN_SCHEMA
+from rundra.sync import (
+    SourceSnapshotPreview,
+    SourceSnapshotPreviewError,
+    SyncExclusionError,
+    preview_source_snapshot,
+)
 from rundra.orchestration.planner import (
     compact_seed_range,
     create_plan,
@@ -560,12 +567,22 @@ class LaunchResolutionValue:
 class PlanValue:
     plan: ExecutionPlan
     launch: LaunchResolutionValue | None = None
+    source_snapshot: SourceSnapshotPreview | None = None
+    format_version: int = PLAN_SCHEMA.current
 
     def __post_init__(self) -> None:
         if type(self.plan) is not ExecutionPlan:
             raise TypeError("PlanValue plan must be an ExecutionPlan")
         if self.launch is not None and type(self.launch) is not LaunchResolutionValue:
             raise TypeError("PlanValue launch must be LaunchResolutionValue or None")
+        if self.source_snapshot is not None and type(
+            self.source_snapshot
+        ) is not SourceSnapshotPreview:
+            raise TypeError(
+                "PlanValue source_snapshot must be SourceSnapshotPreview or None"
+            )
+        if self.format_version not in PLAN_SCHEMA.supported:
+            raise ValueError("PlanValue format_version must be supported")
 
 
 @dataclass(frozen=True, slots=True)
@@ -924,6 +941,7 @@ def plan_operation(
     retrieval_policy: str = "manifest",
     workers: int | None = None,
     task_slots_per_worker: int | None = None,
+    source_root: Path | None = None,
 ) -> OperationResult[PlanValue]:
     try:
         experiment = load_experiment(experiment_source)
@@ -994,12 +1012,37 @@ def plan_operation(
                     preparation=preparation,
                 )
             )
-        return OperationResult.success("plan", PlanValue(plan, launch))
+        source_snapshot = None
+        if preparation is None or source_root is not None:
+            effective_source_root = source_root or experiment_source.parent
+            workspace_root = (
+                Path(str(target.workspace))
+                if target.staging.kind == "local"
+                else None
+            )
+            source_snapshot = preview_source_snapshot(
+                effective_source_root,
+                experiment.sync_excludes,
+                workspace_root=workspace_root,
+            )
+        return OperationResult.success(
+            "plan",
+            PlanValue(plan, launch, source_snapshot),
+        )
     except ConfigError as error:
         return OperationResult.failure("plan", _config_error(error))
     except PlanningError as error:
         return OperationResult.failure(
             "plan", OperationError(error.code, error.message, error.details)
+        )
+    except (SourceSnapshotPreviewError, SyncExclusionError) as error:
+        return OperationResult.failure(
+            "plan",
+            OperationError(
+                "SOURCE_SNAPSHOT_PREVIEW_FAILED",
+                str(error),
+                {"source": str(source_root or experiment_source.parent)},
+            ),
         )
 
 

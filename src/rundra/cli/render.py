@@ -84,6 +84,11 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
             }
     elif isinstance(value, PlanValue):
         document["plan"] = _plan_document(value.plan)
+        document["source_snapshot"] = (
+            None
+            if value.source_snapshot is None
+            else _source_snapshot_document(value.source_snapshot)
+        )
         if value.launch is not None:
             document["launch"] = _launch_document(value.launch)
     elif isinstance(value, TargetsValue):
@@ -346,6 +351,20 @@ def render_human(result: OperationResult[Any]) -> str:
             "Safety: validated offline; no target contact, workspace creation, "
             "Run creation, or submission"
         )
+        if value.source_snapshot is None:
+            rendered += "\nSource snapshot: unavailable for an acquired Git source"
+        else:
+            snapshot = value.source_snapshot
+            rendered += (
+                f"\nSource snapshot: {_human_bytes(snapshot.size_bytes)} in "
+                f"{snapshot.file_count} file(s) after exclusions "
+                f"({'exact' if snapshot.exact else 'estimated'})"
+            )
+            if snapshot.largest_entries:
+                rendered += "\nLargest included roots: " + ", ".join(
+                    f"{item.path}={_human_bytes(item.size_bytes)}"
+                    for item in snapshot.largest_entries
+                )
         if plan.version in {4, 5, 6, 7, 8}:
             assert plan.execution_policy is not None
             rendered += (
@@ -763,6 +782,40 @@ def _plan_document(plan: ExecutionPlan) -> dict[str, Any]:
     return document
 
 
+def _source_snapshot_document(snapshot: object) -> dict[str, Any]:
+    from rundra.sync import SourceSnapshotPreview
+
+    if type(snapshot) is not SourceSnapshotPreview:
+        raise TypeError("source snapshot must be SourceSnapshotPreview")
+    return {
+        "source_root": str(snapshot.source_root),
+        "file_count": snapshot.file_count,
+        "size_bytes": snapshot.size_bytes,
+        "exact": snapshot.exact,
+        "unreadable_entries": snapshot.unreadable_entries,
+        "symlink_entries": snapshot.symlink_entries,
+        "excluded_patterns": list(snapshot.excluded_patterns),
+        "largest_entries": [
+            {
+                "path": str(item.path),
+                "file_count": item.file_count,
+                "size_bytes": item.size_bytes,
+            }
+            for item in snapshot.largest_entries
+        ],
+    }
+
+
+def _human_bytes(size_bytes: int) -> str:
+    value = float(size_bytes)
+    units = ("B", "KiB", "MiB", "GiB", "TiB")
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            return f"{int(value)} {unit}" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+    raise AssertionError("unreachable")
+
+
 def _preparation_document(plan: PreparationPlan) -> dict[str, Any]:
     recipe = plan.recipe
     build = recipe.build
@@ -832,7 +885,7 @@ def _preparation_document(plan: PreparationPlan) -> dict[str, Any]:
 
 def _result_format_version(value: object) -> int:
     if isinstance(value, PlanValue):
-        return value.plan.version
+        return value.format_version
     if isinstance(value, RunValue):
         return 5 if len(value.record.run.tasks) >= 1000 else value.record.format_version
     if isinstance(value, InspectValue):

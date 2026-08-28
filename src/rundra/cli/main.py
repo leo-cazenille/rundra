@@ -699,6 +699,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 retrieval_policy=arguments.retrieval,
                 workers=plan_inputs.workers,
                 task_slots_per_worker=plan_inputs.task_slots_per_worker,
+                source_root=plan_inputs.source_root,
             )
     elif arguments.command == "targets":
         result = targets_operation(arguments.targets_file)

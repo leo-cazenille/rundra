@@ -126,7 +126,8 @@ def preview_source_snapshot(
     def scan(directory: Path) -> None:
         nonlocal unreadable, symlinks
         try:
-            entries = sorted(os.scandir(directory), key=lambda entry: entry.name)
+            with os.scandir(directory) as iterator:
+                entries = sorted(iterator, key=lambda entry: entry.name)
         except OSError:
             unreadable += 1
             return

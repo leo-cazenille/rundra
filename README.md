@@ -149,7 +149,24 @@ rundr validate experiment.yaml
 rundr plan experiment.yaml --seed 17
 ```
 
-Review the command, seed, resources, staging behavior, target, and destination.
+Review the command, seed, resources, staging behavior, target, destination, and
+the source snapshot size before launching. The preview applies the same
+exclusions as staging and highlights the largest included top-level paths.
+
+Project-specific exclusions belong in the portable experiment file, at the
+top level alongside `resources` and `outputs`:
+
+```yaml
+sync:
+  exclude:
+    - results/
+    - derived/
+    - downloads/
+```
+
+These paths are relative to `--source-root` and are added to Rundra's built-in
+transient-file exclusions. Exclude generated or retrieved data rather than
+placing a local workspace inside an included source tree.
 Then execute the Run:
 
 ```bash
