@@ -509,9 +509,7 @@ def test_remote_preparation_script_builds_and_reuses_target_cache(
     assert (workspace.source / "bin/model").read_text(encoding="utf-8") == "built"
     assert spec.build_key is not None
     assert (target_cache / "images" / f"{recipe.image.sha256}.sif").is_file()
-    assert (
-        target_cache / "images" / f"{recipe.image.sha256}.sif.receipt"
-    ).is_file()
+    assert (target_cache / "images" / f"{recipe.image.sha256}.sif.receipt").is_file()
     entry = target_cache / "builds" / spec.build_key
     assert (entry / ".complete").is_file()
     assert (entry / "source/bin/model").is_file()
@@ -728,9 +726,7 @@ destination.write_bytes(b"pulled-immutable-sif")
     assert (
         target_cache / "images" / f"{recipe.image.sha256}.sif"
     ).read_bytes() == image_contents
-    assert (
-        target_cache / "images" / f"{recipe.image.sha256}.sif.receipt"
-    ).is_file()
+    assert (target_cache / "images" / f"{recipe.image.sha256}.sif.receipt").is_file()
 
 
 def test_remote_preparation_reuses_receipt_without_hashing_image(

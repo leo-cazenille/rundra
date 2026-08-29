@@ -59,7 +59,7 @@ def test_remote_offline_probe_verifies_commit_and_image_digest() -> None:
     assert transport.commands[0].argv[-2:] == ("-e", f"{'a' * 40}^{{commit}}")
     assert transport.commands[1].argv[0] == "sh"
     assert 'test ! -L "$image"' in transport.commands[1].argv[2]
-    assert 'receipt=$image.receipt' in transport.commands[1].argv[2]
+    assert "receipt=$image.receipt" in transport.commands[1].argv[2]
 
 
 def test_remote_offline_probe_requires_regular_non_symlink_image() -> None:
