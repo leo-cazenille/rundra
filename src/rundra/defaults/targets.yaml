@@ -10,19 +10,19 @@ targets:
     execution:
       hard_task_limit: 100000
       confirmation_threshold: 1000
-    # Runtime resolution replaces these parse-time ceilings with the CPUs
-    # available through this process's affinity/cgroup allocation.
-    max_active_tasks: 256
-    max_concurrent_jobs: 256
+      # Runtime resolution replaces these parse-time ceilings with the CPUs
+      # available through this process's affinity/cgroup allocation.
+      max_active_tasks: 256
+      max_concurrent_jobs: 256
       max_array_size: 1000
       output_shard_tasks: 1000
       automatic_retrieval_threshold: 1000
       worker_pool:
         activation_threshold: 2
         default_workers: 1
-      max_workers: 256
+        max_workers: 256
         default_task_slots_per_worker: 1
-      max_task_slots_per_worker: 256
+        max_task_slots_per_worker: 256
         tasks_per_lease: 10
         infrastructure_retry_limit: 0
         requeue_limit: 0

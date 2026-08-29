@@ -225,7 +225,9 @@ def test_one_argument_run_uses_packaged_local_defaults(tmp_path: Path) -> None:
         )
         multi_plan = json.loads(multi_task_plan.stdout)["plan"]
         assert multi_plan["strategy"] == "worker-pool"
-        assert multi_plan["concurrent_task_capacity"] == min(9, available_cpus)
+        assert multi_plan["scheduling"]["concurrent_task_capacity"] == min(
+            9, available_cpus
+        )
         assert result.returncode == 0, result.stderr or result.stdout
         document = json.loads(result.stdout)
         assert document["run"]["state"] == "SUCCEEDED"

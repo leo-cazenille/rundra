@@ -808,3 +808,12 @@ targets:
     assert config.version == 5
     assert config.targets["shoal"].staging.kind == "shared"
     assert config.targets["shoal"].staging.options == {"root": "/shoalhome"}
+
+
+def test_packaged_local_target_is_valid() -> None:
+    from rundra.config.targets import builtin_targets_source, load_targets_config
+
+    config = load_targets_config(builtin_targets_source())
+
+    assert config.targets["local"].scheduler.kind == "local"
+    assert config.execution["local"].worker_pool.max_slot_count == 256
