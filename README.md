@@ -46,30 +46,7 @@ uv run rundr --version
 The commands below use the installed `rundr` executable. Prefix them with
 `uv run` when running from a source checkout.
 
-### 2. Configure a local target
-
-Targets describe where and how Rundra executes work. Create the standard target
-file:
-
-```bash
-mkdir -p ~/.config/rundra
-cat > ~/.config/rundra/targets.yaml <<'YAML'
-version: 1
-targets:
-  local:
-    transport: {type: local}
-    scheduler: {type: local}
-    staging: {type: local}
-    container: {type: native}
-    workspace: .rundra
-YAML
-```
-
-This target executes directly on the current machine, without SSH, a batch
-scheduler, or a container runtime. Add `.rundra/` to the project's ignore file
-when the workspace is inside the repository.
-
-### 3. Create a first experiment
+### 2. Create a first experiment
 
 Create an empty project directory and add `experiment.yaml`:
 
@@ -127,20 +104,9 @@ output.parent.mkdir(parents=True, exist_ok=True)
 output.write_text(json.dumps(result, sort_keys=True) + "\n", encoding="utf-8")
 ```
 
-Finally, add the adjacent project file `rundra.yaml`:
+No target file or `rundra.yaml` is needed for this local quick start.
 
-```yaml
-version: 1
-default_profile: local
-profiles:
-  local:
-    config: config.yaml
-    target: local
-    source_root: .
-    destination: retrieved
-```
-
-### 4. Plan and launch
+### 3. Plan and launch
 
 Planning is offline and does not create a Run or consume resources:
 
