@@ -129,6 +129,26 @@ def test_remote_definition_build_location_respects_target_policy(
     assert select_remote_preparation_location(plan, policy) == expected
 
 
+def test_unpinned_prebuilt_auto_preparation_is_resolved_locally(
+    tmp_path: Path,
+) -> None:
+    plan = PreparationPlan(
+        PreparationConfig(
+            PreparationSourceWorkingTree(),
+            PreparationImage(
+                PurePath("application.sif"),
+                "library://example/application:latest",
+                None,
+            ),
+            None,
+        ),
+        source_mode="working_tree",
+        source_root=tmp_path,
+    )
+
+    assert select_remote_preparation_location(plan, None) == "local"
+
+
 def _experiment(recipe: PreparationConfig) -> ExperimentSpec:
     return ExperimentSpec(
         version=1,
