@@ -282,7 +282,8 @@ Add a version-6 `execution` section only to impose explicit local safety or
 concurrency ceilings. Such an explicit local worker-pool policy must use
 `requeue_limit: 0`: no external scheduler owns synchronous local processes, so
 scheduler requeue recovery is unavailable. CLI options can always request a
-lower capacity.
+lower capacity. This omission is also valid when the same target file uses a
+newer schema version for other targets.
 
 ### 5. Run inside an Apptainer or Singularity container
 

@@ -173,9 +173,7 @@ def load_targets_config(source: Path) -> TargetsConfig:
                     )
                 )
             ),
-            required=(
-                _TARGET_V1_FIELDS if version < 3 else _TARGET_V1_FIELDS | {"execution"}
-            ),
+            required=_TARGET_V1_FIELDS,
             source=source,
             path=path,
         )
@@ -241,6 +239,17 @@ def load_targets_config(source: Path) -> TargetsConfig:
                     "SSH stack with Slurm or OpenPBS, rsync or shared staging, "
                     "and Apptainer"
                 ),
+            )
+        if (
+            version >= 3
+            and "execution" not in section
+            and (target.transport.kind != "local" or target.scheduler.kind != "local")
+        ):
+            fail(
+                source=source,
+                path=(*path, "execution"),
+                code="MISSING_FIELD",
+                message="Required field 'execution' is missing",
             )
         if target.execution_storage is not None and target.scheduler.kind != "slurm":
             fail(

@@ -457,7 +457,7 @@ targets:
     assert policy.worker_pool.tasks_per_lease == 100
 
 
-def test_version_three_target_rejects_missing_or_inconsistent_policy(
+def test_version_three_local_target_allows_missing_but_rejects_bad_policy(
     tmp_path: Path,
 ) -> None:
     from rundra.config.errors import ConfigError
@@ -471,10 +471,8 @@ def test_version_three_target_rejects_missing_or_inconsistent_policy(
         "    workspace: /tmp/rundra\n",
         encoding="utf-8",
     )
-    with pytest.raises(ConfigError) as caught:
-        load_targets_config(missing)
-    assert caught.value.code == "MISSING_FIELD"
-    assert caught.value.path == ("targets", "local", "execution")
+    config = load_targets_config(missing)
+    assert "local" not in config.execution
 
     inconsistent = tmp_path / "inconsistent.yaml"
     inconsistent.write_text(
@@ -817,3 +815,53 @@ def test_packaged_local_target_is_valid() -> None:
 
     assert config.targets["local"].scheduler.kind == "local"
     assert config.execution["local"].worker_pool.max_slot_count == 256
+
+
+def test_modern_local_target_may_omit_execution_policy(tmp_path: Path) -> None:
+    from rundra.config.targets import load_targets_config
+
+    source = tmp_path / "targets.yaml"
+    source.write_text(
+        """\
+version: 11
+targets:
+  local:
+    transport: {type: local}
+    scheduler: {type: local}
+    staging: {type: local}
+    container: {type: native}
+    workspace: ~/.local/share/rundra/workspaces
+""",
+        encoding="utf-8",
+    )
+
+    config = load_targets_config(source)
+
+    assert config.targets["local"].scheduler.kind == "local"
+    assert "local" not in config.execution
+
+
+def test_modern_remote_target_still_requires_execution_policy(tmp_path: Path) -> None:
+    from rundra.config.errors import ConfigError
+    from rundra.config.targets import load_targets_config
+
+    source = tmp_path / "targets.yaml"
+    source.write_text(
+        """\
+version: 11
+targets:
+  cluster:
+    transport: {type: ssh, host: cluster}
+    scheduler: {type: slurm}
+    staging: {type: rsync}
+    container: {type: apptainer}
+    workspace: /home/tester/.rundra
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        load_targets_config(source)
+
+    assert caught.value.code == "MISSING_FIELD"
+    assert caught.value.path == ("targets", "cluster", "execution")
