@@ -60,16 +60,37 @@ command:
   argv: [python3, main.py, --config, "{config}", --seed, "{seed}"]
 
 resources:
-  nodes: 1
-  tasks: 1
-  cpus_per_task: 1
-  gpus_per_task: 0
+  nodes: 1          # nodes requested by each Rundra Task
+  tasks: 1          # scheduler ranks/process slots inside each Rundra Task
+  cpus_per_task: 1  # CPU cores assigned to each scheduler task
+  gpus_per_task: 0  # GPUs assigned to each scheduler task
   memory: 512MiB
   walltime: "00:05:00"
 
 outputs:
   include: [results/**]
 ```
+
+Resource fields apply to **each logical Rundra Task**, not to the whole Run. A
+logical Task is normally one seed and parameter-set combination. For example:
+
+```bash
+rundr plan experiment.yaml --seeds 0:9
+```
+
+creates ten independent Rundra Tasks. With the resource block above, each Task
+requests one node, one scheduler task, one CPU, no GPU, 512 MiB of memory, and
+up to five minutes. The ten Tasks are not pinned to one shared node: a remote
+scheduler may distribute them across any compatible nodes and execute as many
+concurrently as target policy and current capacity allow.
+
+`resources.tasks` is scheduler terminology, such as Slurm's `--ntasks`; it is
+not the number of Rundra Tasks or seeds. Rundra invokes the experiment command
+once per logical Task and does not automatically create MPI ranks or child
+processes merely because this value exceeds one. Single-process applications
+should normally keep `nodes: 1` and `tasks: 1`. Use `cpus_per_task` for the
+threads or bounded child processes used by that application, and request
+`gpus_per_task` only when each scheduler task actually consumes those GPUs.
 
 Add `config.yaml`:
 
