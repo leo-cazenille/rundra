@@ -262,8 +262,9 @@ rundr run experiment.yaml --profile local --seeds 0:9 --progress
 ```
 
 Create `~/.config/rundra/targets.yaml` only when you need a custom local
-workspace or explicit limits. Replace `N` with the number of local Task slots
-you permit Rundra to use:
+workspace or explicit limits. Check the usable CPU count with `nproc`; the
+copyable example below permits eight local Task slots, so adjust each commented
+eight-core limit when your machine or policy differs:
 
 ```yaml
 version: 6
@@ -278,17 +279,17 @@ targets:
     execution:
       hard_task_limit: 100000
       confirmation_threshold: 1000
-      max_active_tasks: N
-      max_concurrent_jobs: N
+      max_active_tasks: 8          # total concurrent local Task ceiling
+      max_concurrent_jobs: 8       # local scheduler concurrency ceiling
       max_array_size: 1000
       output_shard_tasks: 1000
       automatic_retrieval_threshold: 1000
       worker_pool:
         activation_threshold: 2
         default_workers: 1
-        max_workers: N
-        default_task_slots_per_worker: N
-        max_task_slots_per_worker: N
+        max_workers: 8             # explicit worker-count ceiling
+        default_task_slots_per_worker: 8  # default: use all permitted CPUs
+        max_task_slots_per_worker: 8      # per-worker hard ceiling
         tasks_per_lease: 10
         infrastructure_retry_limit: 0
         requeue_limit: 0
@@ -296,7 +297,7 @@ targets:
 
 Local worker pools must use `requeue_limit: 0`: no external scheduler owns the
 synchronous local processes, so scheduler requeue recovery is unavailable.
-`default_task_slots_per_worker: N` uses all configured local slots by default;
+`default_task_slots_per_worker: 8` uses all configured local slots by default;
 CLI options can request a lower capacity.
 
 ### 5. Run inside an Apptainer or Singularity container
