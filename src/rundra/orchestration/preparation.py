@@ -691,6 +691,7 @@ def build_remote_preparation_command(
         "  if ! image_receipt_valid; then",
         "    actual=$(sha256sum -- \"$image\" | cut -d' ' -f1)",
         "    [ \"$actual\" = \"$expected_image_digest\" ] || { printf '%s\\n' 'cached image digest mismatch' >&2; exit 65; }",
+        '    chmod a-w -- "$image"',
         "    publish_image_receipt",
         "  fi",
         "else",
