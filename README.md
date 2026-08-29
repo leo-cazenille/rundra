@@ -212,6 +212,22 @@ Single-task retrieval places the file directly under `results/`. Multi-task
 retrieval preserves a `task_NNNNNN/` directory for each logical Task so files
 from distinct Tasks remain isolated even when an application reuses names.
 
+#### Combine the results as JSONL
+
+Each result file contains one JSON object followed by a newline. Sort the Task
+paths and concatenate them into one JSON Lines file:
+
+```bash
+find retrieved/config -type f -name 'result-*.json' -print0 | sort -z | xargs -0 cat > results.jsonl
+```
+
+For seeds `4:12`, the combined file contains nine records:
+
+```bash
+wc -l results.jsonl
+head results.jsonl
+```
+
 Rundra snapshots source inputs, copies the effective configuration, executes in
 an isolated workspace, retrieves declared outputs, and stores the RunRecord in
 `~/.local/share/rundra/runs`. The repository contains a checked version of
