@@ -4,21 +4,40 @@ All notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-08-29
+
+### Added
+
+- Zero-configuration local launches derive an adjacent `config.yaml`, source
+  root, destination, packaged local target, and random seed when the project
+  does not provide `rundra.yaml` or explicit launch values.
+- Local targets execute multi-Task Runs through bounded worker pools and, when
+  execution limits are omitted, automatically use the available logical CPUs.
+  Named profiles are also derived automatically from configured targets.
+- Plans preview the number and total byte size of staged source files before a
+  Run is created. Default synchronization excludes generated result trees,
+  temporary directories, Python caches, and SIF/SIMG images to avoid recursively
+  staging large prior outputs.
+- Codex doctor audits use a private two-command nonce handshake to prove that
+  the selected Run store survives sandbox process boundaries. Doctor JSON v4
+  returns the exact verification command and an actionable persistent-path
+  fallback.
+- Push and pull-request CI install the built wheel into a clean Python 3.12
+  environment and execute a 40-worker local Run through the installed `rundr`
+  entry point.
+- Content-addressed Apptainer image caches publish atomic versioned receipts
+  containing the verified digest and byte size. Legacy entries are measured
+  once and migrated automatically.
+
 ### Changed
 
 - Human, agent, target, scheduler, schema, and release documentation now
   reflects the current 0.1 command surface and backend capabilities.
-
-### Added
-
-- Local targets can execute materialized multi-Task Runs through bounded
-  synchronous worker pools controlled by target worker, slot, active-Task, and
-  concurrent-job limits.
-- Push and pull-request CI now installs the built wheel into a clean Python 3.12
-  environment and executes a 40-worker local Run through its `rundr` entry point.
-- Codex doctor audits use a private two-command nonce handshake to prove that
-  the selected Run store survives sandbox process boundaries. Doctor JSON v4
-  returns the exact verification argv and actionable persistent-path fallback.
+- Local multi-Task progress advances from durable Task completions instead of
+  jumping from preparation directly to a terminal Run state.
+- Valid trusted image receipts avoid repeatedly hashing multi-gigabyte SIF
+  files during preparation and offline/cache probes. Missing or inconsistent
+  receipts still require a complete SHA-256 measurement before trust.
 
 ### Fixed
 
@@ -29,6 +48,25 @@ All notable user-visible changes are recorded here.
   `wait` and `await` tolerate a configurable bounded number of consecutive
   failed snapshots instead of aborting a healthy long Run after one SSH/read
   interruption. Malformed and contradictory journals still fail immediately.
+- Local execution policy is optional, while explicit policy ceilings remain
+  enforced. Custom local targets and zero-configuration launches can run
+  multiple Tasks without scheduler-specific recovery settings.
+- Packaged local target YAML is valid, local retrieval retains declared output
+  pattern matching, and task-specific output paths prevent seeds from
+  overwriting one another.
+- Existing plan JSON contracts retain their declared schema versions while new
+  plans expose staging previews through the current schema.
+
+### Agent action required
+
+- Upgrade the installed tool, verify `rundr version`, refresh managed guidance
+  with `rundr agent-guide --write AGENTS.md`, and rerun `rundr doctor --agent
+  codex --json` before submitting work.
+- Review the staged-source preview in `rundr plan`. Projects that intentionally
+  keep required inputs under normally generated names such as `results`,
+  `outputs`, or `tmp`, or as `.sif`/`.simg` files, must declare an appropriate
+  project synchronization policy rather than relying on implicit whole-tree
+  staging.
 
 ## [0.1.6] - 2026-08-28
 
