@@ -182,6 +182,14 @@ def test_one_argument_run_uses_packaged_local_defaults(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
     )
+    implicit_profile_plan = subprocess.run(
+        [_RUNDR, "plan", "experiment.yaml", "--profile", "local", "--json"],
+        cwd=project,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
     multi_task_plan = subprocess.run(
         [_RUNDR, "plan", "experiment.yaml", "--seeds", "4:12", "--json"],
         cwd=project,
@@ -227,6 +235,9 @@ def test_one_argument_run_uses_packaged_local_defaults(tmp_path: Path) -> None:
     workspace = home / ".local/share/rundra/workspaces"
     try:
         assert planned.returncode == 0, planned.stderr or planned.stdout
+        assert implicit_profile_plan.returncode == 0, (
+            implicit_profile_plan.stderr or implicit_profile_plan.stdout
+        )
         assert multi_task_plan.returncode == 0, (
             multi_task_plan.stderr or multi_task_plan.stdout
         )
@@ -239,6 +250,10 @@ def test_one_argument_run_uses_packaged_local_defaults(tmp_path: Path) -> None:
         assert planned_launch["values"]["target"] == "local"
         assert planned_launch["sources"]["config"] == "built_in"
         assert planned_launch["sources"]["target"] == "built_in"
+        implicit_launch = json.loads(implicit_profile_plan.stdout)["launch"]
+        assert implicit_launch["profile"] == "local"
+        assert implicit_launch["values"]["target"] == "local"
+        assert implicit_launch["sources"]["target"] == "target_profile:local"
         available_cpus = (
             len(os.sched_getaffinity(0))
             if hasattr(os, "sched_getaffinity")

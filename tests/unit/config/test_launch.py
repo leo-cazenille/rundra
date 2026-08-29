@@ -335,3 +335,15 @@ def test_launch_resolution_rejects_an_unknown_requested_profile(
         resolve_launch(project=load_project_launch(source), profile="missing")
 
     assert caught.value.code == "PROFILE_NOT_FOUND"
+
+
+def test_launch_resolution_maps_profile_to_target_without_project() -> None:
+    resolved = resolve_launch(
+        profile="cluster",
+        builtins=LaunchValues(config=Path("config.yaml"), target="local"),
+    )
+
+    assert resolved.profile == "cluster"
+    assert resolved.values.target == "cluster"
+    assert resolved.sources["target"] == "target_profile:cluster"
+    assert resolved.sources["config"] == "built_in"

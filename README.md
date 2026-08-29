@@ -234,10 +234,19 @@ an isolated workspace, retrieves declared outputs, and stores the RunRecord in
 `~/.local/share/rundra/runs`. The repository contains a checked version of
 this workflow in [`examples/minimal`](examples/minimal).
 
-### 4. Add a named local profile
+### 4. Select a named local target
 
-Create an adjacent `rundra.yaml` when you want to select the same local launch
-settings with `--profile local`:
+Every configured target automatically acts as a same-named profile when no
+project `rundra.yaml` exists. The packaged target therefore supports
+`--profile local` immediately:
+
+```bash
+rundr plan experiment.yaml --profile local --seeds 0:9
+rundr run experiment.yaml --profile local --seeds 0:9 --progress
+```
+
+An adjacent `rundra.yaml` is optional. Add one only when the named profile must
+also select project-specific values such as a destination or configuration:
 
 ```yaml
 version: 1
@@ -253,14 +262,10 @@ profiles:
     destination: retrieved/local
 ```
 
-If `~/.config/rundra/targets.yaml` does not exist, `target: local` selects
+If `~/.config/rundra/targets.yaml` does not exist, the name `local` selects
 Rundra's packaged local target. It automatically uses the CPUs available to the
-Rundra process and requires no target configuration:
-
-```bash
-rundr plan experiment.yaml --profile local --seeds 0:9
-rundr run experiment.yaml --profile local --seeds 0:9 --progress
-```
+Rundra process and requires no target configuration. Explicit project profiles
+take precedence over automatic target profiles with the same name.
 
 Create `~/.config/rundra/targets.yaml` only when you need a custom local
 workspace or container runtime. CPU policy remains optional: when `execution`
@@ -603,8 +608,8 @@ sources. Credentials never belong in these files.
 
 ### Local targets
 
-The quick-start target uses the complete local/native stack. The named-profile
-and custom-target forms are shown in [Add a named local profile](#4-add-a-named-local-profile).
+The quick-start target uses the complete local/native stack. Automatic profiles
+and custom-target forms are shown in [Select a named local target](#4-select-a-named-local-target).
 To run a local Apptainer image, change `container.type` to `apptainer` and
 declare the image in the experiment. Local execution is synchronous; `submit`
 is intentionally unavailable because Rundra does not create unmanaged

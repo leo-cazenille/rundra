@@ -497,8 +497,9 @@ def resolve_launch(
     selected_profile = profile
     if selected_profile is None and project is not None:
         selected_profile = project.default_profile
+    implicit_target_profile = selected_profile if project is None else None
     if selected_profile is not None:
-        if project is None or selected_profile not in project.profiles:
+        if project is not None and selected_profile not in project.profiles:
             raise LaunchResolutionError(
                 "PROFILE_NOT_FOUND",
                 f"Launch profile '{selected_profile}' is not defined",
@@ -536,6 +537,13 @@ def resolve_launch(
                     profile_values,
                 )
             )
+    if implicit_target_profile is not None:
+        layers.append(
+            (
+                f"target_profile:{implicit_target_profile}",
+                LaunchValues(target=implicit_target_profile),
+            )
+        )
     layers.append(("cli", cli))
     for source_name, layer in layers:
         values = _overlay(values, layer)

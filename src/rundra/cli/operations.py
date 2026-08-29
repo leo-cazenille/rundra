@@ -1600,10 +1600,15 @@ def resolve_run_inputs_operation(
 
 def _select_builtin_local_target(resolved: ResolvedLaunch) -> ResolvedLaunch:
     """Bind the built-in local target to its packaged definition as one layer."""
-    if (
-        resolved.values.target != "local"
-        or resolved.sources.get("target") != "built_in"
-    ):
+    if resolved.values.target != "local":
+        return resolved
+    target_source = resolved.sources.get("target")
+    implicit_without_target_file = (
+        target_source == "target_profile:local"
+        and resolved.values.targets_file is not None
+        and not resolved.values.targets_file.expanduser().exists()
+    )
+    if target_source != "built_in" and not implicit_without_target_file:
         return resolved
     return ResolvedLaunch(
         replace(resolved.values, targets_file=builtin_targets_source()),
