@@ -335,37 +335,54 @@ Register the machine-specific target once in
 any scheduler policy with values supplied by the cluster operator:
 
 ```yaml
-version: 8
+version: 8  # enables bounded worker pools and worker-memory policy
 
 targets:
   cluster:
     transport:
-      type: ssh
-      host: cluster-login
+      type: ssh                 # contact the cluster through OpenSSH
+      host: cluster-login       # alias from ~/.ssh/config, not a shell command
     scheduler:
-      type: slurm
+      type: slurm               # submit and monitor scheduler-owned jobs
     staging:
-      type: rsync
+      type: rsync               # copy sealed inputs and retrieve declared outputs
     container:
-      type: apptainer
+      type: apptainer           # execute scientific commands inside the SIF
+    # Durable path visible from the login host and every compute node.
     workspace: /shared/users/YOUR_USERNAME/rundra-work
     execution:
+      # Reject a Run containing more logical Rundra Tasks than this.
       hard_task_limit: 10000
+      # At or above this Task count, require --confirm-tasks with the exact count.
       confirmation_threshold: 1000
+      # Maximum logical scientific Tasks allowed to execute concurrently.
       max_active_tasks: 32
+      # Maximum scheduler jobs or array elements Rundra may submit for one Run.
       max_concurrent_jobs: 4
+      # Maximum elements in one scheduler array submission.
       max_array_size: 1000
+      # Maximum logical Task outputs packed into one retrieval shard.
       output_shard_tasks: 1000
+      # Prefer scalable compact retrieval at or above this logical Task count.
       automatic_retrieval_threshold: 1000
+      # Hard aggregate memory ceiling for one worker allocation.
       max_memory_per_worker: 4GiB
       worker_pool:
+        # Auto strategy may bundle Tasks into workers at or above this count.
         activation_threshold: 10
+        # Conservative worker count when neither project nor CLI requests one.
         default_workers: 1
+        # Hard site ceiling for scheduler-owned worker allocations.
         max_workers: 4
+        # Concurrent Task slots in each worker when no explicit request exists.
         default_task_slots_per_worker: 1
+        # Hard ceiling on concurrent Task slots inside one worker.
         max_task_slots_per_worker: 8
+        # Maximum deterministic Task assignments claimed in one worker lease.
         tasks_per_lease: 10
+        # Retries allowed for framework/infrastructure failures, not science errors.
         infrastructure_retry_limit: 1
+        # Scheduler requeues allowed for an interrupted worker allocation.
         requeue_limit: 2
 ```
 
