@@ -70,7 +70,12 @@ from rundra.domain.purge import (
     PurgeScope,
 )
 from rundra.domain.records import RunRecord
-from rundra.domain.scaling import ExecutionPolicy, SeedRange, TaskCoordinate
+from rundra.domain.scaling import (
+    ExecutionPolicy,
+    SeedRange,
+    TaskCoordinate,
+    WorkerPoolPolicy,
+)
 from rundra.domain.states import (
     ExecutionState,
     RetrievalState,
@@ -988,11 +993,12 @@ def plan_operation(
         unsupported = _unsupported_execution_target(target, experiment)
         if unsupported is not None:
             return OperationResult.failure("plan", unsupported)
-        policy = _effective_execution_policy(
+        policy, policy_version = _effective_execution_policy(
             targets_config.execution.get(target_name),
             experiment,
             target,
             targets_source,
+            targets_config.version,
         )
         if policy is not None:
             plan = _create_effective_scaling_plan(
@@ -1001,7 +1007,7 @@ def plan_operation(
                 target,
                 compact_seed_range(seed=seed, seeds=seeds),
                 policy,
-                targets_config.version,
+                policy_version,
                 strategy=execution_strategy,
                 retrieval_policy=retrieval_policy,
                 preparation=preparation,
@@ -1103,22 +1109,44 @@ def _effective_execution_policy(
     experiment: ExperimentSpec,
     target: Target,
     targets_source: Path,
-) -> ExecutionPolicy | None:
+    targets_version: int,
+) -> tuple[ExecutionPolicy | None, int]:
     """Size the framework-owned local target to the client's usable CPUs."""
 
+    if target.transport.kind != "local" or target.scheduler.kind != "local":
+        return policy, targets_version
     if (
-        policy is None
-        or targets_source.resolve() != builtin_targets_source().resolve()
-        or target.transport.kind != "local"
-        or target.scheduler.kind != "local"
+        policy is not None
+        and targets_source.resolve() != builtin_targets_source().resolve()
     ):
-        return policy
+        return policy, targets_version
     try:
         available_cpus = len(os.sched_getaffinity(0))
     except (AttributeError, OSError):
         available_cpus = os.cpu_count() or 1
     logical_task_cpus = experiment.resources.tasks * experiment.resources.cpus_per_task
     task_slots = max(1, available_cpus // logical_task_cpus)
+    if policy is None:
+        policy = ExecutionPolicy(
+            hard_task_limit=100_000,
+            confirmation_threshold=1_000,
+            max_active_tasks=task_slots,
+            max_concurrent_jobs=task_slots,
+            max_array_size=1_000,
+            output_shard_tasks=1_000,
+            automatic_retrieval_threshold=1_000,
+            worker_pool=WorkerPoolPolicy(
+                activation_threshold=2,
+                default_workers=1,
+                max_workers=task_slots,
+                task_slots_per_worker=task_slots,
+                max_task_slots_per_worker=task_slots,
+                tasks_per_lease=10,
+                infrastructure_retry_limit=0,
+                requeue_limit=0,
+            ),
+        )
+        return policy, max(targets_version, 6)
     task_slots = min(task_slots, policy.hard_task_limit)
     worker_pool = replace(
         policy.worker_pool,
@@ -1127,11 +1155,14 @@ def _effective_execution_policy(
         task_slots_per_worker=task_slots,
         max_task_slots_per_worker=task_slots,
     )
-    return replace(
-        policy,
-        max_active_tasks=task_slots,
-        max_concurrent_jobs=task_slots,
-        worker_pool=worker_pool,
+    return (
+        replace(
+            policy,
+            max_active_tasks=task_slots,
+            max_concurrent_jobs=task_slots,
+            worker_pool=worker_pool,
+        ),
+        max(targets_version, 6),
     )
 
 
@@ -1754,11 +1785,12 @@ def run_operation(
                 ),
             )
         target = targets[target_name]
-        policy = _effective_execution_policy(
+        policy, policy_version = _effective_execution_policy(
             targets_config.execution.get(target_name),
             experiment,
             target,
             targets_source,
+            targets_config.version,
         )
         if policy is not None:
             validate_task_confirmation(
@@ -1898,7 +1930,7 @@ def run_operation(
                 target,
                 _execution_seed_range(seed=seed, seeds=seeds),
                 policy,
-                targets_config.version,
+                policy_version,
                 preparation=preparation,
                 workers=workers,
                 task_slots_per_worker=task_slots_per_worker,
@@ -2088,11 +2120,12 @@ def submit_operation(
                 ),
             )
         target = targets[target_name]
-        policy = _effective_execution_policy(
+        policy, policy_version = _effective_execution_policy(
             targets_config.execution.get(target_name),
             experiment,
             target,
             targets_source,
+            targets_config.version,
         )
         if policy is not None:
             validate_task_confirmation(
@@ -2220,7 +2253,7 @@ def submit_operation(
                 target,
                 _execution_seed_range(seed=seed, seeds=seeds),
                 policy,
-                targets_config.version,
+                policy_version,
                 preparation=preparation,
                 workers=workers,
                 task_slots_per_worker=task_slots_per_worker,

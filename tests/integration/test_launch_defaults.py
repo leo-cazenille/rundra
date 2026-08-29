@@ -71,6 +71,14 @@ defaults:
         capture_output=True,
         text=True,
     )
+    multi_task_plan = subprocess.run(
+        [_RUNDR, "plan", "experiment.yaml", "--seeds", "0:3", "--json"],
+        cwd=project,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
     human_plan = subprocess.run(
         [_RUNDR, "plan", "experiment.yaml"],
         cwd=project,
@@ -89,6 +97,9 @@ defaults:
     )
     try:
         assert planned.returncode == 0, planned.stderr or planned.stdout
+        assert multi_task_plan.returncode == 0, (
+            multi_task_plan.stderr or multi_task_plan.stdout
+        )
         assert human_plan.returncode == 0, human_plan.stderr or human_plan.stdout
         assert f"Config: {project / 'config.yaml'} (project profile)" in (
             human_plan.stdout
@@ -100,6 +111,16 @@ defaults:
         assert planned_launch["sources"]["seed"] == "generated"
         assert planned_launch["sources"]["config"] == "project_profile:local"
         assert planned_launch["sources"]["targets_file"] == "user"
+        available_cpus = (
+            len(os.sched_getaffinity(0))
+            if hasattr(os, "sched_getaffinity")
+            else (os.cpu_count() or 1)
+        )
+        multi_plan = json.loads(multi_task_plan.stdout)["plan"]
+        assert multi_plan["strategy"] == "worker-pool"
+        assert multi_plan["scheduling"]["concurrent_task_capacity"] == min(
+            4, available_cpus
+        )
         assert result.returncode == 0, result.stderr or result.stdout
         document = json.loads(result.stdout)
         assert document["run"]["state"] == "SUCCEEDED"
