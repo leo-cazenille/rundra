@@ -509,6 +509,9 @@ def test_remote_preparation_script_builds_and_reuses_target_cache(
     assert (workspace.source / "bin/model").read_text(encoding="utf-8") == "built"
     assert spec.build_key is not None
     assert (target_cache / "images" / f"{recipe.image.sha256}.sif").is_file()
+    assert (
+        target_cache / "images" / f"{recipe.image.sha256}.sif.receipt"
+    ).is_file()
     entry = target_cache / "builds" / spec.build_key
     assert (entry / ".complete").is_file()
     assert (entry / "source/bin/model").is_file()
@@ -725,6 +728,70 @@ destination.write_bytes(b"pulled-immutable-sif")
     assert (
         target_cache / "images" / f"{recipe.image.sha256}.sif"
     ).read_bytes() == image_contents
+    assert (
+        target_cache / "images" / f"{recipe.image.sha256}.sif.receipt"
+    ).is_file()
+
+
+def test_remote_preparation_reuses_receipt_without_hashing_image(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "remote/runs/run_0/source"
+    source.mkdir(parents=True)
+    recipe_image = tmp_path / "expected.sif"
+    recipe_image.write_bytes(b"immutable-sif")
+    recipe = _recipe(recipe_image, build=False)
+    plan = PreparationPlan(
+        recipe,
+        source_mode="working_tree",
+        source_root=tmp_path,
+        offline=True,
+    )
+    target_cache = tmp_path / "cache"
+    images = target_cache / "images"
+    images.mkdir(parents=True)
+    cached = images / f"{recipe.image.sha256}.sif"
+    cached.write_bytes(recipe_image.read_bytes())
+    cached.chmod(0o444)
+    receipt = images / f"{recipe.image.sha256}.sif.receipt"
+    receipt.write_text(
+        f"1\t{recipe.image.sha256}\t{cached.stat().st_size}\n",
+        encoding="ascii",
+    )
+    receipt.chmod(0o444)
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_sha256sum = fake_bin / "sha256sum"
+    fake_sha256sum.write_text("#!/bin/sh\nexit 91\n", encoding="ascii")
+    fake_sha256sum.chmod(0o755)
+    spec = create_remote_preparation_spec(
+        plan,
+        PreparedSource(source, "34" * 32, "snapshot", "working-tree"),
+        _target(tmp_path),
+        "56" * 32,
+        cache_root=target_cache,
+    )
+    workspace = StagedWorkspace(
+        root=source.parent,
+        source=source,
+        inputs=source.parent / "input",
+        config=source.parent / "input/config.yaml",
+        runtime=source.parent / "runtime",
+        outputs=source.parent / "output",
+        logs=source.parent / "logs",
+        metadata=source.parent / "metadata",
+    )
+    workspace.metadata.mkdir()
+
+    completed = subprocess.run(
+        build_remote_preparation_command(spec, workspace).argv,
+        check=False,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+    )
+
+    assert (completed.returncode, completed.stderr) == (0, "")
 
 
 def stat_mode(path: Path) -> int:

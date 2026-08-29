@@ -232,18 +232,7 @@ def probe_remote_offline_preparation(
         *(path / str(image.name) for path in image_search_paths),
     )
     for candidate in candidates:
-        result = transport.run(
-            Command(
-                (
-                    "sh",
-                    "-c",
-                    'candidate=$1; test -f "$candidate" && '
-                    'test ! -L "$candidate" && sha256sum -- "$candidate"',
-                    "rundra-image-probe",
-                    str(candidate),
-                )
-            )
-        )
+        result = transport.run(_remote_image_digest_command(candidate))
         fields = result.stdout.split(maxsplit=1)
         if result.exit_code == 0 and fields and fields[0] == image.sha256:
             return OfflinePreparationProbe(
@@ -428,7 +417,7 @@ def probe_remote_preparation_cache(
             != 0
         ):
             raise PreparationError(f"Target prepared output is not executable: {path}")
-    image_result = transport.run(Command(("sha256sum", "--", str(image))))
+    image_result = transport.run(_remote_image_digest_command(image))
     image_fields = image_result.stdout.split(maxsplit=1)
     if (
         image_result.exit_code != 0
@@ -468,6 +457,32 @@ def _prebuilt_image(plan: PreparationPlan) -> PreparationImage:
             "Legacy remote preparation requires a pinned prebuilt image"
         )
     return image
+
+
+def _remote_image_digest_command(image: PurePath) -> Command:
+    """Read a trusted cache receipt or measure a remote image once."""
+    return Command(
+        (
+            "sh",
+            "-c",
+            """\
+image=$1
+receipt=$image.receipt
+test -f "$image" && test ! -L "$image" || exit 1
+if test -f "$receipt" && test ! -L "$receipt"; then
+  IFS='\t' read -r version digest size extra < "$receipt" || :
+  actual_size=$(wc -c < "$image" | tr -d ' ')
+  if test "$version" = 1 && test -n "$digest" && test "$size" = "$actual_size" && test -z "${extra:-}"; then
+    printf '%s  %s\n' "$digest" "$image"
+    exit 0
+  fi
+fi
+sha256sum -- "$image"
+""",
+            "rundra-image-digest",
+            str(image),
+        )
+    )
 
 
 def create_remote_preparation_spec(
@@ -636,6 +651,7 @@ def build_remote_preparation_command(
     image_recipe = _prebuilt_image(plan)
     target_cache = spec.target_cache_root or workspace.root.parent.parent / "cache"
     image = target_cache / "images" / f"{image_recipe.sha256}.sif"
+    image_receipt = PurePath(f"{image}.receipt")
     image_lock = target_cache / "locks" / f"image-{image_recipe.sha256}.lock"
     runtime = shlex.quote(spec.apptainer_executable)
     lines = [
@@ -643,10 +659,25 @@ def build_remote_preparation_command(
         "umask 077",
         f"cache={shlex.quote(str(target_cache))}",
         f"image={shlex.quote(str(image))}",
+        f"image_receipt={shlex.quote(str(image_receipt))}",
+        f"expected_image_digest={shlex.quote(image_recipe.sha256)}",
         f"image_lock={shlex.quote(str(image_lock))}",
         "image_action=reuse_image_cache",
         "build_action=not_requested",
         'mkdir -p -- "$cache/images" "$cache/builds" "$cache/indexes" "$cache/locks"',
+        "image_receipt_valid() {",
+        '  [ -f "$image" ] && [ ! -L "$image" ] && [ -f "$image_receipt" ] && [ ! -L "$image_receipt" ] || return 1',
+        "  IFS='\t' read -r receipt_version receipt_digest receipt_size receipt_extra < \"$image_receipt\" || return 1",
+        '  actual_size=$(wc -c < "$image" | tr -d \' \')',
+        '  [ "$receipt_version" = 1 ] && [ "$receipt_digest" = "$expected_image_digest" ] && [ "$receipt_size" = "$actual_size" ] && [ -z "${receipt_extra:-}" ]',
+        "}",
+        "publish_image_receipt() {",
+        '  receipt_tmp=$(mktemp "$cache/images/.receipt.XXXXXX")',
+        '  actual_size=$(wc -c < "$image" | tr -d \' \')',
+        "  printf '1\\t%s\\t%s\\n' \"$expected_image_digest\" \"$actual_size\" > \"$receipt_tmp\"",
+        '  chmod a-w -- "$receipt_tmp"',
+        '  mv -f -- "$receipt_tmp" "$image_receipt"',
+        "}",
         "attempt=0",
         'while ! mkdir -- "$image_lock" 2>/dev/null; do',
         "  attempt=$((attempt + 1))",
@@ -655,8 +686,12 @@ def build_remote_preparation_command(
         "done",
         "trap 'rmdir -- \"$image_lock\" 2>/dev/null || :' EXIT HUP INT TERM",
         'if [ -f "$image" ]; then',
-        "  actual=$(sha256sum -- \"$image\" | cut -d' ' -f1)",
-        f"  [ \"$actual\" = {shlex.quote(image_recipe.sha256)} ] || {{ printf '%s\\n' 'cached image digest mismatch' >&2; exit 65; }}",
+        '  [ ! -L "$image" ] || { printf \'%s\\n\' \'cached image is a symlink\' >&2; exit 65; }',
+        "  if ! image_receipt_valid; then",
+        "    actual=$(sha256sum -- \"$image\" | cut -d' ' -f1)",
+        '    [ "$actual" = "$expected_image_digest" ] || { printf \'%s\\n\' \'cached image digest mismatch\' >&2; exit 65; }',
+        "    publish_image_receipt",
+        "  fi",
         "else",
     ]
     for search_root in spec.image_search_paths:
@@ -671,6 +706,7 @@ def build_remote_preparation_command(
                 '      cp -- "$candidate" "$image_tmp"',
                 '      chmod a-w -- "$image_tmp"',
                 '      mv -- "$image_tmp" "$image"',
+                "      publish_image_receipt",
                 "      image_action=cache_verified_candidate",
                 "    fi",
                 "  fi",
@@ -692,6 +728,7 @@ def build_remote_preparation_command(
                 f"  [ \"$actual\" = {shlex.quote(image_recipe.sha256)} ] || {{ printf '%s\\n' 'pulled image digest mismatch' >&2; exit 65; }}",
                 '  chmod a-w -- "$image_tmp"',
                 '  mv -- "$image_tmp" "$image"',
+                "  publish_image_receipt",
                 '  rmdir -- "$image_tmp_dir"',
                 "  image_action=pull_image",
             )
@@ -915,6 +952,7 @@ def _build_remote_definition_command(
     index_root = cache / "image-definitions"
     index = index_root / f"{spec.image_recipe_key}.sha256"
     stable_image = index_root / f"{spec.image_recipe_key}.sif"
+    stable_receipt = PurePath(f"{stable_image}.receipt")
     lock = cache / "locks" / f"definition-{spec.image_recipe_key}.lock"
     definition = workspace.source / recipe.path
     lines = [
@@ -924,6 +962,7 @@ def _build_remote_definition_command(
         f"index_root={shlex.quote(str(index_root))}",
         f"index={shlex.quote(str(index))}",
         f"image={shlex.quote(str(stable_image))}",
+        f"image_receipt={shlex.quote(str(stable_receipt))}",
         f"lock={shlex.quote(str(lock))}",
         f"definition={shlex.quote(str(definition))}",
         'mkdir -p -- "$cache/images" "$index_root" "$cache/locks"',
@@ -939,8 +978,20 @@ def _build_remote_definition_command(
         "build_action=not_requested",
         f'if [ -f "$index" ] && [ -f "$image" ] && [ {"false" if spec.plan.rebuild_image else "true"} = true ]; then',
         '  digest=$(cat -- "$index")',
-        "  actual=$(sha256sum -- \"$image\" | cut -d' ' -f1)",
-        "  [ \"$actual\" = \"$digest\" ] || { printf '%s\\n' 'definition image cache mismatch' >&2; exit 65; }",
+        "  receipt_valid=false",
+        '  actual_size=$(wc -c < "$image" | tr -d \' \')',
+        '  if [ ! -L "$image" ] && [ -f "$image_receipt" ] && [ ! -L "$image_receipt" ]; then',
+        "    IFS='\t' read -r receipt_version receipt_digest receipt_size receipt_extra < \"$image_receipt\" || :",
+        '    if [ "$receipt_version" = 1 ] && [ "$receipt_digest" = "$digest" ] && [ "$receipt_size" = "$actual_size" ] && [ -z "${receipt_extra:-}" ]; then receipt_valid=true; fi',
+        "  fi",
+        '  if [ "$receipt_valid" != true ]; then',
+        "    actual=$(sha256sum -- \"$image\" | cut -d' ' -f1)",
+        "    [ \"$actual\" = \"$digest\" ] || { printf '%s\\n' 'definition image cache mismatch' >&2; exit 65; }",
+        '    receipt_tmp=$(mktemp "$index_root/.receipt.XXXXXX")',
+        "    printf '1\\t%s\\t%s\\n' \"$digest\" \"$actual_size\" > \"$receipt_tmp\"",
+        '    chmod a-w -- "$receipt_tmp"',
+        '    mv -f -- "$receipt_tmp" "$image_receipt"',
+        "  fi",
         "else",
     ]
     if spec.plan.offline:
@@ -968,6 +1019,11 @@ def _build_remote_definition_command(
                 '  cp -- "$content" "$image_tmp"',
                 '  chmod a-w -- "$image_tmp"',
                 '  mv -f -- "$image_tmp" "$image"',
+                '  actual_size=$(wc -c < "$image" | tr -d \' \')',
+                '  receipt_tmp="$work/receipt"',
+                "  printf '1\\t%s\\t%s\\n' \"$digest\" \"$actual_size\" > \"$receipt_tmp\"",
+                '  chmod a-w -- "$receipt_tmp"',
+                '  mv -f -- "$receipt_tmp" "$image_receipt"',
                 '  index_tmp="$work/index"',
                 '  printf \'%s\\n\' "$digest" > "$index_tmp"',
                 '  chmod a-w -- "$index_tmp"',
@@ -1427,11 +1483,17 @@ def _resolve_image(
     for candidate in candidates:
         if candidate.is_symlink() or not candidate.is_file():
             continue
-        if candidate == cached or _file_digest(candidate) == recipe.sha256:
+        candidate_verified = (
+            _trusted_image_receipt(candidate, recipe.sha256)
+            if candidate == cached
+            else _file_digest(candidate) == recipe.sha256
+        )
+        if candidate_verified:
             if candidate != cached:
                 with _lock(cache_root / "locks" / f"image-{recipe.sha256}.lock"):
                     if not cached.exists():
                         _publish_file(candidate, cached)
+                        _publish_image_receipt(cached, recipe.sha256)
             return ResolvedImage(
                 cached,
                 recipe.sha256,
@@ -1446,8 +1508,9 @@ def _resolve_image(
         )
     with _lock(cache_root / "locks" / f"image-{recipe.sha256}.lock"):
         if cached.is_file():
-            if _file_digest(cached) != recipe.sha256:
+            if cached.is_symlink() or _file_digest(cached) != recipe.sha256:
                 raise PreparationError(f"Image cache entry has wrong digest: {cached}")
+            _publish_image_receipt(cached, recipe.sha256)
             return ResolvedImage(cached, recipe.sha256, recipe.uri, "reuse_image_cache")
         with tempfile.TemporaryDirectory(prefix="rundra-image-", dir=cache_root) as raw:
             pulled = Path(raw) / requested
@@ -1467,6 +1530,7 @@ def _resolve_image(
                     f"Pulled image digest mismatch: expected {recipe.sha256}, got {actual}"
                 )
             _publish_file(pulled, cached)
+            _publish_image_receipt(cached, recipe.sha256)
     return ResolvedImage(cached, recipe.sha256, recipe.uri, "pull_image")
 
 
@@ -1525,7 +1589,10 @@ def _resolve_definition_image(
             if (
                 cached.is_file()
                 and not cached.is_symlink()
-                and _file_digest(cached) == digest
+                and (
+                    _trusted_image_receipt(cached, digest)
+                    or _measure_and_receipt_image(cached, digest)
+                )
             ):
                 return ResolvedImage(
                     cached,
@@ -1570,6 +1637,7 @@ def _resolve_definition_image(
             cached = images / f"{digest}.sif"
             if not cached.exists():
                 _publish_file(built, cached)
+                _publish_image_receipt(cached, digest)
             temporary_index = indexes / f".{key}.{os.getpid()}.tmp"
             temporary_index.write_text(
                 json.dumps(
@@ -1847,6 +1915,44 @@ def _file_digest(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _image_receipt_path(image: Path) -> Path:
+    return image.with_name(f"{image.name}.receipt")
+
+
+def _trusted_image_receipt(image: Path, expected_digest: str) -> bool:
+    receipt = _image_receipt_path(image)
+    if image.is_symlink() or not image.is_file() or receipt.is_symlink():
+        return False
+    try:
+        version, digest, size = receipt.read_text(encoding="ascii").strip().split("\t")
+        return (
+            version == "1"
+            and digest == expected_digest
+            and int(size) == image.stat().st_size
+        )
+    except (OSError, UnicodeError, ValueError):
+        return False
+
+
+def _measure_and_receipt_image(image: Path, expected_digest: str) -> bool:
+    if _file_digest(image) != expected_digest:
+        return False
+    _publish_image_receipt(image, expected_digest)
+    return True
+
+
+def _publish_image_receipt(image: Path, digest: str) -> None:
+    receipt = _image_receipt_path(image)
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    temporary = receipt.parent / f".{receipt.name}.tmp-{os.getpid()}"
+    temporary.write_text(
+        f"1\t{digest}\t{image.stat().st_size}\n",
+        encoding="ascii",
+    )
+    temporary.chmod(0o444)
+    os.replace(temporary, receipt)
 
 
 def _platform_fingerprint() -> str:
