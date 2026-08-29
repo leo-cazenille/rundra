@@ -370,6 +370,46 @@ requiring a prebuilt image. See the checked
 for its `python.def`, version-4 project preparation recipe, target build policy,
 and local and Slurm launch commands.
 
+### Pinned and unpinned prebuilt images
+
+Project-managed preparation normally pins the exact SIF bytes:
+
+```yaml
+version: 6
+preparation:
+  source:
+    working_tree: {}
+  image:
+    name: application.sif
+    prebuilt:
+      uri: library://example/application:v1
+      sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+```
+
+When a command verifies this image, a mismatch is fatal and reports the file,
+expected digest, and observed digest. Rundra never silently accepts different
+bytes or downgrades a mismatched pin.
+
+Version 6 also permits omission of `sha256` when an existing SIF must be
+trusted:
+
+```yaml
+version: 6
+preparation:
+  source:
+    working_tree: {}
+  image:
+    name: application.sif
+    prebuilt:
+      uri: library://example/application:v1
+```
+
+This mode emits a warning. Rundra searches the project and configured
+`preparation.image_search_paths`, trusts an existing regular file, measures its
+SHA-256, and records that measured digest in the Run. It does not pull an
+unpinned URI: if no existing file is found, preparation fails with the checked
+paths. Prefer a pin whenever the intended digest is known.
+
 ## Advanced example: Apptainer on a Slurm cluster
 
 This example reuses the quick-start `main.py` and `config.yaml`, but executes

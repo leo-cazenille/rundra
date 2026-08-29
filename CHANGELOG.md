@@ -4,12 +4,23 @@ All notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
+### Added
+
+- Project configuration version 6 permits `prebuilt.sha256` to be omitted.
+  Rundra then trusts only an existing project or configured image-search-path
+  SIF, emits warnings, measures it before deriving build/cache identities, and
+  preserves the measured digest in Run provenance. Unpinned registry pulls are
+  intentionally disabled.
+
 ### Fixed
 
 - Preparation cache receipts are trusted only for sealed, non-writable SIF
   entries. Legacy writable entries receive one full SHA-256 verification and
   are sealed before receipt migration. Scratch preparation tests also preserve
   target cache and image-search paths outside the allocation-local Run copy.
+- Image receipt parsing now uses a real tab delimiter. Offline target probes
+  report each candidate's observed digest, while preparation failures report
+  expected and observed digests and paths instead of a generic mismatch.
 
 ## [0.1.7] - 2026-08-29
 

@@ -1675,6 +1675,18 @@ published image cache is keyed by its measured SHA-256. `--rebuild-image`
 bypasses only the recipe index. `--offline` permits only an existing verified
 definition-image cache hit.
 
+Project schema version 6 permits a prebuilt recipe to omit `sha256`. This is an
+explicitly weaker trust mode, not an assertion of reproducibility. Rundra emits
+a warning in planning and capability audits, accepts only an existing regular
+SIF from the project or configured image search paths, measures its SHA-256,
+publishes it into the content-addressed cache, and records the measured digest
+in Run provenance before application build or scientific execution. Registry
+pulls are disabled when the digest is omitted because a mutable URI alone does
+not identify bytes. If `sha256` is present, strict pinning remains mandatory:
+every command that measures a candidate rejects mismatches and reports the
+candidate path plus expected and observed digests. Rundra never falls back from
+a mismatched pin to unpinned trust.
+
 Forced `--prepare-location target` submits one scheduler job with the
 definition recipe's bounded resources and the target-owned privilege mode; it
 never builds on the SSH controller. Rundra waits for this job because the SIF
