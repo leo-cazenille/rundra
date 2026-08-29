@@ -244,6 +244,12 @@ values to request scale. Requests above a target ceiling fail rather than being
 silently clamped. Without a request, target defaults apply; permitting eight
 workers therefore does not reserve eight workers by default.
 
+To fill every site-approved CPU slot inside each selected cluster worker, set
+`default_task_slots_per_worker` equal to `max_task_slots_per_worker` and retain
+a conservative `default_workers`. The packaged local target instead derives its
+default slots from the CPU affinity available to the Rundra process, divided by
+each logical Task's CPU request.
+
 Project-derived worker scale is bound to the target selected by that project.
 When an explicit `--target` selects a different target, Rundra discards project
 and profile `workers` and `task_slots_per_worker` values so the selected target's

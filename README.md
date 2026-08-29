@@ -140,20 +140,20 @@ rundr plan experiment.yaml --seeds 0:9
 rundr run experiment.yaml --seeds 0:9 --progress
 ```
 
-The built-in local target defaults to one worker with one Task slot, so this
-ten-seed Run executes conservatively and sequentially. Request bounded local
-parallelism explicitly after reviewing the plan:
+The built-in local target detects the CPUs available to the Rundra process
+(including affinity restrictions) and runs up to one single-CPU Task per
+available CPU. A Task requesting multiple CPUs reduces the number of concurrent
+Tasks accordingly. You can impose a lower local cap explicitly after reviewing
+the plan:
 
 ```bash
 rundr plan experiment.yaml --seeds 0:9 \
-  --workers 2 --task-slots-per-worker 2
+  --workers 1 --task-slots-per-worker 2
 rundr run experiment.yaml --seeds 0:9 \
-  --workers 2 --task-slots-per-worker 2 --progress
+  --workers 1 --task-slots-per-worker 2 --progress
 ```
 
-That request permits at most four concurrent application processes. The
-built-in target still validates it against local worker and active-Task
-ceilings; it does not infer or reserve every CPU on the machine.
+That request caps execution at two concurrent application processes.
 
 Review the command, seed, resources, staging behavior, target, destination, and
 the source snapshot size before launching. The preview applies the same
@@ -392,8 +392,8 @@ targets:
         default_workers: 1
         # Hard site ceiling for scheduler-owned worker allocations.
         max_workers: 4
-        # Concurrent Task slots in each worker when no explicit request exists.
-        default_task_slots_per_worker: 1
+        # Fill all eight site-approved CPU slots in each selected worker.
+        default_task_slots_per_worker: 8
         # Hard ceiling on concurrent Task slots inside one worker.
         max_task_slots_per_worker: 8
         # Maximum deterministic Task assignments claimed in one worker lease.
@@ -426,7 +426,12 @@ then execute the remaining assignments in their lanes without creating one
 scheduler element per seed. Rundra preserves separate configs, output
 directories, timeouts, states, and provenance for all twenty Tasks.
 
-The target's `max_active_tasks`, `max_concurrent_jobs`, `max_workers`, and
+Set `default_task_slots_per_worker` equal to
+`max_task_slots_per_worker` when normal Runs should use all site-approved cores
+inside each selected worker. `default_workers` independently limits how many
+worker allocations or nodes are requested, so filling a worker does not imply
+reserving the entire cluster. The target's `max_active_tasks`,
+`max_concurrent_jobs`, `max_workers`, and
 `max_task_slots_per_worker` are hard ceilings. `activation_threshold` controls
 when automatic planning may choose workers for a large Run, while explicit
 project or CLI worker requests still undergo the same checks. `rundr plan`

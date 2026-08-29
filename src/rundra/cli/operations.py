@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import secrets
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -987,7 +988,12 @@ def plan_operation(
         unsupported = _unsupported_execution_target(target, experiment)
         if unsupported is not None:
             return OperationResult.failure("plan", unsupported)
-        policy = targets_config.execution.get(target_name)
+        policy = _effective_execution_policy(
+            targets_config.execution.get(target_name),
+            experiment,
+            target,
+            targets_source,
+        )
         if policy is not None:
             plan = _create_effective_scaling_plan(
                 experiment,
@@ -1089,6 +1095,45 @@ def _create_effective_scaling_plan(
         ),
         workers=workers,
         task_slots_per_worker=task_slots_per_worker,
+    )
+
+
+def _effective_execution_policy(
+    policy: ExecutionPolicy | None,
+    experiment: ExperimentSpec,
+    target: Target,
+    targets_source: Path,
+) -> ExecutionPolicy | None:
+    """Size the framework-owned local target to the client's usable CPUs."""
+
+    if (
+        policy is None
+        or targets_source.resolve() != builtin_targets_source().resolve()
+        or target.transport.kind != "local"
+        or target.scheduler.kind != "local"
+    ):
+        return policy
+    try:
+        available_cpus = len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        available_cpus = os.cpu_count() or 1
+    logical_task_cpus = (
+        experiment.resources.tasks * experiment.resources.cpus_per_task
+    )
+    task_slots = max(1, available_cpus // logical_task_cpus)
+    task_slots = min(task_slots, policy.hard_task_limit)
+    worker_pool = replace(
+        policy.worker_pool,
+        default_workers=1,
+        max_workers=task_slots,
+        task_slots_per_worker=task_slots,
+        max_task_slots_per_worker=task_slots,
+    )
+    return replace(
+        policy,
+        max_active_tasks=task_slots,
+        max_concurrent_jobs=task_slots,
+        worker_pool=worker_pool,
     )
 
 
@@ -1711,7 +1756,12 @@ def run_operation(
                 ),
             )
         target = targets[target_name]
-        policy = targets_config.execution.get(target_name)
+        policy = _effective_execution_policy(
+            targets_config.execution.get(target_name),
+            experiment,
+            target,
+            targets_source,
+        )
         if policy is not None:
             validate_task_confirmation(
                 task_total,
@@ -2040,7 +2090,12 @@ def submit_operation(
                 ),
             )
         target = targets[target_name]
-        policy = targets_config.execution.get(target_name)
+        policy = _effective_execution_policy(
+            targets_config.execution.get(target_name),
+            experiment,
+            target,
+            targets_source,
+        )
         if policy is not None:
             validate_task_confirmation(
                 task_total,
