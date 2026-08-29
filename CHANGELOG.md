@@ -4,6 +4,13 @@ All notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Preparation cache receipts are trusted only for sealed, non-writable SIF
+  entries. Legacy writable entries receive one full SHA-256 verification and
+  are sealed before receipt migration. Scratch preparation tests also preserve
+  target cache and image-search paths outside the allocation-local Run copy.
+
 ## [0.1.7] - 2026-08-29
 
 ### Added

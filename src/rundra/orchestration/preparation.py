@@ -469,7 +469,7 @@ def _remote_image_digest_command(image: PurePath) -> Command:
 image=$1
 receipt=$image.receipt
 test -f "$image" && test ! -L "$image" || exit 1
-if test -f "$receipt" && test ! -L "$receipt"; then
+if test ! -w "$image" && test -f "$receipt" && test ! -L "$receipt"; then
   IFS='\t' read -r version digest size extra < "$receipt" || :
   actual_size=$(wc -c < "$image" | tr -d ' ')
   if test "$version" = 1 && test -n "$digest" && test "$size" = "$actual_size" && test -z "${extra:-}"; then
@@ -666,12 +666,13 @@ def build_remote_preparation_command(
         "build_action=not_requested",
         'mkdir -p -- "$cache/images" "$cache/builds" "$cache/indexes" "$cache/locks"',
         "image_receipt_valid() {",
-        '  [ -f "$image" ] && [ ! -L "$image" ] && [ -f "$image_receipt" ] && [ ! -L "$image_receipt" ] || return 1',
+        '  [ -f "$image" ] && [ ! -L "$image" ] && [ ! -w "$image" ] && [ -f "$image_receipt" ] && [ ! -L "$image_receipt" ] || return 1',
         "  IFS='\t' read -r receipt_version receipt_digest receipt_size receipt_extra < \"$image_receipt\" || return 1",
         "  actual_size=$(wc -c < \"$image\" | tr -d ' ')",
         '  [ "$receipt_version" = 1 ] && [ "$receipt_digest" = "$expected_image_digest" ] && [ "$receipt_size" = "$actual_size" ] && [ -z "${receipt_extra:-}" ]',
         "}",
         "publish_image_receipt() {",
+        '  chmod a-w -- "$image"',
         '  receipt_tmp=$(mktemp "$cache/images/.receipt.XXXXXX")',
         "  actual_size=$(wc -c < \"$image\" | tr -d ' ')",
         '  printf \'1\\t%s\\t%s\\n\' "$expected_image_digest" "$actual_size" > "$receipt_tmp"',
@@ -980,13 +981,14 @@ def _build_remote_definition_command(
         '  digest=$(cat -- "$index")',
         "  receipt_valid=false",
         "  actual_size=$(wc -c < \"$image\" | tr -d ' ')",
-        '  if [ ! -L "$image" ] && [ -f "$image_receipt" ] && [ ! -L "$image_receipt" ]; then',
+        '  if [ ! -L "$image" ] && [ ! -w "$image" ] && [ -f "$image_receipt" ] && [ ! -L "$image_receipt" ]; then',
         "    IFS='\t' read -r receipt_version receipt_digest receipt_size receipt_extra < \"$image_receipt\" || :",
         '    if [ "$receipt_version" = 1 ] && [ "$receipt_digest" = "$digest" ] && [ "$receipt_size" = "$actual_size" ] && [ -z "${receipt_extra:-}" ]; then receipt_valid=true; fi',
         "  fi",
         '  if [ "$receipt_valid" != true ]; then',
         "    actual=$(sha256sum -- \"$image\" | cut -d' ' -f1)",
         "    [ \"$actual\" = \"$digest\" ] || { printf '%s\\n' 'definition image cache mismatch' >&2; exit 65; }",
+        '    chmod a-w -- "$image"',
         '    receipt_tmp=$(mktemp "$index_root/.receipt.XXXXXX")',
         '    printf \'1\\t%s\\t%s\\n\' "$digest" "$actual_size" > "$receipt_tmp"',
         '    chmod a-w -- "$receipt_tmp"',
@@ -1926,7 +1928,12 @@ def _image_receipt_path(image: Path) -> Path:
 
 def _trusted_image_receipt(image: Path, expected_digest: str) -> bool:
     receipt = _image_receipt_path(image)
-    if image.is_symlink() or not image.is_file() or receipt.is_symlink():
+    if (
+        image.is_symlink()
+        or not image.is_file()
+        or image.stat().st_mode & 0o222
+        or receipt.is_symlink()
+    ):
         return False
     try:
         version, digest, size = receipt.read_text(encoding="ascii").strip().split("\t")
@@ -1947,6 +1954,7 @@ def _measure_and_receipt_image(image: Path, expected_digest: str) -> bool:
 
 
 def _publish_image_receipt(image: Path, digest: str) -> None:
+    image.chmod(stat.S_IMODE(image.stat().st_mode) & ~0o222)
     receipt = _image_receipt_path(image)
     receipt.parent.mkdir(parents=True, exist_ok=True)
     temporary = receipt.parent / f".{receipt.name}.tmp-{os.getpid()}"

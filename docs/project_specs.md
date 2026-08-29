@@ -1615,8 +1615,8 @@ Local preparation uses content-addressed immutable source, image, and prepared
 source caches. Candidate images are accepted only after SHA-256 verification;
 cache publication uses per-key locks, temporary paths, and atomic rename.
 Successful image publication also writes an atomic versioned receipt containing
-the measured digest and byte size. A regular, non-symlink content-addressed
-cache entry with a matching trusted receipt avoids rereading a potentially
+the measured digest and byte size. A regular, non-symlink, non-writable
+content-addressed cache entry with a matching trusted receipt avoids rereading a potentially
 large SIF on every preparation. Missing or inconsistent receipts cause one
 full SHA-256 measurement and receipt migration; newly acquired images are
 always fully measured before either the image or receipt is trusted.

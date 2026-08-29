@@ -488,6 +488,10 @@ def test_remote_preparation_script_builds_and_reuses_target_cache(
     assert "--pwd /workspace" in command.argv[-1]
     assert "$rundra_run_root/source" in scratch_command.argv[4]
     assert 'mktemp -d "$rundra_scratch/build.XXXXXX"' in scratch_command.argv[4]
+    assert str(target_cache) in scratch_command.argv[4]
+    assert str(image_search) in scratch_command.argv[4]
+    assert "$rundra_run_root/cache" not in scratch_command.argv[4]
+    assert "$rundra_run_root/shared-images" not in scratch_command.argv[4]
 
     cold = subprocess.run(
         command.argv, check=False, capture_output=True, text=True, timeout=10
