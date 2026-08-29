@@ -272,14 +272,36 @@ profiles:
   cluster:
     target: cluster
     destination: retrieved/cluster
+    workers: 2
+    task_slots_per_worker: 4
 ```
+
+`defaults` apply to every profile, while the selected profile overlays them.
+`default_profile` selects `cluster` when `--profile` is omitted; an explicit
+CLI option still has highest precedence. Relative paths are resolved from the
+directory containing `rundra.yaml`. The file should contain reproducible
+project choices, not SSH credentials or site secrets.
+
+The two scaling fields request a bounded worker pool from the selected target:
+
+- `workers: 2` requests two scheduler-owned worker allocations. Slurm normally
+  represents them as elements of one worker array submission.
+- `task_slots_per_worker: 4` reserves four concurrent logical Task slots inside
+  each worker allocation.
+- The resulting maximum scientific concurrency is `2 x 4 = 8` logical Tasks.
+  If the Run contains more than eight Tasks, each slot executes further
+  deterministic assignments sequentially.
+
+These values are requests, not permission to exceed cluster policy. They are
+validated against target-owned ceilings during `plan` and rejected rather than
+silently reduced.
 
 Register the machine-specific target once in
 `~/.config/rundra/targets.yaml`, replacing the SSH alias, username path, and
 any scheduler policy with values supplied by the cluster operator:
 
 ```yaml
-version: 1
+version: 8
 
 targets:
   cluster:
@@ -293,19 +315,54 @@ targets:
     container:
       type: apptainer
     workspace: /shared/users/YOUR_USERNAME/rundra-work
+    execution:
+      hard_task_limit: 10000
+      confirmation_threshold: 1000
+      max_active_tasks: 32
+      max_concurrent_jobs: 4
+      max_array_size: 1000
+      output_shard_tasks: 1000
+      automatic_retrieval_threshold: 1000
+      max_memory_per_worker: 4GiB
+      worker_pool:
+        activation_threshold: 10
+        default_workers: 1
+        max_workers: 4
+        default_task_slots_per_worker: 1
+        max_task_slots_per_worker: 8
+        tasks_per_lease: 10
+        infrastructure_retry_limit: 1
+        requeue_limit: 2
 ```
 
 Keep SSH keys, proxy jumps, ports, and host verification in normal OpenSSH
 configuration, never in Rundra YAML. The login host is used only for staging
 and scheduler operations; the scientific command runs in a Slurm allocation.
+The `execution` section is site policy and should be supplied or reviewed by
+the cluster operator. Conservative defaults prevent a project from reserving
+all allowed workers merely because the target permits them.
 
 Diagnose and review the resolved profile before submitting:
 
 ```bash
 rundr doctor experiment.yaml --profile cluster --connect
-rundr plan experiment.yaml --profile cluster --seeds 0:3
-rundr submit experiment.yaml --profile cluster --seeds 0:3
+rundr plan experiment.yaml --profile cluster --seeds 0:19
+rundr submit experiment.yaml --profile cluster --seeds 0:19
 ```
+
+This plan contains twenty logical Rundra Tasks but requests only two workers.
+Each logical Task needs one CPU and 512 MiB, so four slots make each worker ask
+Slurm for four CPUs and 2 GiB. Up to eight Tasks run concurrently; the workers
+then execute the remaining assignments in their lanes without creating one
+scheduler element per seed. Rundra preserves separate configs, output
+directories, timeouts, states, and provenance for all twenty Tasks.
+
+The target's `max_active_tasks`, `max_concurrent_jobs`, `max_workers`, and
+`max_task_slots_per_worker` are hard ceilings. `activation_threshold` controls
+when automatic planning may choose workers for a large Run, while explicit
+project or CLI worker requests still undergo the same checks. `rundr plan`
+reports the chosen strategy, worker count, slot count, aggregate worker
+resources, lane depth, and exact logical Task count before submission.
 
 Retain the displayed Run ID, then wait and retrieve the declared outputs:
 
