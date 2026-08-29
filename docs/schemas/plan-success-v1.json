@@ -61,7 +61,7 @@
     "units": [
       {
         "command": {
-          "argv": ["python3", "main.py", "--config", "examples/minimal/config.yaml", "--seed", "0"],
+          "argv": ["python3", "main.py", "--config", "examples/minimal/config.yaml", "--seed", "0", "--output", "/workspace/output/results/result-0.json"],
           "environment": {},
           "working_directory": null
         },
@@ -80,7 +80,7 @@
       },
       {
         "command": {
-          "argv": ["python3", "main.py", "--config", "examples/minimal/config.yaml", "--seed", "1"],
+          "argv": ["python3", "main.py", "--config", "examples/minimal/config.yaml", "--seed", "1", "--output", "/workspace/output/results/result-1.json"],
           "environment": {},
           "working_directory": null
         },
