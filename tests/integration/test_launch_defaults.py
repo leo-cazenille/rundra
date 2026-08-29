@@ -87,7 +87,6 @@ defaults:
         capture_output=True,
         text=True,
     )
-
     try:
         assert planned.returncode == 0, planned.stderr or planned.stdout
         assert human_plan.returncode == 0, human_plan.stderr or human_plan.stdout
@@ -178,6 +177,23 @@ def test_one_argument_run_uses_packaged_local_defaults(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
     )
+    multi_task_result = subprocess.run(
+        [
+            _RUNDR,
+            "run",
+            "experiment.yaml",
+            "--seeds",
+            "4:12",
+            "--destination",
+            str(project / "retrieved/multi-task"),
+            "--json",
+        ],
+        cwd=project,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
 
     workspace = home / ".local/share/rundra/workspaces"
     try:
@@ -197,6 +213,12 @@ def test_one_argument_run_uses_packaged_local_defaults(tmp_path: Path) -> None:
         assert document["launch"]["values"]["source_root"] == str(project)
         assert document["launch"]["sources"]["seed"] == "generated"
         assert (project / "retrieved/config/results/result.json").is_file()
+        assert multi_task_result.returncode == 0, (
+            multi_task_result.stderr or multi_task_result.stdout
+        )
+        multi_task_document = json.loads(multi_task_result.stdout)
+        assert multi_task_document["run"]["state"] == "SUCCEEDED"
+        assert multi_task_document["run"]["tasks"] == 9
         assert workspace.is_dir()
         assert not (project / ".rundra").exists()
     finally:

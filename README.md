@@ -137,7 +137,23 @@ After the three files above exist, previewing a ten-seed Run is also valid:
 
 ```bash
 rundr plan experiment.yaml --seeds 0:9
+rundr run experiment.yaml --seeds 0:9 --progress
 ```
+
+The built-in local target defaults to one worker with one Task slot, so this
+ten-seed Run executes conservatively and sequentially. Request bounded local
+parallelism explicitly after reviewing the plan:
+
+```bash
+rundr plan experiment.yaml --seeds 0:9 \
+  --workers 2 --task-slots-per-worker 2
+rundr run experiment.yaml --seeds 0:9 \
+  --workers 2 --task-slots-per-worker 2 --progress
+```
+
+That request permits at most four concurrent application processes. The
+built-in target still validates it against local worker and active-Task
+ceilings; it does not infer or reserve every CPU on the machine.
 
 Review the command, seed, resources, staging behavior, target, destination, and
 the source snapshot size before launching. The preview applies the same

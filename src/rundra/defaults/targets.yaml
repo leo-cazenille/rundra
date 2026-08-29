@@ -1,4 +1,4 @@
-version: 1
+version: 6
 
 targets:
   local:
@@ -7,3 +7,20 @@ targets:
     staging: {type: local}
     container: {type: native}
     workspace: ~/.local/share/rundra/workspaces
+    execution:
+      hard_task_limit: 100000
+      confirmation_threshold: 1000
+      max_active_tasks: 256
+      max_concurrent_jobs: 16
+      max_array_size: 1000
+      output_shard_tasks: 1000
+      automatic_retrieval_threshold: 1000
+      worker_pool:
+        activation_threshold: 2
+        default_workers: 1
+        max_workers: 16
+        default_task_slots_per_worker: 1
+        max_task_slots_per_worker: 64
+        tasks_per_lease: 10
+        infrastructure_retry_limit: 0
+        requeue_limit: 0
