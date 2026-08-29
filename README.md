@@ -202,6 +202,103 @@ requiring a prebuilt image. See the checked
 for its `python.def`, version-4 project preparation recipe, target build policy,
 and local and Slurm launch commands.
 
+## Advanced example: Apptainer on a Slurm cluster
+
+This example reuses the quick-start `main.py` and `config.yaml`, but executes
+four seeds through Slurm inside a prebuilt Apptainer image. It adds a tracked
+project profile and a one-time, user-owned cluster target.
+
+First, define `experiment.yaml` with an image path visible from every compute
+node. The image must contain Python 3.12 and PyYAML:
+
+```yaml
+version: 1
+
+experiment:
+  name: clustered-random-samples
+
+command:
+  argv: [python3, main.py, --config, "{config}", --seed, "{seed}"]
+
+container:
+  image: /shared/containers/python-3.12-pyyaml.sif
+  gpu: false
+
+resources:
+  nodes: 1
+  tasks: 1
+  cpus_per_task: 1
+  gpus_per_task: 0
+  memory: 512MiB
+  walltime: "00:05:00"
+
+outputs:
+  include: [results/**]
+```
+
+Add the adjacent tracked `rundra.yaml`. Unlike the local quick start, this file
+records the project's cluster profile and retrieval convention:
+
+```yaml
+version: 1
+default_profile: cluster
+
+defaults:
+  config: config.yaml
+  source_root: .
+
+profiles:
+  cluster:
+    target: cluster
+    destination: retrieved/cluster
+```
+
+Register the machine-specific target once in
+`~/.config/rundra/targets.yaml`, replacing the SSH alias, username path, and
+any scheduler policy with values supplied by the cluster operator:
+
+```yaml
+version: 1
+
+targets:
+  cluster:
+    transport:
+      type: ssh
+      host: cluster-login
+    scheduler:
+      type: slurm
+    staging:
+      type: rsync
+    container:
+      type: apptainer
+    workspace: /shared/users/YOUR_USERNAME/rundra-work
+```
+
+Keep SSH keys, proxy jumps, ports, and host verification in normal OpenSSH
+configuration, never in Rundra YAML. The login host is used only for staging
+and scheduler operations; the scientific command runs in a Slurm allocation.
+
+Diagnose and review the resolved profile before submitting:
+
+```bash
+rundr doctor experiment.yaml --profile cluster --connect
+rundr plan experiment.yaml --profile cluster --seeds 0:3
+rundr submit experiment.yaml --profile cluster --seeds 0:3
+```
+
+Retain the displayed Run ID, then wait and retrieve the declared outputs:
+
+```bash
+rundr wait RUN_ID --progress
+rundr fetch RUN_ID
+```
+
+The RunRecord preserves all four seeds, the effective config, target, Slurm job
+identifiers, requested resources, container identity, Task outcomes, and
+retrieved artifacts. To build and cache the SIF from a definition instead of
+using a prebuilt shared image, continue with the checked
+[`python-multiprocessing` preparation example](examples/python-multiprocessing/README.md).
+
 ## Everyday workflow
 
 Use `run` for short synchronous work. For long or remote experiments, submit
