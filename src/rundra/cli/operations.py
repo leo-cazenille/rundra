@@ -55,6 +55,7 @@ from rundra.domain.parameters import ParameterSet
 from rundra.domain.preparation import (
     PREPARE_LOCATIONS,
     PreparationConfig,
+    PreparationImage,
     PreparationImageDefinition,
     PreparationPlan,
     PreparationRecord,
@@ -102,6 +103,7 @@ from rundra.orchestration.preparation import (
     remote_builder_version,
     remote_platform_fingerprint,
     remote_preparation_record,
+    resolve_remote_unpinned_prebuilt,
     select_remote_preparation_location,
 )
 from rundra.orchestration.progress import ProgressEvent, ProgressObserver, ProgressPhase
@@ -876,9 +878,7 @@ def _preparation_plan(
     actions = [
         "snapshot_working_tree"
         if source_mode == "working_tree"
-        else "reuse_source_snapshot",
-        "use_verified_image_candidate",
-        "reuse_image_cache",
+        else "reuse_source_snapshot"
     ]
     if source_mode == "git" and not offline:
         actions.append("fetch_git_commit")
@@ -886,8 +886,12 @@ def _preparation_plan(
         if not rebuild_image:
             actions.append("reuse_definition_image_cache")
         actions.append("build_definition_image")
-    elif not offline:
-        actions.extend(("transfer_verified_image", "pull_image"))
+    elif recipe.image.sha256 is None:
+        actions.append("trust_unpinned_existing_image")
+    else:
+        actions.extend(("use_verified_image_candidate", "reuse_image_cache"))
+        if not offline:
+            actions.extend(("transfer_verified_image", "pull_image"))
     if recipe.build is not None:
         if not rebuild:
             actions.append("reuse_build_cache")
@@ -1626,6 +1630,11 @@ def _remote_preparation_inputs(
     local_storage: PreparationStorageConfig,
     target_storage: PreparationStorageConfig,
 ) -> tuple[Path, ExperimentSpec, PreparationRecord, RemotePreparationSpec]:
+    plan = resolve_remote_unpinned_prebuilt(
+        plan,
+        transport,
+        image_search_paths=target_storage.image_search_paths,
+    )
     image = plan.recipe.image
     source = prepare_source_snapshot(
         plan,
@@ -1671,7 +1680,10 @@ def _cached_remote_preparation_inputs(
     transport: Transport,
     target_storage: PreparationStorageConfig,
 ) -> tuple[ExperimentSpec, PreparationRecord, PurePath] | None:
-    if type(plan.recipe.image) is PreparationImageDefinition:
+    if type(plan.recipe.image) is PreparationImageDefinition or (
+        type(plan.recipe.image) is PreparationImage
+        and plan.recipe.image.sha256 is None
+    ):
         return None
     cached = probe_remote_preparation_cache(
         plan,

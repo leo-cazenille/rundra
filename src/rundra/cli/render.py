@@ -419,7 +419,11 @@ def render_human(result: OperationResult[Any]) -> str:
             preparation = plan.preparation
             image = preparation.recipe.image
             image_identity = (
-                f"sha256:{image.sha256}"
+                (
+                    f"sha256:{image.sha256}"
+                    if image.sha256 is not None
+                    else f"UNPINNED:{image.name}"
+                )
                 if type(image) is PreparationImage
                 else f"definition:{image.path}"
                 if type(image) is PreparationImageDefinition
@@ -433,6 +437,12 @@ def render_human(result: OperationResult[Any]) -> str:
                 f"offline={preparation.offline}, rebuild={preparation.rebuild}, "
                 f"rebuild_image={preparation.rebuild_image}"
             )
+            if type(image) is PreparationImage and image.sha256 is None:
+                rendered += (
+                    "\nWARNING: prebuilt image is unpinned; Rundra will trust an "
+                    "existing file, measure its SHA-256, and record that digest. "
+                    "Registry pulls are disabled for unpinned images."
+                )
         if plan.target.partition_policy is not None:
             partition = plan.units[0].resources.native.get("slurm", {}).get("partition")
             route = next(
@@ -498,6 +508,15 @@ def render_human(result: OperationResult[Any]) -> str:
             f"Retrieval: {value.record.run.retrieval_state.value}\n"
             f"Target: {value.record.run.target.name}"
         )
+        preparation = value.record.preparation
+        if preparation is not None and preparation.image_action in {
+            "resolve_unpinned_in_preparation_job",
+            "trust_unpinned_existing_image",
+        }:
+            rendered += (
+                "\nWARNING: this Run trusts an unpinned existing image; "
+                "the measured digest is preserved in Run provenance."
+            )
         if value.record.run.state not in {
             ExecutionState.SUCCEEDED,
             ExecutionState.FAILED,

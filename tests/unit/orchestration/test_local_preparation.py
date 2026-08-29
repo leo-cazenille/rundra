@@ -172,6 +172,45 @@ raise SystemExit(subprocess.run(command, cwd=work, env=os.environ).returncode)
     return executable
 
 
+def test_local_preparation_trusts_and_records_unpinned_existing_image(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    image = project / "application.sif"
+    image.write_bytes(b"existing unpinned image")
+    digest = hashlib.sha256(image.read_bytes()).hexdigest()
+    recipe = PreparationConfig(
+        PreparationSourceWorkingTree(),
+        PreparationImage(
+            PurePath("application.sif"),
+            "library://unused/application:latest",
+            None,
+        ),
+        None,
+    )
+    plan = PreparationPlan(
+        recipe,
+        source_mode="working_tree",
+        source_root=project,
+        offline=True,
+        possible_actions=("trust_unpinned_existing_image",),
+    )
+
+    prepared = prepare_local(
+        plan,
+        _experiment(recipe),
+        _target(tmp_path),
+        project_root=project,
+        source_root=project,
+        cache_root=tmp_path / "cache",
+    )
+
+    assert prepared.record.image_sha256 == digest
+    assert prepared.record.image_action == "trust_unpinned_existing_image"
+    assert prepared.record.image_path.name == f"{digest}.sif"
+
+
 def test_local_preparation_publishes_and_reuses_verified_build_cache(
     tmp_path: Path,
 ) -> None:

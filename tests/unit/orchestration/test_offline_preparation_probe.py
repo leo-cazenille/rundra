@@ -15,6 +15,7 @@ from rundra.domain.preparation import (
 from rundra.orchestration.preparation import (
     _remote_image_digest_command,
     probe_remote_offline_preparation,
+    resolve_remote_unpinned_prebuilt,
 )
 from rundra.ports import CapabilityCheck, CommandResult
 
@@ -125,3 +126,29 @@ def test_remote_image_digest_command_uses_tab_delimited_receipt(
 
     assert completed.returncode == 0
     assert completed.stdout.split(maxsplit=1)[0] == digest
+
+
+def test_remote_unpinned_image_is_measured_before_cache_identity() -> None:
+    digest = "c" * 64
+    source = PreparationSourceGit("https://example.invalid/source.git", "a" * 40)
+    image = PreparationImage(
+        PurePosixPath("image.sif"),
+        "library://example/image:latest",
+        None,
+    )
+    plan = PreparationPlan(
+        PreparationConfig(source, image, None),
+        "git",
+        None,
+        offline=True,
+    )
+    transport = ProbeTransport([(0, f"{digest}  image.sif\n")])
+
+    resolved = resolve_remote_unpinned_prebuilt(
+        plan,
+        transport,
+        image_search_paths=(PurePosixPath("/shared/images"),),
+    )
+
+    assert resolved.recipe.image.sha256 == digest
+    assert "trust_unpinned_existing_image" in resolved.possible_actions

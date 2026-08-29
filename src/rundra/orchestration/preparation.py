@@ -13,7 +13,7 @@ import subprocess
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePath
 from typing import BinaryIO
 
@@ -171,11 +171,20 @@ def probe_local_offline_preparation(
         )
     except PreparationError as error:
         return OfflinePreparationProbe(True, False, source_message, str(error))
+    unpinned = (
+        type(plan.recipe.image) is PreparationImage
+        and plan.recipe.image.sha256 is None
+    )
     return OfflinePreparationProbe(
         True,
-        True,
+        None if unpinned else True,
         source_message,
-        f"verified image is available as sha256:{image.sha256}",
+        (
+            "WARNING: prebuilt image is unpinned; Rundra will trust the existing "
+            f"file and record its measured sha256:{image.sha256}"
+            if unpinned
+            else f"verified image is available as sha256:{image.sha256}"
+        ),
     )
 
 
@@ -227,7 +236,31 @@ def probe_remote_offline_preparation(
             "an exact recipe identity",
         )
     assert type(image) is PreparationImage
-    expected_digest = str(image.sha256)
+    expected_digest = image.sha256
+    if expected_digest is None:
+        candidates = tuple(path / str(image.name) for path in image_search_paths)
+        observations: list[str] = []
+        for candidate in candidates:
+            result = transport.run(_remote_image_digest_command(candidate))
+            fields = result.stdout.split(maxsplit=1)
+            observed = fields[0] if fields and _is_sha256(fields[0]) else None
+            if result.exit_code == 0 and observed is not None:
+                return OfflinePreparationProbe(
+                    True,
+                    None,
+                    source_message,
+                    "WARNING: prebuilt image is unpinned; Rundra will trust "
+                    f"{candidate} and record its measured sha256:{observed}",
+                )
+            observations.append(f"{candidate} (exit {result.exit_code})")
+        checked = ", ".join(observations) or "no configured image search paths"
+        return OfflinePreparationProbe(
+            True,
+            False,
+            source_message,
+            "Unpinned prebuilt image requires an existing target candidate; "
+            f"checked: {checked}",
+        )
     candidates = (
         root / "images" / f"{expected_digest}.sif",
         *(path / str(image.name) for path in image_search_paths),
@@ -320,6 +353,8 @@ def remote_preparation_index_key(
     plan: PreparationPlan, target: Target, platform_fingerprint: str
 ) -> str:
     image = _prebuilt_image(plan)
+    if image.sha256 is None:
+        raise PreparationError("Remote preparation index requires a measured image")
     build = plan.recipe.build
     if build is None:
         raise PreparationError("Remote preparation index requires a build recipe")
@@ -355,6 +390,8 @@ def probe_remote_preparation_cache(
     if plan.source_mode != "git" or plan.rebuild or plan.recipe.build is None:
         return None
     image_recipe = _prebuilt_image(plan)
+    if image_recipe.sha256 is None:
+        return None
     fingerprint = remote_platform_fingerprint(transport)
     root = target.workspace / "cache" if cache_root is None else cache_root
     index_key = remote_preparation_index_key(plan, target, fingerprint)
@@ -472,9 +509,44 @@ def _prebuilt_image(plan: PreparationPlan) -> PreparationImage:
     image = plan.recipe.image
     if type(image) is not PreparationImage:
         raise PreparationError(
-            "Legacy remote preparation requires a pinned prebuilt image"
+            "Remote preparation requires a prebuilt image"
         )
     return image
+
+
+def resolve_remote_unpinned_prebuilt(
+    plan: PreparationPlan,
+    transport: Transport,
+    *,
+    image_search_paths: tuple[PurePath, ...],
+) -> PreparationPlan:
+    """Measure one existing target candidate before deriving cache identities."""
+    image = _prebuilt_image(plan)
+    if image.sha256 is not None:
+        return plan
+    observations: list[str] = []
+    for root in image_search_paths:
+        candidate = root / str(image.name)
+        result = transport.run(_remote_image_digest_command(candidate))
+        fields = result.stdout.split(maxsplit=1)
+        observed = fields[0] if fields and _is_sha256(fields[0]) else None
+        if result.exit_code == 0 and observed is not None:
+            measured = replace(image, sha256=observed)
+            return replace(
+                plan,
+                recipe=replace(plan.recipe, image=measured),
+                possible_actions=tuple(
+                    dict.fromkeys(
+                        (*plan.possible_actions, "trust_unpinned_existing_image")
+                    )
+                ),
+            )
+        observations.append(f"{candidate} (exit {result.exit_code})")
+    checked = ", ".join(observations) or "no configured image search paths"
+    raise PreparationError(
+        "Unpinned prebuilt image requires an existing target candidate; "
+        f"checked: {checked}. Rundra will not pull an unpinned registry image"
+    )
 
 
 def _remote_image_digest_command(image: PurePath) -> Command:
@@ -543,6 +615,10 @@ def create_remote_preparation_spec(
         )
     elif type(image) is not PreparationImage:
         raise PreparationError("Unsupported remote image recipe")
+    elif image.sha256 is None:
+        raise PreparationError(
+            "Target preparation requires an existing unpinned image to be measured first"
+        )
     key = None
     build_key_prefix = None
     build_key_suffix = None
@@ -632,6 +708,8 @@ def remote_preparation_record(
         )
     if type(recipe) is not PreparationImage:
         raise PreparationError("Unsupported remote image recipe")
+    if recipe.sha256 is None:
+        raise PreparationError("Remote preparation record requires a measured image")
     image = (
         (spec.target_cache_root or PurePath(str(target.workspace)) / "cache")
         / "images"
@@ -644,7 +722,11 @@ def remote_preparation_record(
         image_uri=recipe.uri,
         image_sha256=recipe.sha256,
         image_path=image,
-        image_action="resolve_in_preparation_job",
+        image_action=(
+            "resolve_unpinned_in_preparation_job"
+            if "trust_unpinned_existing_image" in spec.plan.possible_actions
+            else "resolve_in_preparation_job"
+        ),
         resolution_location="target",
         build_cache_key=spec.build_key,
         builder_location="target",
@@ -667,6 +749,8 @@ def build_remote_preparation_command(
             scratch_policy,
         )
     image_recipe = _prebuilt_image(plan)
+    if image_recipe.sha256 is None:
+        raise PreparationError("Remote preparation requires a measured image digest")
     target_cache = spec.target_cache_root or workspace.root.parent.parent / "cache"
     image = target_cache / "images" / f"{image_recipe.sha256}.sif"
     image_receipt = PurePath(f"{image}.receipt")
@@ -708,7 +792,7 @@ def build_remote_preparation_command(
         "  [ ! -L \"$image\" ] || { printf '%s\\n' 'cached image is a symlink' >&2; exit 65; }",
         "  if ! image_receipt_valid; then",
         "    actual=$(sha256sum -- \"$image\" | cut -d' ' -f1)",
-        "    [ \"$actual\" = \"$expected_image_digest\" ] || { printf '%s\\n' 'cached image digest mismatch' >&2; exit 65; }",
+        "    [ \"$actual\" = \"$expected_image_digest\" ] || { printf 'cached image digest mismatch: expected sha256:%s, observed sha256:%s at %s\\n' \"$expected_image_digest\" \"$actual\" \"$image\" >&2; exit 65; }",
         '    chmod a-w -- "$image"',
         "    publish_image_receipt",
         "  fi",
@@ -727,16 +811,25 @@ def build_remote_preparation_command(
                 '      chmod a-w -- "$image_tmp"',
                 '      mv -- "$image_tmp" "$image"',
                 "      publish_image_receipt",
-                "      image_action=cache_verified_candidate",
+                (
+                    "      image_action=trust_unpinned_existing_image"
+                    if "trust_unpinned_existing_image" in plan.possible_actions
+                    else "      image_action=cache_verified_candidate"
+                ),
+                "    else",
+                f"      printf 'candidate image digest mismatch: expected sha256:%s, observed sha256:%s at %s\\n' {shlex.quote(image_recipe.sha256)} \"$actual\" \"$candidate\" >&2",
                 "    fi",
                 "  fi",
             )
         )
     lines.append('  if [ ! -f "$image" ]; then')
-    if plan.offline:
-        lines.append(
-            "  printf '%s\\n' 'verified image unavailable in offline mode' >&2; exit 69"
+    if plan.offline or "trust_unpinned_existing_image" in plan.possible_actions:
+        unavailable = (
+            "unpinned image candidate changed or became unavailable"
+            if "trust_unpinned_existing_image" in plan.possible_actions
+            else "verified image unavailable in offline mode"
         )
+        lines.append(f"  printf '%s\\n' {shlex.quote(unavailable)} >&2; exit 69")
     else:
         lines.extend(
             (
@@ -745,7 +838,7 @@ def build_remote_preparation_command(
                 '  trap \'rm -rf -- "$image_tmp_dir"; rmdir -- "$image_lock" 2>/dev/null || :\' EXIT HUP INT TERM',
                 f'  {runtime} pull --disable-cache "$image_tmp" {shlex.quote(image_recipe.uri)}',
                 "  actual=$(sha256sum -- \"$image_tmp\" | cut -d' ' -f1)",
-                f"  [ \"$actual\" = {shlex.quote(image_recipe.sha256)} ] || {{ printf '%s\\n' 'pulled image digest mismatch' >&2; exit 65; }}",
+                f"  [ \"$actual\" = {shlex.quote(image_recipe.sha256)} ] || {{ printf 'pulled image digest mismatch: expected sha256:%s, observed sha256:%s from %s\\n' {shlex.quote(image_recipe.sha256)} \"$actual\" {shlex.quote(image_recipe.uri)} >&2; exit 65; }}",
                 '  chmod a-w -- "$image_tmp"',
                 '  mv -- "$image_tmp" "$image"',
                 "  publish_image_receipt",
@@ -1494,24 +1587,55 @@ def _resolve_image(
         raise PreparationError("Unsupported preparation image recipe")
     images = cache_root / "images"
     images.mkdir(parents=True, exist_ok=True)
-    cached = images / f"{recipe.sha256}.sif"
     requested = str(recipe.name)
+    if recipe.sha256 is None:
+        unpinned_candidates = (
+            project_root / requested,
+            *(path.expanduser().resolve() / requested for path in image_search_paths),
+        )
+        for candidate in unpinned_candidates:
+            if candidate.is_symlink() or not candidate.is_file():
+                continue
+            measured = _file_digest(candidate)
+            cached = images / f"{measured}.sif"
+            with _lock(cache_root / "locks" / f"image-{measured}.lock"):
+                if not cached.exists():
+                    _publish_file(candidate, cached)
+                elif cached.is_symlink() or _file_digest(cached) != measured:
+                    raise PreparationError(
+                        "Image cache digest mismatch: "
+                        f"expected sha256:{measured} at {cached}"
+                    )
+                _publish_image_receipt(cached, measured)
+            return ResolvedImage(
+                cached,
+                measured,
+                recipe.uri,
+                "trust_unpinned_existing_image",
+            )
+        raise PreparationError(
+            "Unpinned prebuilt image requires an existing file; checked: "
+            + ", ".join(str(candidate) for candidate in unpinned_candidates)
+            + ". Rundra will not pull an unpinned registry image"
+        )
+    cached = images / f"{recipe.sha256}.sif"
     candidates = (
         cached,
         project_root / requested,
         *(path.expanduser().resolve() / requested for path in image_search_paths),
     )
+    mismatches: list[str] = []
     for candidate in candidates:
         if candidate.is_symlink() or not candidate.is_file():
             continue
-        candidate_verified = (
-            (
-                _trusted_image_receipt(candidate, recipe.sha256)
-                or _measure_and_receipt_image(candidate, recipe.sha256)
-            )
-            if candidate == cached
-            else _file_digest(candidate) == recipe.sha256
-        )
+        if candidate == cached and _trusted_image_receipt(candidate, recipe.sha256):
+            actual = recipe.sha256
+            candidate_verified = True
+        else:
+            actual = _file_digest(candidate)
+            candidate_verified = actual == recipe.sha256
+            if candidate_verified and candidate == cached:
+                _publish_image_receipt(candidate, recipe.sha256)
         if candidate_verified:
             if candidate != cached:
                 with _lock(cache_root / "locks" / f"image-{recipe.sha256}.lock"):
@@ -1526,6 +1650,11 @@ def _resolve_image(
                 if candidate == cached
                 else "cache_verified_candidate",
             )
+        mismatches.append(
+            f"{candidate}: expected sha256:{recipe.sha256}, observed sha256:{actual}"
+        )
+    if mismatches:
+        raise PreparationError("Image digest mismatch; " + "; ".join(mismatches))
     if plan.offline:
         raise PreparationError(
             f"Verified image sha256:{recipe.sha256} is unavailable in offline mode"

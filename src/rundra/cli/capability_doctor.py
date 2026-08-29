@@ -28,7 +28,11 @@ from rundra.domain.models import (
     Target,
     TaskId,
 )
-from rundra.domain.preparation import PreparationPlan, PreparationStorageConfig
+from rundra.domain.preparation import (
+    PreparationImage,
+    PreparationPlan,
+    PreparationStorageConfig,
+)
 from rundra.domain.states import ExecutionState
 from rundra.orchestration.preparation import (
     probe_local_offline_preparation,
@@ -272,6 +276,20 @@ def doctor_operation(
             if scheduler_inventory and connected:
                 inventory, inventory_checks = _scheduler_inventory(target)
                 checks.extend(inventory_checks)
+            if (
+                preparation is not None
+                and type(preparation.recipe.image) is PreparationImage
+                and preparation.recipe.image.sha256 is None
+            ):
+                checks.append(
+                    DoctorCheck(
+                        "unpinned_image",
+                        "warning",
+                        "prebuilt image is unpinned; Rundra will trust an existing "
+                        "file, measure its SHA-256, and preserve that digest in Run "
+                        "provenance; registry pulls are disabled",
+                    )
+                )
             if offline and preparation is not None and experiment_source is not None:
                 location = (
                     "local"
