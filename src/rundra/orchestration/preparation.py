@@ -227,25 +227,43 @@ def probe_remote_offline_preparation(
             "an exact recipe identity",
         )
     assert type(image) is PreparationImage
+    expected_digest = str(image.sha256)
     candidates = (
-        root / "images" / f"{image.sha256}.sif",
+        root / "images" / f"{expected_digest}.sif",
         *(path / str(image.name) for path in image_search_paths),
     )
+    observations: list[str] = []
     for candidate in candidates:
         result = transport.run(_remote_image_digest_command(candidate))
         fields = result.stdout.split(maxsplit=1)
-        if result.exit_code == 0 and fields and fields[0] == image.sha256:
+        observed_digest = (
+            fields[0]
+            if fields
+            and len(fields[0]) == 64
+            and all(character in "0123456789abcdef" for character in fields[0])
+            else None
+        )
+        if result.exit_code == 0 and observed_digest == expected_digest:
             return OfflinePreparationProbe(
                 True,
                 True,
                 source_message,
-                f"verified target image is available as sha256:{image.sha256}",
+                f"verified target image is available as sha256:{expected_digest}",
             )
+        observed = (
+            f"sha256:{observed_digest}"
+            if observed_digest is not None
+            else "no valid digest"
+        )
+        observations.append(
+            f"{candidate} (exit {result.exit_code}, observed {observed})"
+        )
     return OfflinePreparationProbe(
         True,
         False,
         source_message,
-        f"Verified image sha256:{image.sha256} is unavailable on the target",
+        f"Verified image sha256:{expected_digest} is unavailable on the target; "
+        f"checked: {', '.join(observations)}",
     )
 
 

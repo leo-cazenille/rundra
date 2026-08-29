@@ -78,6 +78,17 @@ def test_remote_offline_probe_requires_regular_non_symlink_image() -> None:
     assert 'test ! -L "$image"' in transport.commands[1].argv[2]
 
 
+def test_remote_offline_probe_reports_observed_digest_mismatch() -> None:
+    observed = "c" * 64
+    transport = ProbeTransport([(0, ""), (0, f"{observed}  image.sif\n")])
+
+    probe = probe_remote_offline_preparation(_plan(), _target(), transport)
+
+    assert not probe.image_ready
+    assert f"sha256:{observed}" in probe.image_message
+    assert "exit 0" in probe.image_message
+
+
 def test_remote_offline_probe_reports_cold_source_without_image_probe() -> None:
     transport = ProbeTransport([(1, "")])
 
