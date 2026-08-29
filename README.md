@@ -109,6 +109,7 @@ import argparse
 import json
 import random
 from pathlib import Path
+from time import sleep
 
 import yaml
 
@@ -119,6 +120,7 @@ parser.add_argument("--output", required=True, type=Path)
 args = parser.parse_args()
 
 config = yaml.safe_load(args.config.read_text(encoding="utf-8"))
+sleep(2)  # Simulate 2000 ms of computation.
 rng = random.Random(args.seed)
 result = {
     "seed": args.seed,
