@@ -91,8 +91,8 @@ targets:
         first_document = json.loads(first.stdout)
         second_document = json.loads(second.stdout)
         assert first_document["run"]["run_id"] != second_document["run"]["run_id"]
-        first_result = (tmp_path / "first/results/result.json").read_bytes()
-        second_result = (tmp_path / "second/results/result.json").read_bytes()
+        first_result = (tmp_path / "first/results/result-17.json").read_bytes()
+        second_result = (tmp_path / "second/results/result-17.json").read_bytes()
         assert first_result == second_result
         assert json.loads(first_result) == {
             "population_size": 100,

@@ -12,6 +12,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--seed", required=True, type=int)
+    parser.add_argument("--output", required=True, type=Path)
     arguments = parser.parse_args()
     config = yaml.safe_load(arguments.config.read_text(encoding="utf-8"))
     population_size = config["population"]["size"]
@@ -21,7 +22,7 @@ def main() -> int:
         "samples": [generator.random() for _ in range(3)],
         "seed": arguments.seed,
     }
-    destination = Path("../output/results/result.json")
+    destination = arguments.output
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(
         json.dumps(result, allow_nan=False, sort_keys=True, separators=(",", ":"))

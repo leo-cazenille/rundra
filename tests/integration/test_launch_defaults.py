@@ -108,9 +108,10 @@ defaults:
         assert document["launch"]["values"]["seed"] == seed
         assert document["launch"]["sources"]["seed"] == "generated"
         assert document["launch"]["sources"]["data_dir"] == "user"
-        assert (project / "retrieved/results/result.json").is_file()
+        result_path = project / f"retrieved/results/result-{seed}.json"
+        assert result_path.is_file()
         result_document = json.loads(
-            (project / "retrieved/results/result.json").read_text(encoding="utf-8")
+            result_path.read_text(encoding="utf-8")
         )
         assert result_document["seed"] == seed
         replay = subprocess.run(
@@ -132,8 +133,8 @@ defaults:
         )
         assert replay.returncode == 0, replay.stderr or replay.stdout
         assert json.loads(replay.stdout)["launch"]["sources"]["seed"] == "cli"
-        assert (project / "retrieved/results/result.json").read_bytes() == (
-            project / "replayed/results/result.json"
+        assert result_path.read_bytes() == (
+            project / f"replayed/results/result-{seed}.json"
         ).read_bytes()
         stored = JsonRunStore(records).list()
         assert len(stored) == 2
@@ -233,13 +234,23 @@ def test_one_argument_run_uses_packaged_local_defaults(tmp_path: Path) -> None:
         assert document["run"]["state"] == "SUCCEEDED"
         assert document["launch"]["values"]["source_root"] == str(project)
         assert document["launch"]["sources"]["seed"] == "generated"
-        assert (project / "retrieved/config/results/result.json").is_file()
+        generated_seed = document["run"]["seed"]
+        assert (
+            project / f"retrieved/config/results/result-{generated_seed}.json"
+        ).is_file()
         assert multi_task_result.returncode == 0, (
             multi_task_result.stderr or multi_task_result.stdout
         )
         multi_task_document = json.loads(multi_task_result.stdout)
         assert multi_task_document["run"]["state"] == "SUCCEEDED"
         assert multi_task_document["run"]["tasks"] == 9
+        retrieved_seeds = {
+            int(path.stem.removeprefix("result-"))
+            for path in (project / "retrieved/multi-task").glob(
+                "task_*/results/result-*.json"
+            )
+        }
+        assert retrieved_seeds == set(range(4, 13))
         assert workspace.is_dir()
         assert not (project / ".rundra").exists()
     finally:

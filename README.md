@@ -57,7 +57,15 @@ experiment:
   name: random-samples
 
 command:
-  argv: [python3, main.py, --config, "{config}", --seed, "{seed}"]
+  argv:
+    - python3
+    - main.py
+    - --config
+    - "{config}"
+    - --seed
+    - "{seed}"
+    - --output
+    - /workspace/output/results/result-{seed}.json
 
 resources:
   nodes: 1          # nodes requested by each Rundra Task
@@ -107,6 +115,7 @@ import yaml
 parser = argparse.ArgumentParser()
 parser.add_argument("--config", required=True, type=Path)
 parser.add_argument("--seed", required=True, type=int)
+parser.add_argument("--output", required=True, type=Path)
 args = parser.parse_args()
 
 config = yaml.safe_load(args.config.read_text(encoding="utf-8"))
@@ -116,9 +125,8 @@ result = {
     "samples": [rng.random() for _ in range(config["sample_count"])],
 }
 
-output = Path("../output/results/result.json")
-output.parent.mkdir(parents=True, exist_ok=True)
-output.write_text(json.dumps(result, sort_keys=True) + "\n", encoding="utf-8")
+args.output.parent.mkdir(parents=True, exist_ok=True)
+args.output.write_text(json.dumps(result, sort_keys=True) + "\n", encoding="utf-8")
 ```
 
 No target file or `rundra.yaml` is needed for this local quick start.
@@ -188,8 +196,19 @@ Then execute the Run:
 
 ```bash
 rundr run experiment.yaml --seed 17
-cat retrieved/results/result.json
+cat retrieved/config/results/result-17.json
 ```
+
+For a multi-seed Run, every logical Task writes a distinct file:
+
+```bash
+rundr run experiment.yaml --seeds 4:12 --progress
+find retrieved/config -name 'result-*.json' -print
+```
+
+Single-task retrieval places the file directly under `results/`. Multi-task
+retrieval preserves a `task_NNNNNN/` directory for each logical Task so files
+from distinct Tasks remain isolated even when an application reuses names.
 
 Rundra snapshots source inputs, copies the effective configuration, executes in
 an isolated workspace, retrieves declared outputs, and stores the RunRecord in
