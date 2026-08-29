@@ -72,13 +72,9 @@ outputs:
 ```
 
 Resource fields apply to **each logical Rundra Task**, not to the whole Run. A
-logical Task is normally one seed and parameter-set combination. For example:
-
-```bash
-rundr plan experiment.yaml --seeds 0:9
-```
-
-creates ten independent Rundra Tasks. With the resource block above, each Task
+logical Task is normally one seed and parameter-set combination. The inclusive
+seed range `0:9`, for example, creates ten independent Rundra Tasks. With the
+resource block above, each Task
 requests one node, one scheduler task, one CPU, no GPU, 512 MiB of memory, and
 up to five minutes. The ten Tasks are not pinned to one shared node: a remote
 scheduler may distribute them across any compatible nodes and execute as many
@@ -135,6 +131,12 @@ Planning is offline and does not create a Run or consume resources:
 rundr validate experiment.yaml
 rundr plan experiment.yaml
 rundr run experiment.yaml
+```
+
+After the three files above exist, previewing a ten-seed Run is also valid:
+
+```bash
+rundr plan experiment.yaml --seeds 0:9
 ```
 
 Review the command, seed, resources, staging behavior, target, destination, and
