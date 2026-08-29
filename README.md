@@ -268,7 +268,7 @@ is omitted, Rundra uses all CPUs available through process affinity and adjusts
 concurrency for each logical Task's `cpus_per_task` request:
 
 ```yaml
-version: 1
+version: 6
 
 targets:
   local:

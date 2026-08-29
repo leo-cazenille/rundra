@@ -1120,6 +1120,12 @@ def _effective_execution_policy(
         and targets_source.resolve() != builtin_targets_source().resolve()
     ):
         return policy, targets_version
+    if (
+        policy is None
+        and targets_version < 6
+        and targets_source.resolve() != builtin_targets_source().resolve()
+    ):
+        return None, targets_version
     try:
         available_cpus = len(os.sched_getaffinity(0))
     except (AttributeError, OSError):

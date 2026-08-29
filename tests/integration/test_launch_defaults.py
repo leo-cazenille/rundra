@@ -41,7 +41,7 @@ profiles:
     records = tmp_path / "records"
     targets.write_text(
         f"""\
-version: 1
+version: 6
 targets:
   local:
     transport: {{type: local}}
