@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
+import subprocess
 from datetime import UTC, datetime
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 from rundra.domain.models import BackendConfig, Command, Target
 from rundra.domain.preparation import (
@@ -10,7 +12,10 @@ from rundra.domain.preparation import (
     PreparationPlan,
     PreparationSourceGit,
 )
-from rundra.orchestration.preparation import probe_remote_offline_preparation
+from rundra.orchestration.preparation import (
+    _remote_image_digest_command,
+    probe_remote_offline_preparation,
+)
 from rundra.ports import CapabilityCheck, CommandResult
 
 
@@ -81,3 +86,31 @@ def test_remote_offline_probe_reports_cold_source_without_image_probe() -> None:
     assert not probe.source_ready
     assert not probe.image_ready
     assert len(transport.commands) == 1
+
+
+def test_remote_image_digest_command_uses_tab_delimited_receipt(
+    tmp_path: Path,
+) -> None:
+    image = tmp_path / "image.sif"
+    image.write_bytes(b"immutable image")
+    image.chmod(0o444)
+    digest = "b" * 64
+    receipt = tmp_path / "image.sif.receipt"
+    receipt.write_text(f"1\t{digest}\t{image.stat().st_size}\n", encoding="ascii")
+    receipt.chmod(0o444)
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_sha256sum = fake_bin / "sha256sum"
+    fake_sha256sum.write_text("#!/bin/sh\nexit 91\n", encoding="ascii")
+    fake_sha256sum.chmod(0o755)
+
+    completed = subprocess.run(
+        _remote_image_digest_command(image).argv,
+        check=False,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout.split(maxsplit=1)[0] == digest

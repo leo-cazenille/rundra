@@ -470,7 +470,7 @@ image=$1
 receipt=$image.receipt
 test -f "$image" && test ! -L "$image" || exit 1
 if test ! -w "$image" && test -f "$receipt" && test ! -L "$receipt"; then
-  IFS='\t' read -r version digest size extra < "$receipt" || :
+  IFS="$(printf '\\t')" read -r version digest size extra < "$receipt" || :
   actual_size=$(wc -c < "$image" | tr -d ' ')
   if test "$version" = 1 && test -n "$digest" && test "$size" = "$actual_size" && test -z "${extra:-}"; then
     printf '%s  %s\n' "$digest" "$image"
@@ -667,7 +667,7 @@ def build_remote_preparation_command(
         'mkdir -p -- "$cache/images" "$cache/builds" "$cache/indexes" "$cache/locks"',
         "image_receipt_valid() {",
         '  [ -f "$image" ] && [ ! -L "$image" ] && [ ! -w "$image" ] && [ -f "$image_receipt" ] && [ ! -L "$image_receipt" ] || return 1',
-        "  IFS='\t' read -r receipt_version receipt_digest receipt_size receipt_extra < \"$image_receipt\" || return 1",
+        "  IFS=\"$(printf '\\t')\" read -r receipt_version receipt_digest receipt_size receipt_extra < \"$image_receipt\" || return 1",
         "  actual_size=$(wc -c < \"$image\" | tr -d ' ')",
         '  [ "$receipt_version" = 1 ] && [ "$receipt_digest" = "$expected_image_digest" ] && [ "$receipt_size" = "$actual_size" ] && [ -z "${receipt_extra:-}" ]',
         "}",
@@ -983,7 +983,7 @@ def _build_remote_definition_command(
         "  receipt_valid=false",
         "  actual_size=$(wc -c < \"$image\" | tr -d ' ')",
         '  if [ ! -L "$image" ] && [ ! -w "$image" ] && [ -f "$image_receipt" ] && [ ! -L "$image_receipt" ]; then',
-        "    IFS='\t' read -r receipt_version receipt_digest receipt_size receipt_extra < \"$image_receipt\" || :",
+        "    IFS=\"$(printf '\\t')\" read -r receipt_version receipt_digest receipt_size receipt_extra < \"$image_receipt\" || :",
         '    if [ "$receipt_version" = 1 ] && [ "$receipt_digest" = "$digest" ] && [ "$receipt_size" = "$actual_size" ] && [ -z "${receipt_extra:-}" ]; then receipt_valid=true; fi',
         "  fi",
         '  if [ "$receipt_valid" != true ]; then',
