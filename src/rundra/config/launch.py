@@ -25,6 +25,7 @@ _PROJECT_V2_FIELDS = _PROJECT_V1_FIELDS | {"preparation"}
 _PROJECT_V3_FIELDS = _PROJECT_V2_FIELDS
 _PROJECT_V4_FIELDS = _PROJECT_V3_FIELDS
 _PROJECT_V5_FIELDS = _PROJECT_V4_FIELDS
+_PROJECT_V6_FIELDS = _PROJECT_V5_FIELDS
 _LAUNCH_VALUE_FIELDS = frozenset(
     {
         "config",
@@ -243,7 +244,7 @@ def load_project_launch(source: Path) -> ProjectLaunchConfig:
             path=("version",),
             code="UNSUPPORTED_VERSION",
             message=(
-                "Unsupported project config version; supported versions are 1, 2, 3, 4, and 5"
+                "Unsupported project config version; supported versions are 1 through 6"
             ),
         )
     check_fields(
@@ -258,6 +259,8 @@ def load_project_launch(source: Path) -> ProjectLaunchConfig:
             else _PROJECT_V4_FIELDS
             if version == 4
             else _PROJECT_V5_FIELDS
+            if version == 5
+            else _PROJECT_V6_FIELDS
         ),
         required=(
             frozenset({"version"})

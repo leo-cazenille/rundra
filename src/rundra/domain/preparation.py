@@ -77,11 +77,11 @@ class PreparationBuild:
 
 @dataclass(frozen=True, slots=True)
 class PreparationImage:
-    """A logical image filename and immutable external identity."""
+    """A logical prebuilt image with an optional expected identity."""
 
     name: PurePath
     uri: str
-    sha256: str
+    sha256: str | None
 
     def __post_init__(self) -> None:
         _require_safe_relative(self.name, field_name="Preparation image name")
@@ -89,7 +89,7 @@ class PreparationImage:
             raise ValueError("Preparation image name must be a filename")
         if type(self.uri) is not str or not self.uri.strip() or "\x00" in self.uri:
             raise ValueError("Preparation image URI must be nonblank and safe")
-        if (
+        if self.sha256 is not None and (
             type(self.sha256) is not str
             or len(self.sha256) != 64
             or any(character not in "0123456789abcdef" for character in self.sha256)

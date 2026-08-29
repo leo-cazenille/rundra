@@ -225,7 +225,11 @@ def _image(
         check_fields(
             prebuilt,
             allowed=frozenset({"uri", "sha256"}),
-            required=frozenset({"uri", "sha256"}),
+            required=(
+                frozenset({"uri"})
+                if version >= 6
+                else frozenset({"uri", "sha256"})
+            ),
             source=source,
             path=prebuilt_path,
         )
@@ -241,17 +245,23 @@ def _image(
             code="INVALID_VALUE",
             message="Image URI must not contain NUL",
         )
-    sha256 = expect_string(
-        section["sha256"], source=source, path=(*path, "sha256"), nonblank=True
-    )
-    if _SHA256_PATTERN.fullmatch(sha256) is None:
-        fail(
-            source=source,
-            path=(*path, "sha256"),
-            code="INVALID_VALUE",
-            message="Image SHA-256 must be 64 hexadecimal characters",
+    sha256 = None
+    if "sha256" in section:
+        sha256 = expect_string(
+            section["sha256"], source=source, path=(*path, "sha256"), nonblank=True
         )
-    return PreparationImage(name=name, uri=uri, sha256=sha256.lower())
+        if _SHA256_PATTERN.fullmatch(sha256) is None:
+            fail(
+                source=source,
+                path=(*path, "sha256"),
+                code="INVALID_VALUE",
+                message="Image SHA-256 must be 64 hexadecimal characters",
+            )
+    return PreparationImage(
+        name=name,
+        uri=uri,
+        sha256=None if sha256 is None else sha256.lower(),
+    )
 
 
 def _build(value: object, source: Path, path: ConfigPath) -> PreparationBuild:

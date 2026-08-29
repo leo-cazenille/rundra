@@ -30,7 +30,7 @@ LOGS_SCHEMA = SchemaVersions(6, RUN_RECORD_SCHEMA.supported)
 INSPECT_SCHEMA = SchemaVersions(6, RUN_RECORD_SCHEMA.supported)
 RUN_LIST_SCHEMA = SchemaVersions(2, frozenset({2}))
 PLAN_SCHEMA = SchemaVersions(10, frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9, 10}))
-PROJECT_CONFIG_SCHEMA = SchemaVersions(5, frozenset({1, 2, 3, 4, 5}))
+PROJECT_CONFIG_SCHEMA = SchemaVersions(6, frozenset({1, 2, 3, 4, 5, 6}))
 USER_CONFIG_SCHEMA = SchemaVersions(2, frozenset({1, 2}))
 TARGET_CONFIG_SCHEMA = SchemaVersions(
     11, frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11})

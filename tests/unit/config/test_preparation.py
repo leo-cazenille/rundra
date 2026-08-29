@@ -175,6 +175,29 @@ preparation:
     assert project.preparation.image.resources.memory_bytes == 2 * 1024**3
 
 
+def test_project_v6_accepts_unpinned_existing_prebuilt_image(tmp_path: Path) -> None:
+    source = tmp_path / "rundra.yaml"
+    source.write_text(
+        """\
+version: 6
+preparation:
+  source:
+    working_tree: {}
+  image:
+    name: application.sif
+    prebuilt:
+      uri: library://example/application:v1
+""",
+        encoding="utf-8",
+    )
+
+    project = load_project_launch(source)
+
+    assert project.version == 6
+    assert project.preparation is not None
+    assert project.preparation.image.sha256 is None
+
+
 def test_project_v3_definition_key_is_deterministic(tmp_path: Path) -> None:
     source = tmp_path / "rundra.yaml"
     source.write_text(
