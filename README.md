@@ -233,6 +233,72 @@ an isolated workspace, retrieves declared outputs, and stores the RunRecord in
 `~/.local/share/rundra/runs`. The repository contains a checked version of
 this workflow in [`examples/minimal`](examples/minimal).
 
+### 4. Add a named local profile
+
+Create an adjacent `rundra.yaml` when you want to select the same local launch
+settings with `--profile local`:
+
+```yaml
+version: 1
+default_profile: local
+
+defaults:
+  config: config.yaml
+  source_root: .
+
+profiles:
+  local:
+    target: local
+    destination: retrieved/local
+```
+
+If `~/.config/rundra/targets.yaml` does not exist, `target: local` selects
+Rundra's packaged local target. It automatically uses the CPUs available to the
+Rundra process and requires no target configuration:
+
+```bash
+rundr plan experiment.yaml --profile local --seeds 0:9
+rundr run experiment.yaml --profile local --seeds 0:9 --progress
+```
+
+Create `~/.config/rundra/targets.yaml` only when you need a custom local
+workspace or explicit limits. Replace `N` with the number of local Task slots
+you permit Rundra to use:
+
+```yaml
+version: 6
+
+targets:
+  local:
+    transport: {type: local}
+    scheduler: {type: local}
+    staging: {type: local}
+    container: {type: native}
+    workspace: ~/.local/share/rundra/workspaces
+    execution:
+      hard_task_limit: 100000
+      confirmation_threshold: 1000
+      max_active_tasks: N
+      max_concurrent_jobs: N
+      max_array_size: 1000
+      output_shard_tasks: 1000
+      automatic_retrieval_threshold: 1000
+      worker_pool:
+        activation_threshold: 2
+        default_workers: 1
+        max_workers: N
+        default_task_slots_per_worker: N
+        max_task_slots_per_worker: N
+        tasks_per_lease: 10
+        infrastructure_retry_limit: 0
+        requeue_limit: 0
+```
+
+Local worker pools must use `requeue_limit: 0`: no external scheduler owns the
+synchronous local processes, so scheduler requeue recovery is unavailable.
+`default_task_slots_per_worker: N` uses all configured local slots by default;
+CLI options can request a lower capacity.
+
 ### 5. Run inside an Apptainer or Singularity container
 
 To execute the same experiment in a prebuilt SIF image, add a container target
@@ -328,7 +394,15 @@ experiment:
   name: clustered-random-samples
 
 command:
-  argv: [python3, main.py, --config, "{config}", --seed, "{seed}"]
+  argv:
+    - python3
+    - main.py
+    - --config
+    - "{config}"
+    - --seed
+    - "{seed}"
+    - --output
+    - /workspace/output/results/result-{seed}.json
 
 container:
   image: /shared/containers/python-3.12-pyyaml.sif
@@ -542,10 +616,12 @@ sources. Credentials never belong in these files.
 
 ### Local targets
 
-The quick-start target uses the complete local/native stack. To run a local
-Apptainer image, change `container.type` to `apptainer` and declare the image
-in the experiment. Local execution is synchronous; `submit` is intentionally
-unavailable because Rundra does not create unmanaged background processes.
+The quick-start target uses the complete local/native stack. The named-profile
+and custom-target forms are shown in [Add a named local profile](#4-add-a-named-local-profile).
+To run a local Apptainer image, change `container.type` to `apptainer` and
+declare the image in the experiment. Local execution is synchronous; `submit`
+is intentionally unavailable because Rundra does not create unmanaged
+background processes.
 
 ### Remote scheduler targets
 
