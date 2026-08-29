@@ -6,7 +6,7 @@ import stat
 import subprocess
 import tempfile
 from collections.abc import Callable, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePath, PurePosixPath
@@ -158,13 +158,22 @@ class LocalScheduler:
                 max_workers=capacity,
                 thread_name_prefix="rundra-local",
             ) as executor:
-                results = tuple(
-                    executor.submit(self._transport.run, unit.command) for unit in units
-                )
-                for reference, future in zip(references, results, strict=True):
+                pending = {
+                    executor.submit(self._transport.run, unit.command): (
+                        unit,
+                        reference,
+                    )
+                    for unit, reference in zip(units, references, strict=True)
+                }
+                completed = 0
+                for future in as_completed(pending):
+                    unit, reference = pending[future]
                     self._observations[reference] = _local_observation(
                         reference, future.result()
                     )
+                    completed += 1
+                    if request.completion_observer is not None:
+                        request.completion_observer(unit.task_id, completed, len(units))
         except Exception as error:
             raise LocalSchedulerError(
                 f"Local array execution failed: {type(error).__name__}"

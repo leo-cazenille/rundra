@@ -1482,6 +1482,19 @@ class OrchestrationService:
                         else None
                     ),
                     worker_resources=request.worker_resources,
+                    completion_observer=(
+                        (
+                            lambda task_id, completed, total: self._report(
+                                ProgressPhase.WAIT,
+                                4 + completed,
+                                f"tasks={completed}/{total} last={task_id}",
+                                run_id,
+                                len(units),
+                            )
+                        )
+                        if request.plan.target.scheduler.kind == "local"
+                        else None
+                    ),
                 )
                 submission = (
                     cast(DependencyScheduler, self._scheduler).submit_array_afterok(
@@ -1669,8 +1682,12 @@ class OrchestrationService:
         self.store.update(updated, expected=record)
         record = updated
         self._report(
-            ProgressPhase.SUBMIT,
-            4,
+            (
+                ProgressPhase.WAIT
+                if request.plan.target.scheduler.kind == "local" and len(units) > 1
+                else ProgressPhase.SUBMIT
+            ),
+            (4 + len(units) if request.plan.target.scheduler.kind == "local" else 4),
             "scheduler_jobs="
             f"{','.join(reference.native_id for reference in submission_references)} "
             f"tasks={len(units)}",

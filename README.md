@@ -153,8 +153,9 @@ rundr run experiment.yaml --seeds 0:9 --progress
 The built-in local target detects the CPUs available to the Rundra process
 (including affinity restrictions) and runs up to one single-CPU Task per
 available CPU. A Task requesting multiple CPUs reduces the number of concurrent
-Tasks accordingly. You can impose a lower local cap explicitly after reviewing
-the plan:
+Tasks accordingly. With `--progress`, completed local Tasks advance the bar as
+each process exits, including when a Run needs several concurrency waves. You
+can impose a lower local cap explicitly after reviewing the plan:
 
 ```bash
 rundr plan experiment.yaml --seeds 0:9 \

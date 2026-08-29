@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -243,6 +243,7 @@ class SchedulerArrayRequest:
     output_root: PurePath | None = None
     shard_root: PurePath | None = None
     worker_resources: ResourceRequest | None = None
+    completion_observer: Callable[[TaskId, int, int], None] | None = None
 
     def __post_init__(self) -> None:
         if type(self.group) is not SchedulerGroup:
@@ -303,6 +304,12 @@ class SchedulerArrayRequest:
         ):
             raise TypeError(
                 "SchedulerArrayRequest worker_resources must be a ResourceRequest"
+            )
+        if self.completion_observer is not None and not callable(
+            self.completion_observer
+        ):
+            raise TypeError(
+                "SchedulerArrayRequest completion_observer must be callable or None"
             )
         for name in ("output_root", "shard_root"):
             path = getattr(self, name)

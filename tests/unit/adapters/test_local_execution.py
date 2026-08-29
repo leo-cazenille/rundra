@@ -202,6 +202,7 @@ def test_local_array_scheduler_enforces_worker_slot_capacity(tmp_path: Path) -> 
         _unit(Command((sys.executable, "-c", "pass")), ordinal=index)
         for index in range(8)
     )
+    completions: list[tuple[TaskId, int, int]] = []
     request = SchedulerArrayRequest(
         SchedulerGroup(units),
         tuple(
@@ -212,6 +213,9 @@ def test_local_array_scheduler_enforces_worker_slot_capacity(tmp_path: Path) -> 
         max_concurrent_jobs=8,
         max_workers=2,
         task_slots_per_worker=2,
+        completion_observer=lambda task_id, completed, total: completions.append(
+            (task_id, completed, total)
+        ),
     )
 
     submission = scheduler.submit_array(request)
@@ -222,3 +226,6 @@ def test_local_array_scheduler_enforces_worker_slot_capacity(tmp_path: Path) -> 
     assert len(submission.references) == 8
     assert len(submission.task_native_ids) == 8
     assert all(item.state is ExecutionState.SUCCEEDED for item in observations)
+    assert [item[1] for item in completions] == list(range(1, 9))
+    assert {item[0] for item in completions} == {unit.task_id for unit in units}
+    assert {item[2] for item in completions} == {8}
