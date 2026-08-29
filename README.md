@@ -191,18 +191,52 @@ targets:
     scheduler: {type: local}
     staging: {type: local}
     container: {type: apptainer}
-    workspace: .rundra
+    workspace: ~/.local/share/rundra/workspaces
 ```
 
-Declare the immutable image in `experiment.yaml`. Use an absolute path and make
-sure the image contains every runtime dependency, including Python and PyYAML
-for this example:
+Create `python-with-pyyaml.def` beside the quick-start files:
+
+```text
+Bootstrap: docker
+From: python:3.12-slim
+
+%post
+    python3 -m pip install --no-cache-dir PyYAML==6.0.3
+
+%environment
+    export PYTHONDONTWRITEBYTECODE=1
+
+%runscript
+    exec python3 "$@"
+```
+
+Build the exact SIF used below, then verify its Python dependency:
+
+```bash
+apptainer build --fakeroot /tmp/python-with-pyyaml.sif python-with-pyyaml.def
+apptainer exec /tmp/python-with-pyyaml.sif \
+  python3 -c 'import yaml; print(yaml.__version__)'
+```
+
+`--fakeroot` requires an Apptainer installation configured for unprivileged
+builds. If the local administrator provides a different approved build mode,
+use that mode without changing the output path. Building pulls the declared
+base image and Python package, so it requires registry and package-index access.
+
+Add the container block to `experiment.yaml`, using the same SIF path as the
+build command:
 
 ```yaml
 container:
-  image: /absolute/path/to/python-with-pyyaml.sif
+  image: /tmp/python-with-pyyaml.sif
   gpu: false
 ```
+
+Rundra excludes arbitrary `*.sif` files from source snapshots, so this direct
+prebuilt-image example uses an explicit absolute image path. `/tmp` keeps the
+walkthrough self-contained; use a durable user-owned absolute path for regular
+work. The later preparation example instead lets Rundra build, verify, cache,
+and resolve a logical SIF name automatically.
 
 Plan and run against the container target:
 
