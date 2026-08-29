@@ -110,9 +110,7 @@ defaults:
         assert document["launch"]["sources"]["data_dir"] == "user"
         result_path = project / f"retrieved/results/result-{seed}.json"
         assert result_path.is_file()
-        result_document = json.loads(
-            result_path.read_text(encoding="utf-8")
-        )
+        result_document = json.loads(result_path.read_text(encoding="utf-8"))
         assert result_document["seed"] == seed
         replay = subprocess.run(
             [
@@ -133,9 +131,10 @@ defaults:
         )
         assert replay.returncode == 0, replay.stderr or replay.stdout
         assert json.loads(replay.stdout)["launch"]["sources"]["seed"] == "cli"
-        assert result_path.read_bytes() == (
-            project / f"replayed/results/result-{seed}.json"
-        ).read_bytes()
+        assert (
+            result_path.read_bytes()
+            == (project / f"replayed/results/result-{seed}.json").read_bytes()
+        )
         stored = JsonRunStore(records).list()
         assert len(stored) == 2
         assert all(record.run.tasks[0].seed == seed for record in stored)

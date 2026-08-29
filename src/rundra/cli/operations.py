@@ -1117,9 +1117,7 @@ def _effective_execution_policy(
         available_cpus = len(os.sched_getaffinity(0))
     except (AttributeError, OSError):
         available_cpus = os.cpu_count() or 1
-    logical_task_cpus = (
-        experiment.resources.tasks * experiment.resources.cpus_per_task
-    )
+    logical_task_cpus = experiment.resources.tasks * experiment.resources.cpus_per_task
     task_slots = max(1, available_cpus // logical_task_cpus)
     task_slots = min(task_slots, policy.hard_task_limit)
     worker_pool = replace(
