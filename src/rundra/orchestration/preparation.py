@@ -1484,7 +1484,10 @@ def _resolve_image(
         if candidate.is_symlink() or not candidate.is_file():
             continue
         candidate_verified = (
-            _trusted_image_receipt(candidate, recipe.sha256)
+            (
+                _trusted_image_receipt(candidate, recipe.sha256)
+                or _measure_and_receipt_image(candidate, recipe.sha256)
+            )
             if candidate == cached
             else _file_digest(candidate) == recipe.sha256
         )
