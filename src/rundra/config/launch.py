@@ -125,9 +125,7 @@ class ProjectLaunchConfig:
         if type(self.version) is not int:
             raise ValueError("ProjectLaunchConfig version must be an int")
         if self.version not in PROJECT_CONFIG_SCHEMA.supported:
-            raise ValueError(
-                "ProjectLaunchConfig version must be 1, 2, 3, 4, 5, or 6"
-            )
+            raise ValueError("ProjectLaunchConfig version must be 1, 2, 3, 4, 5, or 6")
         if not isinstance(self.source, Path) or not self.source.is_absolute():
             raise ValueError("ProjectLaunchConfig source must be an absolute Path")
         if type(self.defaults) is not LaunchValues:

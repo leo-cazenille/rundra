@@ -46,10 +46,7 @@ def select_remote_preparation_location(
     """Resolve local versus scheduled preparation without overriding target policy."""
     if plan.requested_location != "auto":
         return plan.requested_location
-    if (
-        type(plan.recipe.image) is PreparationImage
-        and plan.recipe.image.sha256 is None
-    ):
+    if type(plan.recipe.image) is PreparationImage and plan.recipe.image.sha256 is None:
         return "local"
     if (
         type(plan.recipe.image) is PreparationImageDefinition
@@ -177,8 +174,7 @@ def probe_local_offline_preparation(
     except PreparationError as error:
         return OfflinePreparationProbe(True, False, source_message, str(error))
     unpinned = (
-        type(plan.recipe.image) is PreparationImage
-        and plan.recipe.image.sha256 is None
+        type(plan.recipe.image) is PreparationImage and plan.recipe.image.sha256 is None
     )
     return OfflinePreparationProbe(
         True,
@@ -797,7 +793,7 @@ def build_remote_preparation_command(
         "  [ ! -L \"$image\" ] || { printf '%s\\n' 'cached image is a symlink' >&2; exit 65; }",
         "  if ! image_receipt_valid; then",
         "    actual=$(sha256sum -- \"$image\" | cut -d' ' -f1)",
-        "    [ \"$actual\" = \"$expected_image_digest\" ] || { printf 'cached image digest mismatch: expected sha256:%s, observed sha256:%s at %s\\n' \"$expected_image_digest\" \"$actual\" \"$image\" >&2; exit 65; }",
+        '    [ "$actual" = "$expected_image_digest" ] || { printf \'cached image digest mismatch: expected sha256:%s, observed sha256:%s at %s\\n\' "$expected_image_digest" "$actual" "$image" >&2; exit 65; }',
         '    chmod a-w -- "$image"',
         "    publish_image_receipt",
         "  fi",
@@ -822,7 +818,7 @@ def build_remote_preparation_command(
                     else "      image_action=cache_verified_candidate"
                 ),
                 "    else",
-                f"      printf 'candidate image digest mismatch: expected sha256:%s, observed sha256:%s at %s\\n' {shlex.quote(image_recipe.sha256)} \"$actual\" \"$candidate\" >&2",
+                f'      printf \'candidate image digest mismatch: expected sha256:%s, observed sha256:%s at %s\\n\' {shlex.quote(image_recipe.sha256)} "$actual" "$candidate" >&2',
                 "    fi",
                 "  fi",
             )
@@ -843,7 +839,7 @@ def build_remote_preparation_command(
                 '  trap \'rm -rf -- "$image_tmp_dir"; rmdir -- "$image_lock" 2>/dev/null || :\' EXIT HUP INT TERM',
                 f'  {runtime} pull --disable-cache "$image_tmp" {shlex.quote(image_recipe.uri)}',
                 "  actual=$(sha256sum -- \"$image_tmp\" | cut -d' ' -f1)",
-                f"  [ \"$actual\" = {shlex.quote(image_recipe.sha256)} ] || {{ printf 'pulled image digest mismatch: expected sha256:%s, observed sha256:%s from %s\\n' {shlex.quote(image_recipe.sha256)} \"$actual\" {shlex.quote(image_recipe.uri)} >&2; exit 65; }}",
+                f'  [ "$actual" = {shlex.quote(image_recipe.sha256)} ] || {{ printf \'pulled image digest mismatch: expected sha256:%s, observed sha256:%s from %s\\n\' {shlex.quote(image_recipe.sha256)} "$actual" {shlex.quote(image_recipe.uri)} >&2; exit 65; }}',
                 '  chmod a-w -- "$image_tmp"',
                 '  mv -- "$image_tmp" "$image"',
                 "  publish_image_receipt",

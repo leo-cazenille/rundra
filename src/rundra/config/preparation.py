@@ -226,9 +226,7 @@ def _image(
             prebuilt,
             allowed=frozenset({"uri", "sha256"}),
             required=(
-                frozenset({"uri"})
-                if version >= 6
-                else frozenset({"uri", "sha256"})
+                frozenset({"uri"}) if version >= 6 else frozenset({"uri", "sha256"})
             ),
             source=source,
             path=prebuilt_path,

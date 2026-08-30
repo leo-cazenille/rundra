@@ -1681,8 +1681,7 @@ def _cached_remote_preparation_inputs(
     target_storage: PreparationStorageConfig,
 ) -> tuple[ExperimentSpec, PreparationRecord, PurePath] | None:
     if type(plan.recipe.image) is PreparationImageDefinition or (
-        type(plan.recipe.image) is PreparationImage
-        and plan.recipe.image.sha256 is None
+        type(plan.recipe.image) is PreparationImage and plan.recipe.image.sha256 is None
     ):
         return None
     cached = probe_remote_preparation_cache(
