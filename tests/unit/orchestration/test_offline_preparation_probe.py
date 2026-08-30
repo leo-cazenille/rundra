@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import os
 import subprocess
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 
-from rundra.domain.models import BackendConfig, Command, Target
+from rundra.domain.models import BackendConfig, Command, ResourceRequest, Target
 from rundra.domain.preparation import (
     PreparationConfig,
     PreparationImage,
+    PreparationImageDefinition,
     PreparationPlan,
     PreparationSourceGit,
 )
@@ -152,3 +153,32 @@ def test_remote_unpinned_image_is_measured_before_cache_identity() -> None:
 
     assert resolved.recipe.image.sha256 == digest
     assert "trust_unpinned_existing_image" in resolved.possible_actions
+
+
+def test_remote_unpinned_resolver_leaves_definition_builds_unchanged() -> None:
+    source = PreparationSourceGit("https://example.invalid/source.git", "a" * 40)
+    image = PreparationImageDefinition(
+        PurePosixPath("image.sif"),
+        PurePosixPath("image.def"),
+        ResourceRequest(
+            cpus_per_task=1,
+            memory_bytes=1024**3,
+            walltime=timedelta(minutes=5),
+        ),
+    )
+    plan = PreparationPlan(
+        PreparationConfig(source, image, None),
+        "git",
+        None,
+        offline=False,
+    )
+    transport = ProbeTransport([])
+
+    resolved = resolve_remote_unpinned_prebuilt(
+        plan,
+        transport,
+        image_search_paths=(PurePosixPath("/shared/images"),),
+    )
+
+    assert resolved is plan
+    assert transport.commands == []

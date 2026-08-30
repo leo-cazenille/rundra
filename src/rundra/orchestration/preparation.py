@@ -510,15 +510,6 @@ def _is_sha256(value: str) -> bool:
     )
 
 
-def _prebuilt_image(plan: PreparationPlan) -> PreparationImage:
-    image = plan.recipe.image
-    if type(image) is not PreparationImage:
-        raise PreparationError(
-            "Remote preparation requires a prebuilt image"
-        )
-    return image
-
-
 def resolve_remote_unpinned_prebuilt(
     plan: PreparationPlan,
     transport: Transport,
@@ -526,7 +517,9 @@ def resolve_remote_unpinned_prebuilt(
     image_search_paths: tuple[PurePath, ...],
 ) -> PreparationPlan:
     """Measure one existing target candidate before deriving cache identities."""
-    image = _prebuilt_image(plan)
+    image = plan.recipe.image
+    if type(image) is not PreparationImage:
+        return plan
     if image.sha256 is not None:
         return plan
     observations: list[str] = []
