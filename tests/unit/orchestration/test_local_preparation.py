@@ -439,7 +439,10 @@ def test_offline_preparation_rejects_an_unverified_image_candidate(
         offline=True,
     )
 
-    with pytest.raises(PreparationError, match="unavailable in offline mode"):
+    with pytest.raises(
+        PreparationError,
+        match=r"Image digest mismatch; .*expected sha256:.*observed sha256:",
+    ):
         prepare_local(
             plan,
             _experiment(recipe),

@@ -125,7 +125,9 @@ class ProjectLaunchConfig:
         if type(self.version) is not int:
             raise ValueError("ProjectLaunchConfig version must be an int")
         if self.version not in PROJECT_CONFIG_SCHEMA.supported:
-            raise ValueError("ProjectLaunchConfig version must be 1, 2, 3, 4, or 5")
+            raise ValueError(
+                "ProjectLaunchConfig version must be 1, 2, 3, 4, 5, or 6"
+            )
         if not isinstance(self.source, Path) or not self.source.is_absolute():
             raise ValueError("ProjectLaunchConfig source must be an absolute Path")
         if type(self.defaults) is not LaunchValues:
@@ -149,7 +151,7 @@ class ProjectLaunchConfig:
         if self.version == 1 and self.preparation is not None:
             raise ValueError("ProjectLaunchConfig v1 cannot define preparation")
         if (
-            self.version in {2, 3, 4, 5}
+            self.version in {2, 3, 4, 5, 6}
             and type(self.preparation) is not PreparationConfig
         ):
             raise ValueError("ProjectLaunchConfig v2+ requires preparation")
@@ -335,7 +337,7 @@ def load_project_launch(source: Path) -> ProjectLaunchConfig:
             source=normalized_source,
             version=version,
         )
-        if version_number in {2, 3, 4, 5}
+        if version_number in {2, 3, 4, 5, 6}
         else None
     )
     return ProjectLaunchConfig(
