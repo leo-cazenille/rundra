@@ -510,6 +510,13 @@ def _is_sha256(value: str) -> bool:
     )
 
 
+def _prebuilt_image(plan: PreparationPlan) -> PreparationImage:
+    image = plan.recipe.image
+    if type(image) is not PreparationImage:
+        raise PreparationError("Remote preparation requires a prebuilt image")
+    return image
+
+
 def resolve_remote_unpinned_prebuilt(
     plan: PreparationPlan,
     transport: Transport,
