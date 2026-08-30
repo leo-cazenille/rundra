@@ -240,7 +240,7 @@ def probe_remote_offline_preparation(
     expected_digest = image.sha256
     if expected_digest is None:
         candidates = tuple(path / str(image.name) for path in image_search_paths)
-        observations: list[str] = []
+        unpinned_observations: list[str] = []
         for candidate in candidates:
             result = transport.run(_remote_image_digest_command(candidate))
             fields = result.stdout.split(maxsplit=1)
@@ -253,8 +253,8 @@ def probe_remote_offline_preparation(
                     "WARNING: prebuilt image is unpinned; Rundra will trust "
                     f"{candidate} and record its measured sha256:{observed}",
                 )
-            observations.append(f"{candidate} (exit {result.exit_code})")
-        checked = ", ".join(observations) or "no configured image search paths"
+            unpinned_observations.append(f"{candidate} (exit {result.exit_code})")
+        checked = ", ".join(unpinned_observations) or "no configured image search paths"
         return OfflinePreparationProbe(
             True,
             False,
@@ -626,6 +626,7 @@ def create_remote_preparation_spec(
     if build is not None:
         scope = target.name if build.cache_scope == "target" else platform_fingerprint
         if type(image) is PreparationImage:
+            assert image.sha256 is not None
             key = build_cache_key(
                 source_digest=source.digest,
                 image_digest=image.sha256,

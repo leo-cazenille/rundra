@@ -508,8 +508,8 @@ def render_human(result: OperationResult[Any]) -> str:
             f"Retrieval: {value.record.run.retrieval_state.value}\n"
             f"Target: {value.record.run.target.name}"
         )
-        preparation = value.record.preparation
-        if preparation is not None and preparation.image_action in {
+        preparation_record = value.record.preparation
+        if preparation_record is not None and preparation_record.image_action in {
             "resolve_unpinned_in_preparation_job",
             "trust_unpinned_existing_image",
         }:

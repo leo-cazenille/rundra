@@ -886,7 +886,7 @@ def _preparation_plan(
         if not rebuild_image:
             actions.append("reuse_definition_image_cache")
         actions.append("build_definition_image")
-    elif recipe.image.sha256 is None:
+    elif type(recipe.image) is PreparationImage and recipe.image.sha256 is None:
         actions.append("trust_unpinned_existing_image")
     else:
         actions.extend(("use_verified_image_candidate", "reuse_image_cache"))
