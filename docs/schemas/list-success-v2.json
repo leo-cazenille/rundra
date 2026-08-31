@@ -19,6 +19,10 @@
       "scheduler_job_ids": [
         "local-0123456789abcdef0123456789abcdef"
       ],
+      "preparation_scheduler_job_id": null,
+      "scientific_scheduler_job_ids": [
+        "local-0123456789abcdef0123456789abcdef"
+      ],
       "state": "SUCCEEDED",
       "target": "local",
       "tasks": {

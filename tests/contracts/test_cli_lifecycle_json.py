@@ -7,6 +7,7 @@ from pathlib import Path, PurePosixPath
 import pytest
 
 from rundra.cli.operations import (
+    ArtifactsValue,
     CancelValue,
     FetchValue,
     InspectValue,
@@ -193,3 +194,57 @@ def test_inspect_embeds_the_checked_run_record_contract() -> None:
         "operation": "inspect",
         "record": _RECORD_DOCUMENT,
     }
+
+
+def test_summary_documents_omit_unbounded_detail() -> None:
+    status_document = result_document(
+        OperationResult.success(
+            "status",
+            replace(_STATUS, task_details=(), task_details_included=False),
+        )
+    )
+    inspect_document = result_document(
+        OperationResult.success("inspect", InspectValue(_RECORD, summary=True))
+    )
+    fetch_document = result_document(
+        OperationResult.success(
+            "fetch",
+            FetchValue(
+                _RECORD.run.id,
+                PurePosixPath("retrieved"),
+                _RECORD.run.retrieval_state,
+                (),
+                (_RECORD.run.tasks[0].id,),
+                artifact_total=len(_RAW_ARTIFACTS),
+                artifacts_included=False,
+            ),
+        )
+    )
+
+    assert status_document["status"]["task_details"] == []
+    assert not status_document["status"]["task_details_included"]
+    assert not isinstance(inspect_document["record"]["artifacts"], list)
+    assert fetch_document["fetch"]["artifact_total"] == 1
+    assert not fetch_document["fetch"]["artifacts_included"]
+    assert fetch_document["fetch"]["artifacts"] == []
+
+
+def test_artifacts_document_is_paginated() -> None:
+    document = result_document(
+        OperationResult.success(
+            "artifacts",
+            ArtifactsValue(
+                run_id=_RECORD.run.id,
+                total=len(_RECORD.artifacts),
+                offset=0,
+                limit=2,
+                artifacts=_RECORD.artifacts[:2],
+            ),
+        )
+    )
+
+    assert document["artifacts"]["total"] == len(_RECORD.artifacts)
+    assert document["artifacts"]["offset"] == 0
+    assert document["artifacts"]["limit"] == 2
+    assert document["artifacts"]["next_offset"] == 2
+    assert len(document["artifacts"]["items"]) == 2

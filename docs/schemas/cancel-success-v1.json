@@ -7,6 +7,10 @@
     "scheduler_job_ids": [
       "18372"
     ],
+    "preparation_scheduler_job_id": null,
+    "scientific_scheduler_job_ids": [
+      "18372"
+    ],
     "state": "CANCELLED",
     "target": "shoal",
     "task_details": [

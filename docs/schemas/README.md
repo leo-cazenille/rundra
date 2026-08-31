@@ -22,7 +22,7 @@ interface.
 
 | Operation or document | Checked example | Primary payload |
 |---|---|---|
-| CLI surface | [`cli-surface-v25.json`](cli-surface-v25.json) | current program, commands, positionals, options |
+| CLI surface | [`cli-surface-v26.json`](cli-surface-v26.json) | current program, commands, positionals, options |
 | MCP launcher surface | [`rundr-mcp-surface-v1.json`](rundr-mcp-surface-v1.json) | stdio and authenticated Streamable HTTP options |
 | `validate` | [`validate-success-v1.json`](validate-success-v1.json) | `experiment` |
 | `plan` | [`plan-success-v1.json`](plan-success-v1.json) | `plan`, plus launch resolution |
@@ -34,6 +34,7 @@ interface.
 | `wait` | composed and contract-tested | status, terminal/timeout flags, elapsed duration |
 | `await` | composed and contract-tested | bounded aggregate state for one or several Runs |
 | `tasks` | composed and contract-tested | bounded v4 Task-state page |
+| `artifacts` | composed and contract-tested | bounded persisted-artifact page |
 | `list` | [`list-success-v1.json`](list-success-v1.json) | ordered `runs` summaries |
 | `logs` | [`logs-success-v1.json`](logs-success-v1.json) | one Task's stdout/stderr and paths |
 | `fetch` | [`fetch-success-v1.json`](fetch-success-v1.json) | destination, selected Tasks, artifacts |
@@ -184,6 +185,11 @@ The version-21 CLI surface adds `doctor --prepare-location`; plan v8, doctor
 v3, and targets v2 expose derived scheduler capabilities. Version 22 adds the
 aggregate `await` command, and version 23 adds read-only
 `doctor --scheduler-inventory`.
+
+Version 26 adds bounded `--summary` output to `status`, `inspect`, and `fetch`,
+plus the paginated `artifacts` operation. Additive lifecycle fields distinguish
+preparation scheduler identity from scientific scheduler identities and retain
+the total artifact count when fetch detail is omitted.
 
 Scheduler capability fields are added only to those new versions. Older plan,
 doctor, and target-list documents retain their previous shapes.

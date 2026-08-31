@@ -872,6 +872,9 @@ def build_remote_preparation_command(
                 '  trap \'rm -rf -- "$work" "$publish"; rmdir -- "$build_lock" 2>/dev/null || :\' EXIT HUP INT TERM',
                 f'  cp -a -- {shlex.quote(str(workspace.source))}/. "$work"/',
                 '  chmod -R u+w -- "$work"',
+                '  mkdir -m 700 -- "$work/.rundra-tmp"',
+                "  export APPTAINERENV_TMPDIR=/workspace/.rundra-tmp APPTAINERENV_TMP=/workspace/.rundra-tmp APPTAINERENV_TEMP=/workspace/.rundra-tmp",
+                "  export SINGULARITYENV_TMPDIR=/workspace/.rundra-tmp SINGULARITYENV_TMP=/workspace/.rundra-tmp SINGULARITYENV_TEMP=/workspace/.rundra-tmp",
                 "  "
                 + shlex.join(
                     _container_exec_argv(
@@ -1020,6 +1023,9 @@ rundra_scratch="$rundra_base/rundra-preparation-${SLURM_JOB_ID:?missing SLURM_JO
 case "$rundra_scratch" in "$rundra_base"/rundra-preparation-*) ;; *) exit 72 ;; esac
 rm -rf -- "$rundra_scratch"
 mkdir -m 700 -- "$rundra_scratch"
+rundra_tmp="$rundra_scratch/tmp"
+mkdir -m 700 -- "$rundra_tmp"
+export TMPDIR="$rundra_tmp" TMP="$rundra_tmp" TEMP="$rundra_tmp"
 trap 'chmod -R u+w -- "$rundra_scratch" 2>/dev/null || :; rm -rf -- "$rundra_scratch"' EXIT HUP INT TERM
 cp -a -- "$2"/. "$rundra_scratch"/
 rundra_run_root="$rundra_scratch"

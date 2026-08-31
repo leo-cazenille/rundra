@@ -320,6 +320,7 @@ class StatusValue:
     active_workers: int | None = None
     throughput_tasks_per_second: float | None = None
     eta_seconds: float | None = None
+    task_details_included: bool = True
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -370,6 +371,10 @@ class StatusValue:
             item = getattr(self, name)
             if item is not None and (type(item) not in (int, float) or item < 0):
                 raise ValueError(f"StatusValue {name} must be non-negative or None")
+        if type(self.task_details_included) is not bool:
+            raise TypeError("StatusValue task_details_included must be a boolean")
+        if not self.task_details_included and self.task_details:
+            raise ValueError("A compact StatusValue cannot include Task details")
 
 
 @dataclass(frozen=True, slots=True)
@@ -473,6 +478,22 @@ class ListRunsValue:
 class InspectValue:
     record: RunRecord
     retention: PurgeReceipt | None = None
+    summary: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactsValue:
+    run_id: RunId
+    total: int
+    offset: int
+    limit: int
+    artifacts: tuple[Artifact, ...]
+    format_version: int = 1
+
+    @property
+    def next_offset(self) -> int | None:
+        value = self.offset + len(self.artifacts)
+        return value if value < self.total else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -543,6 +564,20 @@ class FetchValue:
     artifacts: tuple[Artifact, ...]
     task_ids: tuple[TaskId, ...] = ()
     format_version: int = 1
+    artifact_total: int | None = None
+    artifacts_included: bool = True
+
+    def __post_init__(self) -> None:
+        total = (
+            len(self.artifacts) if self.artifact_total is None else self.artifact_total
+        )
+        if type(total) is not int or total < len(self.artifacts):
+            raise ValueError("FetchValue artifact_total must cover returned artifacts")
+        if type(self.artifacts_included) is not bool:
+            raise TypeError("FetchValue artifacts_included must be a boolean")
+        if not self.artifacts_included and self.artifacts:
+            raise ValueError("A compact FetchValue cannot include artifacts")
+        object.__setattr__(self, "artifact_total", total)
 
 
 type LaunchOutputValue = str | int | None
@@ -2516,6 +2551,7 @@ def status_operation(
     task_store: SqliteTaskStore | None = None,
     retry_sleeper: Callable[[float], None] = sleep,
     journal_read_retries: int = _STATUS_JOURNAL_READ_RETRIES,
+    summary: bool = False,
 ) -> OperationResult[StatusValue]:
     record, error = _load_record(run_id, store)
     if error is not None:
@@ -2609,7 +2645,9 @@ def status_operation(
         return OperationResult.failure(
             "status", _run_store_operation_error(store_error, record.run.id)
         )
-    return OperationResult.success("status", _status_value(record, counts))
+    return OperationResult.success(
+        "status", _status_value(record, counts, include_tasks=not summary)
+    )
 
 
 def wait_operation(
@@ -2978,6 +3016,7 @@ def inspect_operation(
     store: RunStore,
     *,
     receipts: PurgeReceiptStore | None = None,
+    summary: bool = False,
 ) -> OperationResult[InspectValue]:
     record, error = _load_record(run_id, store)
     if error is not None:
@@ -2989,7 +3028,41 @@ def inspect_operation(
         return OperationResult.failure(
             "inspect", OperationError("PURGE_RECEIPT_INVALID", str(receipt_error))
         )
-    return OperationResult.success("inspect", InspectValue(record, retention))
+    return OperationResult.success("inspect", InspectValue(record, retention, summary))
+
+
+def artifacts_operation(
+    run_id: str,
+    store: RunStore,
+    *,
+    offset: int = 0,
+    limit: int = 100,
+) -> OperationResult[ArtifactsValue]:
+    record, error = _load_record(run_id, store)
+    if error is not None:
+        return OperationResult.failure("artifacts", error)
+    assert record is not None
+    if offset < 0 or not 1 <= limit <= 1000:
+        return OperationResult.failure(
+            "artifacts",
+            OperationError(
+                "INVALID_PAGE",
+                "Artifact offset must be non-negative and limit must be 1..1000",
+                {"offset": offset, "limit": limit},
+            ),
+        )
+    artifacts = tuple(record.artifacts)
+    return OperationResult.success(
+        "artifacts",
+        ArtifactsValue(
+            record.run.id,
+            len(artifacts),
+            offset,
+            limit,
+            artifacts[offset : offset + limit],
+            record.format_version,
+        ),
+    )
 
 
 def purge_operation(
@@ -3432,6 +3505,7 @@ def fetch_operation(
     extract: bool = False,
     progress: ProgressObserver | None = None,
     task_store: SqliteTaskStore | None = None,
+    summary: bool = False,
 ) -> OperationResult[FetchValue]:
     record, error = _load_record(run_id, store)
     if error is not None:
@@ -3450,7 +3524,7 @@ def fetch_operation(
         else _default_fetch_destination(record)
     )
     with store.operation_lock(record.run.id):
-        return _fetch_operation_locked(
+        result = _fetch_operation_locked(
             str(record.run.id),
             store,
             effective_destination,
@@ -3461,6 +3535,19 @@ def fetch_operation(
             progress=progress,
             task_store=task_store,
         )
+    if not summary or not result.ok:
+        return result
+    assert result.value is not None
+    value = result.value
+    return OperationResult.success(
+        "fetch",
+        replace(
+            value,
+            artifact_total=len(value.artifacts),
+            artifacts=(),
+            artifacts_included=False,
+        ),
+    )
 
 
 def _default_fetch_destination(record: RunRecord) -> Path:
@@ -4053,6 +4140,8 @@ def _run_store_operation_error(error: RunStoreError, run_id: RunId) -> Operation
 def _status_value(
     record: RunRecord,
     compact_counts: Mapping[ExecutionState, int] | None = None,
+    *,
+    include_tasks: bool = True,
 ) -> StatusValue:
     counts = (
         {state.value: count for state, count in compact_counts.items() if count}
@@ -4084,7 +4173,9 @@ def _status_value(
                 parameter_set=task.parameter_set,
             )
             for task in record.run.tasks
-        ),
+        )
+        if include_tasks
+        else (),
         preparation=(
             None
             if record.preparation is None
@@ -4125,6 +4216,7 @@ def _status_value(
             if type(record.scheduler_metadata.get("eta_seconds")) in (int, float)
             else None
         ),
+        task_details_included=include_tasks,
     )
 
 

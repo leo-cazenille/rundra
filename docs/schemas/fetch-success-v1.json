@@ -8,6 +8,8 @@
         "task_id": "task_000000"
       }
     ],
+    "artifact_total": 1,
+    "artifacts_included": true,
     "destination": "retrieved",
     "retrieval_state": "SUCCEEDED",
     "run_id": "run_0123456789abcdef0123456789abcdef",

@@ -253,6 +253,14 @@ is required. Before submission, inspect
 `plan.preparation.strategy.selected_location` in `plan --json`; it is derived
 from target policy without contacting the target.
 
+When target-side preparation runs under a configured Slurm allocation-scratch
+policy, Rundra creates a private temporary directory inside that allocation and
+sets `TMPDIR`, `TMP`, and `TEMP` for preparation commands. Containerized
+application builds also receive matching `APPTAINERENV_*` and
+`SINGULARITYENV_*` variables mapped to `/workspace/.rundra-tmp`. Compilers and
+Apptainer therefore avoid login-node or compute-node `/tmp`; the temporary
+directory is not copied back as a scientific result.
+
 See `examples/python-multiprocessing/prepared/` for a complete working-tree
 example and `rundr plan ... --json` for its network-free preparation plan.
 

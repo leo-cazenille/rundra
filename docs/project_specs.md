@@ -4125,3 +4125,20 @@ own local subprocesses after the client exits. Local pools do not use compact
 TaskSpace state, scheduler reruns, bundle journals, or result shards. Runs above
 the compact threshold remain materialized and are still bounded by the target's
 hard Task limit.
+
+## M33 bounded lifecycle detail and preparation temporary storage
+
+Lifecycle JSON remains bounded on demand. `status --summary` omits per-Task
+detail, `inspect --summary` emits a compact Run summary, and `fetch --summary`
+omits the artifact list while retaining its total. Tasks and persisted artifacts
+are exposed through independent offset/limit pages. Submission output identifies
+preparation and scientific scheduler jobs separately so clients do not confuse
+dependency work with scientific execution.
+
+For target-side preparation under a configured Slurm allocation-scratch policy,
+Rundra owns a private temporary directory below the scheduler-provided scratch
+root and exports it through `TMPDIR`, `TMP`, and `TEMP`. Containerized
+application compilation receives equivalent Apptainer and Singularity
+environment mappings. This temporary state is allocation-local, is never treated
+as a durable artifact, and does not weaken the existing durable cache publication
+and scientific output copy-back contracts.

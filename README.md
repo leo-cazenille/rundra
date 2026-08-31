@@ -755,7 +755,9 @@ agent sandbox if required, and rerun the diagnostic until `ready` is true. The
 first Codex audit may return a `run_store_durability.verification_argv`; execute
 that argv as a separate command so Rundra can prove the Run store survives
 between sandboxed processes. If verification fails, grant persistent access to
-the reported store or use `--data-dir` inside the agent's persistent workspace.
+the reported store or use a project-local `--data-dir`, such as
+`--data-dir "$PWD/.rundra-data"`, inside the agent's persistent workspace. Use
+that exact directory for every later lifecycle command.
 Then use:
 
 ```bash
@@ -763,8 +765,11 @@ rundr doctor experiment.yaml --connect --agent codex --json
 rundr plan experiment.yaml --json
 rundr submit experiment.yaml --json
 rundr await RUN_ID --json
-rundr fetch RUN_ID --json
+rundr fetch RUN_ID --mode copy --extract --summary --json
 ```
+
+See the concise [agent happy path](docs/agent-happy-path.md) for the complete
+durability-safe sequence and compact diagnostic commands.
 
 Agent rules:
 
@@ -783,6 +788,7 @@ Agent rules:
 The optional MCP server exposes the same lifecycle to compatible clients.
 Install it with `uv tool install --python 3.12 'rundra[mcp]'`. See the
 [agent tutorial](docs/tutorials/03-agent-async.md),
+[agent happy path](docs/agent-happy-path.md),
 [JSON schemas](docs/schemas/README.md), and
 [portable agent instructions](docs/agent-instructions.md).
 

@@ -10,6 +10,7 @@ from typing import Any
 from rundra.cli.agent_guide import AgentGuideValue
 from rundra.cli.capability_doctor import DoctorValue
 from rundra.cli.operations import (
+    ArtifactsValue,
     AwaitRunsValue,
     CancelValue,
     FetchValue,
@@ -37,6 +38,7 @@ from rundra.domain.preparation import (
     PreparationSourceGit,
     source_recipe_identity,
 )
+from rundra.domain.records import RunRecord
 from rundra.domain.states import ExecutionState, RetrievalState
 from rundra.orchestration.models import ExecutionPlan, ExecutionUnit
 from rundra.persistence import receipt_document, record_to_dict
@@ -172,6 +174,7 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
             "run_id": str(record.run.id),
             "state": record.run.state.value,
             "scheduler_job_ids": list(record.scheduler_job_ids),
+            **_scheduler_job_roles_document(record),
         }
     elif isinstance(value, StatusValue):
         document["status"] = _status_document(value)
@@ -259,10 +262,16 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
             "destination": str(value.destination),
             "retrieval_state": value.retrieval_state.value,
             "task_ids": [str(task_id) for task_id in value.task_ids],
+            "artifact_total": value.artifact_total,
+            "artifacts_included": value.artifacts_included,
             "artifacts": [_artifact_document(item) for item in value.artifacts],
         }
     elif isinstance(value, InspectValue):
-        document["record"] = record_to_dict(value.record)
+        document["record"] = (
+            _run_record_summary_document(value.record)
+            if value.summary
+            else record_to_dict(value.record)
+        )
         if value.retention is not None:
             document["retention"] = receipt_document(value.retention)
     elif isinstance(value, PurgeValue):
@@ -302,6 +311,16 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
                 }
                 for item in value.tasks
             ],
+        }
+    elif isinstance(value, ArtifactsValue):
+        document["artifacts"] = {
+            "run_id": str(value.run_id),
+            "total": value.total,
+            "offset": value.offset,
+            "limit": value.limit,
+            "returned": len(value.artifacts),
+            "next_offset": value.next_offset,
+            "items": [_artifact_document(item) for item in value.artifacts],
         }
     elif isinstance(value, AgentGuideValue):
         document["agent_guide"] = {
@@ -509,6 +528,16 @@ def render_human(result: OperationResult[Any]) -> str:
             f"Target: {value.record.run.target.name}"
         )
         preparation_record = value.record.preparation
+        if preparation_record is not None:
+            rendered += (
+                "\nPreparation scheduler job: "
+                f"{preparation_record.builder_scheduler_id or '-'}"
+            )
+        rendered += "\nScientific scheduler jobs: " + (
+            ", ".join(value.record.scheduler_job_ids)
+            if value.record.scheduler_job_ids
+            else "-"
+        )
         if preparation_record is not None and preparation_record.image_action in {
             "resolve_unpinned_in_preparation_job",
             "trust_unpinned_existing_image",
@@ -637,7 +666,7 @@ def render_human(result: OperationResult[Any]) -> str:
     if isinstance(value, FetchValue):
         selected = _human_sequence(value.task_ids) if value.task_ids else "all"
         return (
-            f"Fetched {len(value.artifacts)} artifact(s) for {value.run_id} "
+            f"Fetched {value.artifact_total} artifact(s) for {value.run_id} "
             f"to {value.destination}\nTasks: {selected}\n"
             f"Retrieval: {value.retrieval_state.value}"
         )
@@ -671,6 +700,12 @@ def render_human(result: OperationResult[Any]) -> str:
             for item in value.tasks
         )
         return header if not details else f"{header}\n{details}"
+    if isinstance(value, ArtifactsValue):
+        return (
+            f"Run: {value.run_id}\nArtifacts: offset={value.offset} "
+            f"returned={len(value.artifacts)} total={value.total}\n"
+            f"Next offset: {value.next_offset if value.next_offset is not None else '-'}"
+        )
     if isinstance(value, AgentGuideValue):
         if value.action in {"printed", "topic", "topics"}:
             return value.content.rstrip("\n")
@@ -931,7 +966,7 @@ def _result_format_version(value: object) -> int:
         return value.format_version
     if isinstance(value, PreparationLogsValue):
         return value.format_version
-    if isinstance(value, (LogsValue, FetchValue, PurgeValue)):
+    if isinstance(value, (LogsValue, FetchValue, PurgeValue, ArtifactsValue)):
         return value.format_version
     if isinstance(value, TasksValue):
         return value.format_version
@@ -1211,6 +1246,7 @@ def _duration_seconds(value: timedelta | None) -> int | None:
 
 def _run_value_document(value: RunValue) -> dict[str, Any]:
     record = value.record
+    job_roles = _scheduler_job_roles_document(record)
     if record.task_space is not None:
         task_space = record.task_space
         return {
@@ -1230,6 +1266,7 @@ def _run_value_document(value: RunValue) -> dict[str, Any]:
             },
             "tasks": {"total": task_space.task_count, "details_included": False},
             "scheduler_job_ids": list(record.scheduler_job_ids),
+            **job_roles,
             "scheduler": record.run.target.scheduler.kind,
             "artifacts": [_artifact_document(item) for item in record.artifacts],
         }
@@ -1261,6 +1298,7 @@ def _run_value_document(value: RunValue) -> dict[str, Any]:
             },
             "tasks": {"total": len(record.run.tasks), "details_included": False},
             "scheduler_job_ids": list(record.scheduler_job_ids),
+            **job_roles,
             "scheduler": record.run.target.scheduler.kind,
             "artifacts": [_artifact_document(item) for item in record.artifacts],
         }
@@ -1274,6 +1312,7 @@ def _run_value_document(value: RunValue) -> dict[str, Any]:
         "retrieval_state": record.run.retrieval_state.value,
         "tasks": len(record.run.tasks),
         "scheduler_job_ids": list(record.scheduler_job_ids),
+        **job_roles,
         "task_exit_codes": {
             str(task_id): exit_code
             for task_id, exit_code in sorted(
@@ -1286,7 +1325,7 @@ def _run_value_document(value: RunValue) -> dict[str, Any]:
 
 
 def _status_document(value: StatusValue) -> dict[str, Any]:
-    compact = len(value.task_details) >= 1000
+    compact = not value.task_details_included or len(value.task_details) >= 1000
     document: dict[str, Any] = {
         "run_id": str(value.run_id),
         "experiment": value.experiment,
@@ -1295,6 +1334,10 @@ def _status_document(value: StatusValue) -> dict[str, Any]:
         "retrieval_state": value.retrieval_state.value,
         "native_state": value.native_state,
         "scheduler_job_ids": list(value.scheduler_job_ids),
+        "preparation_scheduler_job_id": (
+            None if value.preparation is None else value.preparation.scheduler_id
+        ),
+        "scientific_scheduler_job_ids": list(value.scheduler_job_ids),
         "task_details": []
         if compact
         else [
@@ -1357,4 +1400,30 @@ def _artifact_document(artifact: Artifact) -> dict[str, Any]:
         "path": str(artifact.path),
         "task_id": None if artifact.task_id is None else str(artifact.task_id),
         "size_bytes": artifact.size_bytes,
+    }
+
+
+def _scheduler_job_roles_document(record: RunRecord) -> dict[str, Any]:
+    return {
+        "preparation_scheduler_job_id": (
+            None
+            if record.preparation is None
+            else record.preparation.builder_scheduler_id
+        ),
+        "scientific_scheduler_job_ids": list(record.scheduler_job_ids),
+    }
+
+
+def _run_record_summary_document(record: RunRecord) -> dict[str, Any]:
+    return {
+        "run_id": str(record.run.id),
+        "experiment": record.run.experiment_name,
+        "target": record.run.target.name,
+        "state": record.run.state.value,
+        "retrieval_state": record.run.retrieval_state.value,
+        "native_state": record.native_state,
+        "tasks": {"total": len(record.run.tasks), "details_included": False},
+        "artifacts": {"total": len(record.artifacts), "details_included": False},
+        "scheduler_job_ids": list(record.scheduler_job_ids),
+        **_scheduler_job_roles_document(record),
     }

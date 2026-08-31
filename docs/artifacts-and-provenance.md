@@ -143,6 +143,18 @@ an explicit `--extract` is interrupted. Run inspection records
 `extraction_destination`, so extraction can be retried without rolling back
 verified Task retrieval state.
 
+A worker-pool plan may report `retrieval_policy: manifest`. The manifest is a
+bounded description of verified result shards, not necessarily an ordinary
+directory tree for downstream tools. Materialize and extract it explicitly:
+
+```bash
+rundr fetch RUN_ID --mode copy --extract --summary --json
+```
+
+`--summary` keeps the final fetch document bounded while preserving artifact
+counts. Page persisted artifact metadata separately with `rundr artifacts
+RUN_ID --offset OFFSET --limit LIMIT --json`.
+
 ## Raw and derived outputs
 
 Rundra manages raw execution products selected by `outputs.include`. It does not

@@ -19,18 +19,26 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 | `submit` | `EXPERIMENT` | same as `run` | Submit asynchronously when the selected scheduler supports it. |
 | `resume` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Recover an interrupted submission without duplication. |
 | `resolve-submission` | `RUN_ID` or `--last` | `--not-submitted`, `--confirm RUN_ID`, `--data-dir`, `--json` | Close an unknown submission only after proving no scheduler job exists. |
-| `status` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Reconcile scheduler state and return portable Run/Task status. |
+| `status` | `RUN_ID` or `--last` | `--summary`, `--data-dir`, `--json` | Reconcile scheduler state; `--summary` omits per-Task detail. |
 | `tasks` | `RUN_ID` or `--last` | `--offset`, `--limit`, `--data-dir`, `--json` | Return one bounded Task-state page. |
+| `artifacts` | `RUN_ID` or `--last` | `--offset`, `--limit`, `--data-dir`, `--json` | Return one bounded persisted-artifact page. |
 | `list` | none | `--offset`, `--limit`, `--include-tasks`, `--data-dir`, `--json` | Page through compact Run summaries. |
 | `logs` | `RUN_ID` or `--last` | `--task`, `--preparation`, `--data-dir`, `--json` | Read framework-managed Task or preparation logs. |
-| `fetch` | `RUN_ID` or `--last` | `--destination`, repeatable `--task`, `--mode`, `--extract`, progress options, `--data-dir`, `--json` | Retrieve all or selected artifacts idempotently. |
-| `inspect` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Return the complete persisted RunRecord. |
+| `fetch` | `RUN_ID` or `--last` | `--destination`, repeatable `--task`, `--mode`, `--extract`, `--summary`, progress options, `--data-dir`, `--json` | Retrieve all or selected artifacts idempotently; `--summary` omits the artifact list. |
+| `inspect` | `RUN_ID` or `--last` | `--summary`, `--data-dir`, `--json` | Return the complete RunRecord or a bounded lifecycle summary. |
 | `cancel` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Reconcile and cancel active scheduler work. |
 | `purge` | `RUN_ID` or `--last` | `--workspace`, `--confirm RUN_ID`, `--dry-run`, `--data-dir`, `--json` | Preview or delete terminal Run data. |
 
 `--verbose` prints lifecycle details and `--progress` displays a TQDM phase
 bar. They may be combined. Both write only to stderr, preserving the final
 human or JSON result on stdout.
+
+Submit and Run output distinguish `preparation_scheduler_job_id`, which owns
+target-side image/application preparation, from `scientific_scheduler_job_ids`,
+which own scientific Tasks. Do not infer that a preparation job ID executed a
+scientific Task. For large Runs, use `status --summary --json` and
+`inspect --summary --json`, then page individual records with `tasks` and
+`artifacts`.
 Progress redraws are deduplicated and throttled to `--progress-interval`
 seconds (10 by default), except for phase and terminal updates. Captured
 `--json --progress` emits a warning because terminal redraws may inflate agent

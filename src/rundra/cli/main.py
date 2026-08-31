@@ -19,6 +19,7 @@ from rundra.cli.operations import (
     AwaitRunsValue,
     RunValue,
     WaitValue,
+    artifacts_operation,
     await_runs_operation,
     cancel_operation,
     fetch_operation,
@@ -66,6 +67,7 @@ _COMMANDS = (
     "await",
     "status",
     "tasks",
+    "artifacts",
     "list",
     "logs",
     "fetch",
@@ -288,6 +290,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     status = subparsers.add_parser("status", help="show persisted Run status")
     _add_run_selector(status)
+    status.add_argument("--summary", action="store_true")
     _add_store_option(status)
     _add_json_option(status)
 
@@ -297,6 +300,15 @@ def build_parser() -> argparse.ArgumentParser:
     tasks.add_argument("--limit", type=int, default=100)
     _add_store_option(tasks)
     _add_json_option(tasks)
+
+    artifacts = subparsers.add_parser(
+        "artifacts", help="page through persisted Run artifacts"
+    )
+    _add_run_selector(artifacts)
+    artifacts.add_argument("--offset", type=int, default=0)
+    artifacts.add_argument("--limit", type=int, default=100)
+    _add_store_option(artifacts)
+    _add_json_option(artifacts)
 
     list_runs = subparsers.add_parser("list", help="list persisted Runs")
     list_runs.add_argument("--offset", type=int, default=0)
@@ -344,12 +356,14 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="TASK_ID_OR_INDEX",
         help="retrieve only this Task; repeat to select multiple Tasks",
     )
+    fetch.add_argument("--summary", action="store_true")
     _add_feedback_arguments(fetch)
     _add_store_option(fetch)
     _add_json_option(fetch)
 
     inspect = subparsers.add_parser("inspect", help="inspect a persisted Run record")
     _add_run_selector(inspect)
+    inspect.add_argument("--summary", action="store_true")
     _add_store_option(inspect)
     _add_json_option(inspect)
 
@@ -905,12 +919,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             arguments.run_id,
             JsonRunStore(arguments.data_dir),
             task_store=SqliteTaskStore(arguments.data_dir),
+            summary=arguments.summary,
         )
     elif arguments.command == "tasks":
         result = tasks_operation(
             arguments.run_id,
             JsonRunStore(arguments.data_dir),
             SqliteTaskStore(arguments.data_dir),
+            offset=arguments.offset,
+            limit=arguments.limit,
+        )
+    elif arguments.command == "artifacts":
+        result = artifacts_operation(
+            arguments.run_id,
+            JsonRunStore(arguments.data_dir),
             offset=arguments.offset,
             limit=arguments.limit,
         )
@@ -939,12 +961,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             extract=arguments.extract,
             progress=progress,
             task_store=SqliteTaskStore(arguments.data_dir),
+            summary=arguments.summary,
         )
     elif arguments.command == "inspect":
         result = inspect_operation(
             arguments.run_id,
             JsonRunStore(arguments.data_dir),
             receipts=PurgeReceiptStore(arguments.data_dir),
+            summary=arguments.summary,
         )
     elif arguments.command == "cancel":
         result = cancel_operation(
