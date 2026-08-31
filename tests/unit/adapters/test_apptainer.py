@@ -319,7 +319,7 @@ def test_remote_apptainer_identity_uses_a_shell_free_version_probe() -> None:
     identity = RemoteApptainerRuntime(transport, "apptainer-custom").identity()
 
     assert identity == CapabilityCheck("apptainer", "apptainer version 1.4.2")
-    assert transport.calls == [Command(("apptainer-custom", "version"))]
+    assert transport.calls == [Command(("apptainer-custom", "--version"))]
 
 
 @pytest.mark.parametrize("stdout", ["", "one\ntwo\n", "x" * 257, "bad\x00version"])

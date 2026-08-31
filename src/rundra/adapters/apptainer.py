@@ -67,7 +67,7 @@ class ApptainerRuntime:
                     f"Apptainer executable {self._executable!r} was not found on PATH"
                 )
             completed = subprocess.run(
-                (resolved, "version"),
+                (resolved, "--version"),
                 capture_output=True,
                 check=False,
                 encoding="utf-8",
@@ -175,7 +175,7 @@ class RemoteApptainerRuntime:
     def identity(self) -> CapabilityCheck:
         """Read the target runtime version without exposing transport diagnostics."""
         try:
-            result = self._transport.run(Command((self._executable, "version")))
+            result = self._transport.run(Command((self._executable, "--version")))
         except Exception as error:
             raise ApptainerUnavailableError(
                 "Could not determine the remote Apptainer runtime version"

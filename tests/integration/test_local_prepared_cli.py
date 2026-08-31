@@ -140,7 +140,7 @@ import subprocess
 import sys
 
 args = sys.argv[1:]
-if args == ["version"]:
+if args == ["--version"]:
     print("apptainer version test")
     raise SystemExit(0)
 if args[0] != "exec":
