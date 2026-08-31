@@ -16,6 +16,7 @@ from rundra.domain.preparation import (
 from rundra.orchestration.preparation import (
     _remote_image_digest_command,
     probe_remote_offline_preparation,
+    remote_builder_version,
     resolve_remote_unpinned_prebuilt,
 )
 from rundra.ports import CapabilityCheck, CommandResult
@@ -34,6 +35,15 @@ class ProbeTransport:
         exit_code, stdout = self.outputs.pop(0)
         now = datetime.now(UTC)
         return CommandResult(command, exit_code, stdout, "", now, now)
+
+
+def test_remote_builder_version_uses_portable_version_flag() -> None:
+    transport = ProbeTransport([(0, "singularity version 3.8.7\n")])
+
+    version = remote_builder_version(transport, "singularity")
+
+    assert version == "singularity version 3.8.7"
+    assert transport.commands == [Command(("singularity", "--version"))]
 
 
 def _target() -> Target:

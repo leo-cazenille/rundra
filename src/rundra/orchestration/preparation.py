@@ -343,7 +343,7 @@ def remote_builder_version(
     transport: Transport, apptainer_executable: str = "apptainer"
 ) -> str:
     """Read the target Apptainer version without performing a build."""
-    result = transport.run(Command((apptainer_executable, "version")))
+    result = transport.run(Command((apptainer_executable, "--version")))
     value = result.stdout.strip() or result.stderr.strip()
     if result.exit_code != 0 or not value:
         raise PreparationError("Could not determine target Apptainer builder version")
@@ -1872,7 +1872,7 @@ def _validate_definition_resources(
 
 def _builder_version(executable: str) -> str:
     completed = subprocess.run(
-        (executable, "version"),
+        (executable, "--version"),
         check=False,
         stdin=subprocess.DEVNULL,
         capture_output=True,

@@ -168,7 +168,7 @@ import subprocess
 import sys
 
 args = sys.argv[1:]
-if args[0] == "version":
+if args[0] == "--version":
     print("apptainer version 1.4.0")
     raise SystemExit(0)
 if args[0] == "build":
