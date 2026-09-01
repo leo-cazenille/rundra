@@ -36,6 +36,11 @@ class SchedulerPartition:
     max_walltime_seconds: int | None
     max_walltime_raw: str
     gres: str
+    node_count: int | None = None
+    cpu_allocated: int | None = None
+    cpu_idle: int | None = None
+    cpu_other: int | None = None
+    cpu_total: int | None = None
 
     def __post_init__(self) -> None:
         if type(self.name) is not str or not self.name.strip():
@@ -49,6 +54,39 @@ class SchedulerPartition:
             type(self.max_walltime_seconds) is not int or self.max_walltime_seconds < 1
         ):
             raise ValueError("Scheduler partition walltime must be positive or None")
+        for field_name in (
+            "node_count",
+            "cpu_allocated",
+            "cpu_idle",
+            "cpu_other",
+            "cpu_total",
+        ):
+            value = getattr(self, field_name)
+            if value is not None and (type(value) is not int or value < 0):
+                raise ValueError(
+                    f"Scheduler partition {field_name} must be nonnegative or None"
+                )
+        cpu_values = (
+            self.cpu_allocated,
+            self.cpu_idle,
+            self.cpu_other,
+            self.cpu_total,
+        )
+        if any(value is None for value in cpu_values) != all(
+            value is None for value in cpu_values
+        ):
+            raise ValueError("Scheduler partition CPU observations must be complete")
+        if self.cpu_total is not None and (
+            self.cpu_allocated + self.cpu_idle + self.cpu_other != self.cpu_total
+        ):
+            raise ValueError("Scheduler partition CPU observations are inconsistent")
+
+    @property
+    def utilization_percent(self) -> int | None:
+        if self.cpu_total in {None, 0}:
+            return None
+        assert self.cpu_allocated is not None
+        return (100 * self.cpu_allocated) // self.cpu_total
 
 
 @runtime_checkable

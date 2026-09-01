@@ -347,3 +347,51 @@ def test_launch_resolution_maps_profile_to_target_without_project() -> None:
     assert resolved.values.target == "cluster"
     assert resolved.sources["target"] == "target_profile:cluster"
     assert resolved.sources["config"] == "built_in"
+
+
+def test_project_v8_resolves_profile_placement_over_default_target(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "rundra.yaml"
+    source.write_text(
+        """\
+version: 8
+defaults:
+  target: local
+profiles:
+  distributed:
+    placement: balanced
+placements:
+  balanced:
+    candidates: [shoal, isircluster]
+    max_utilization_percent: 80
+    minimum_idle_cpus: 4
+""",
+        encoding="utf-8",
+    )
+
+    project = load_project_launch(source)
+    resolved = resolve_launch(project=project, profile="distributed")
+
+    assert project.version == 8
+    assert project.placements["balanced"].candidates == ("shoal", "isircluster")
+    assert project.placements["balanced"].max_utilization_percent == 80
+    assert resolved.values.target is None
+    assert resolved.values.placement == "balanced"
+    assert resolved.sources["placement"] == "project_profile:distributed"
+
+
+def test_explicit_target_overrides_project_placement(tmp_path: Path) -> None:
+    source = tmp_path / "rundra.yaml"
+    source.write_text(
+        "version: 8\ndefaults: {placement: auto}\n", encoding="utf-8"
+    )
+
+    resolved = resolve_launch(
+        cli=LaunchValues(target="shoal"),
+        project=load_project_launch(source),
+    )
+
+    assert resolved.values.target == "shoal"
+    assert resolved.values.placement is None
+    assert "placement" not in resolved.sources

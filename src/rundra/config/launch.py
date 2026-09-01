@@ -16,6 +16,7 @@ from rundra.config._schema import (
 )
 from rundra.config._yaml import read_yaml_document
 from rundra.config.campaigns import CampaignDefinition, parse_project_campaigns
+from rundra.config.placement import PlacementPolicy, parse_placement_policies
 from rundra.config.preparation import parse_preparation
 from rundra.domain.preparation import PreparationConfig, PreparationStorageConfig
 from rundra.schema_versions import PROJECT_CONFIG_SCHEMA, USER_CONFIG_SCHEMA
@@ -28,6 +29,7 @@ _PROJECT_V4_FIELDS = _PROJECT_V3_FIELDS
 _PROJECT_V5_FIELDS = _PROJECT_V4_FIELDS
 _PROJECT_V6_FIELDS = _PROJECT_V5_FIELDS
 _PROJECT_V7_FIELDS = _PROJECT_V6_FIELDS | {"campaigns"}
+_PROJECT_V8_FIELDS = _PROJECT_V7_FIELDS | {"placements"}
 _LAUNCH_VALUE_FIELDS = frozenset(
     {
         "config",
@@ -38,6 +40,7 @@ _LAUNCH_VALUE_FIELDS = frozenset(
         "workers",
         "task_slots_per_worker",
         "fetch_mode",
+        "placement",
     }
 )
 _USER_V1_FIELDS = frozenset({"version", "defaults"})
@@ -64,6 +67,7 @@ _VALUE_NAMES = (
     "workers",
     "task_slots_per_worker",
     "fetch_mode",
+    "placement",
 )
 
 
@@ -81,6 +85,7 @@ class LaunchValues:
     workers: int | None = None
     task_slots_per_worker: int | None = None
     fetch_mode: str | None = None
+    placement: str | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -110,6 +115,12 @@ class LaunchValues:
             "archive",
         }:
             raise ValueError("LaunchValues fetch_mode is unsupported")
+        if self.placement is not None and (
+            type(self.placement) is not str or not self.placement.strip()
+        ):
+            raise ValueError("LaunchValues placement must be nonblank or None")
+        if self.target is not None and self.placement is not None:
+            raise ValueError("LaunchValues target and placement are mutually exclusive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,12 +134,13 @@ class ProjectLaunchConfig:
     default_profile: str | None = None
     preparation: PreparationConfig | None = None
     campaigns: Mapping[str, CampaignDefinition] = MappingProxyType({})
+    placements: Mapping[str, PlacementPolicy] = MappingProxyType({})
 
     def __post_init__(self) -> None:
         if type(self.version) is not int:
             raise ValueError("ProjectLaunchConfig version must be an int")
         if self.version not in PROJECT_CONFIG_SCHEMA.supported:
-            raise ValueError("ProjectLaunchConfig version must be between 1 and 7")
+            raise ValueError("ProjectLaunchConfig version must be between 1 and 8")
         if not isinstance(self.source, Path) or not self.source.is_absolute():
             raise ValueError("ProjectLaunchConfig source must be an absolute Path")
         if type(self.defaults) is not LaunchValues:
@@ -164,6 +176,21 @@ class ProjectLaunchConfig:
         ):
             raise ValueError("ProjectLaunchConfig campaigns are invalid")
         object.__setattr__(self, "campaigns", MappingProxyType(campaigns))
+        placements = dict(self.placements)
+        if any(
+            type(name) is not str or type(value) is not PlacementPolicy
+            for name, value in placements.items()
+        ):
+            raise ValueError("ProjectLaunchConfig placements are invalid")
+        referenced = {
+            value.placement
+            for value in (self.defaults, *profiles.values())
+            if value.placement not in {None, "auto"}
+        }
+        missing = referenced - set(placements)
+        if missing:
+            raise ValueError(f"Unknown placement policies: {', '.join(sorted(missing))}")
+        object.__setattr__(self, "placements", MappingProxyType(placements))
 
     @property
     def project_root(self) -> Path:
@@ -254,7 +281,7 @@ def load_project_launch(source: Path) -> ProjectLaunchConfig:
             path=("version",),
             code="UNSUPPORTED_VERSION",
             message=(
-                "Unsupported project config version; supported versions are 1 through 7"
+                "Unsupported project config version; supported versions are 1 through 8"
             ),
         )
     check_fields(
@@ -273,6 +300,8 @@ def load_project_launch(source: Path) -> ProjectLaunchConfig:
             else _PROJECT_V6_FIELDS
             if version == 6
             else _PROJECT_V7_FIELDS
+            if version == 7
+            else _PROJECT_V8_FIELDS
         ),
         required=(
             frozenset({"version"})
@@ -326,11 +355,17 @@ def load_project_launch(source: Path) -> ProjectLaunchConfig:
         if "campaigns" in document
         else MappingProxyType({})
     )
+    placements = (
+        parse_placement_policies(document["placements"], source=normalized_source)
+        if "placements" in document
+        else MappingProxyType({})
+    )
     if (
-        version_number in {1, 7}
+        version_number in {1, 7, 8}
         and defaults == LaunchValues()
         and not profiles
         and not campaigns
+        and not placements
     ):
         fail(
             source=normalized_source,
@@ -359,7 +394,7 @@ def load_project_launch(source: Path) -> ProjectLaunchConfig:
             source=normalized_source,
             version=version,
         )
-        if version_number in {2, 3, 4, 5, 6, 7} and "preparation" in document
+        if version_number in {2, 3, 4, 5, 6, 7, 8} and "preparation" in document
         else None
     )
     return ProjectLaunchConfig(
@@ -370,6 +405,7 @@ def load_project_launch(source: Path) -> ProjectLaunchConfig:
         default_profile=default_profile,
         preparation=preparation,
         campaigns=campaigns,
+        placements=placements,
     )
 
 
@@ -575,6 +611,10 @@ def resolve_launch(
     layers.append(("cli", cli))
     for source_name, layer in layers:
         values = _overlay(values, layer)
+        if layer.target is not None:
+            sources.pop("placement", None)
+        if layer.placement is not None:
+            sources.pop("target", None)
         for field in _VALUE_NAMES:
             if getattr(layer, field) is not None:
                 sources[field] = source_name
@@ -623,6 +663,16 @@ def _launch_values(
             section, "task_slots_per_worker", source, path
         ),
         fetch_mode=_optional_fetch_mode(section, source, path),
+        placement=(
+            expect_string(
+                section["placement"],
+                source=source,
+                path=(*path, "placement"),
+                nonblank=True,
+            )
+            if "placement" in section
+            else None
+        ),
     )
 
 
@@ -712,7 +762,13 @@ def _overlay(base: LaunchValues, override: LaunchValues) -> LaunchValues:
     return LaunchValues(
         config=override.config if override.config is not None else base.config,
         seed=override.seed if override.seed is not None else base.seed,
-        target=override.target if override.target is not None else base.target,
+        target=(
+            None
+            if override.placement is not None
+            else override.target
+            if override.target is not None
+            else base.target
+        ),
         source_root=(
             override.source_root
             if override.source_root is not None
@@ -737,5 +793,12 @@ def _overlay(base: LaunchValues, override: LaunchValues) -> LaunchValues:
         ),
         fetch_mode=(
             override.fetch_mode if override.fetch_mode is not None else base.fetch_mode
+        ),
+        placement=(
+            None
+            if override.target is not None
+            else override.placement
+            if override.placement is not None
+            else base.placement
         ),
     )

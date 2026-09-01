@@ -310,18 +310,27 @@ class SlurmScheduler:
         """Return a read-only, structured Slurm partition inventory."""
 
         result = self._transport.run(
-            Command((self._sinfo, "--noheader", "--format=%P|%l|%a|%G"))
+            Command((self._sinfo, "--noheader", "--format=%P|%l|%a|%G|%D|%C"))
         )
         if result.exit_code != 0:
             raise SlurmQueryError("Slurm partition inventory failed")
         partitions: dict[str, SchedulerPartition] = {}
         for line in result.stdout.splitlines():
-            fields = line.strip().split("|", 3)
-            if len(fields) != 4:
+            fields = line.strip().split("|", 5)
+            if len(fields) != 6:
                 raise SlurmQueryError("Slurm partition inventory was malformed")
-            raw_name, raw_limit, availability, gres = fields
+            raw_name, raw_limit, availability, gres, raw_nodes, raw_cpus = fields
             default = raw_name.endswith("*")
             name = raw_name.removesuffix("*")
+            try:
+                node_count = int(raw_nodes.strip())
+                allocated, idle, other, total = (
+                    int(item) for item in raw_cpus.strip().split("/", 3)
+                )
+            except ValueError as error:
+                raise SlurmQueryError(
+                    "Slurm partition capacity inventory was malformed"
+                ) from error
             item = SchedulerPartition(
                 name,
                 default,
@@ -329,6 +338,11 @@ class SlurmScheduler:
                 _slurm_limit_seconds(raw_limit.strip()),
                 raw_limit.strip(),
                 gres.strip(),
+                node_count,
+                allocated,
+                idle,
+                other,
+                total,
             )
             previous = partitions.get(name)
             if (
@@ -338,7 +352,22 @@ class SlurmScheduler:
                 raise SlurmQueryError(
                     "Slurm partition inventory has inconsistent time limits"
                 )
-            partitions[name] = item
+            if previous is None:
+                partitions[name] = item
+            else:
+                partitions[name] = SchedulerPartition(
+                    name,
+                    previous.default or item.default,
+                    previous.availability,
+                    previous.max_walltime_seconds,
+                    previous.max_walltime_raw,
+                    previous.gres,
+                    (previous.node_count or 0) + (item.node_count or 0),
+                    (previous.cpu_allocated or 0) + (item.cpu_allocated or 0),
+                    (previous.cpu_idle or 0) + (item.cpu_idle or 0),
+                    (previous.cpu_other or 0) + (item.cpu_other or 0),
+                    (previous.cpu_total or 0) + (item.cpu_total or 0),
+                )
         return tuple(partitions[name] for name in sorted(partitions))
 
     def submit(self, group: SchedulerGroup) -> SchedulerSubmission:

@@ -118,16 +118,17 @@ def test_slurm_array_request_preserves_explicit_bounded_mapping() -> None:
 
 def test_slurm_inventory_parses_duration_partitions_without_submission() -> None:
     now = datetime.now(UTC)
-    command = Command(("sinfo", "--noheader", "--format=%P|%l|%a|%G"))
+    command = Command(("sinfo", "--noheader", "--format=%P|%l|%a|%G|%D|%C"))
     transport = ScriptedTransport(
         deque(
             (
                 CommandResult(
                     command,
                     0,
-                    "cpu-short*|01:00:00|up|(null)\n"
-                    "cpu-day|1-00:00:00|up|(null)\n"
-                    "gpu-short|01:00:00|down|gpu:a6000:4\n",
+                    "cpu-short*|01:00:00|up|(null)|2|4/12/0/16\n"
+                    "cpu-short*|01:00:00|up|(null)|1|4/4/0/8\n"
+                    "cpu-day|1-00:00:00|up|(null)|4|8/24/0/32\n"
+                    "gpu-short|01:00:00|down|gpu:a6000:4|1|8/0/0/8\n",
                     "",
                     now,
                     now,
@@ -141,6 +142,11 @@ def test_slurm_inventory_parses_duration_partitions_without_submission() -> None
     assert [item.name for item in inventory] == ["cpu-day", "cpu-short", "gpu-short"]
     assert inventory[0].max_walltime_seconds == 86400
     assert inventory[1].default is True
+    assert inventory[1].node_count == 3
+    assert inventory[1].cpu_allocated == 8
+    assert inventory[1].cpu_idle == 16
+    assert inventory[1].cpu_total == 24
+    assert inventory[1].utilization_percent == 33
     assert inventory[2].availability == "down"
     assert transport.run_calls == [command]
 
