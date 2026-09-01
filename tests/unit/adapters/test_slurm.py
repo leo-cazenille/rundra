@@ -38,6 +38,7 @@ from rundra.ports import (
     SchedulerArrayRequest,
     SchedulerGroup,
     SchedulerReference,
+    SchedulerSubmissionRole,
     SchedulerSubmissionOutcome,
     SchedulerUnit,
 )
@@ -102,6 +103,19 @@ def _array_request(
         manifest_path,
         max_array_size,
     )
+
+
+def test_preparation_script_disables_requeue_and_uses_distinct_name() -> None:
+    group = SchedulerGroup(
+        _group().units,
+        role=SchedulerSubmissionRole.PREPARATION,
+    )
+
+    script = render_sbatch_script(group)
+
+    assert "#SBATCH --job-name=rundra-prepare" in script
+    assert "#SBATCH --no-requeue" in script
+    assert "#SBATCH --requeue" not in script
 
 
 def test_slurm_array_request_preserves_explicit_bounded_mapping() -> None:

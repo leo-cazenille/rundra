@@ -249,12 +249,20 @@ class AllocationScratch:
             raise TypeError("Allocation scratch task_directories must be bool")
 
 
+class SchedulerSubmissionRole(StrEnum):
+    """Portable purpose used to apply bounded scheduler submission policy."""
+
+    SCIENTIFIC = "scientific"
+    PREPARATION = "preparation"
+
+
 @dataclass(frozen=True, slots=True)
 class SchedulerGroup:
     """One nonempty scheduler submission with explicit logical Task members."""
 
     units: tuple[SchedulerUnit, ...]
     scratch: AllocationScratch | None = None
+    role: SchedulerSubmissionRole = SchedulerSubmissionRole.SCIENTIFIC
 
     def __post_init__(self) -> None:
         if not isinstance(self.units, Sequence) or isinstance(self.units, (str, bytes)):
@@ -268,6 +276,8 @@ class SchedulerGroup:
             raise ValueError("SchedulerGroup Task IDs must be unique")
         if self.scratch is not None and type(self.scratch) is not AllocationScratch:
             raise TypeError("SchedulerGroup scratch must be AllocationScratch or None")
+        if type(self.role) is not SchedulerSubmissionRole:
+            raise TypeError("SchedulerGroup role must be a SchedulerSubmissionRole")
         object.__setattr__(self, "units", units)
 
 

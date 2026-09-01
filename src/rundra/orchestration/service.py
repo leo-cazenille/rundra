@@ -77,6 +77,7 @@ from rundra.ports import (
     SchedulerGroup,
     SchedulerObservation,
     SchedulerReference,
+    SchedulerSubmissionRole,
     SchedulerSubmissionFailure,
     SchedulerSubmissionOutcome,
     SchedulerUnit,
@@ -1238,7 +1239,8 @@ class OrchestrationService:
                                 ),
                                 resources,
                             ),
-                        )
+                        ),
+                        role=SchedulerSubmissionRole.PREPARATION,
                     )
                 )
                 preparation_reference = preparation_submission.reference

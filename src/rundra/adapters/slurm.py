@@ -23,6 +23,7 @@ from rundra.ports import (
     SchedulerObservation,
     SchedulerPartition,
     SchedulerReference,
+    SchedulerSubmissionRole,
     SchedulerSubmission,
     SchedulerSubmissionFailure,
     SchedulerSubmissionOutcome,
@@ -1890,10 +1891,17 @@ def render_sbatch_script(
             "Slurm stdout and stderr paths must be provided together"
         )
     directives = _sbatch_directives(
-        job_name=f"rundra-{unit.task_id}",
+        job_name=(
+            "rundra-prepare"
+            if group.role is SchedulerSubmissionRole.PREPARATION
+            else f"rundra-{unit.task_id}"
+        ),
         resources=resources,
         stdout_path=stdout_path,
         stderr_path=stderr_path,
+        allow_requeue=(
+            False if group.role is SchedulerSubmissionRole.PREPARATION else None
+        ),
     )
     scratch = group.scratch
     if scratch is None:
@@ -1929,6 +1937,7 @@ def _sbatch_directives(
     stdout_path: PurePath | None,
     stderr_path: PurePath | None,
     array_stop: int | None = None,
+    allow_requeue: bool | None = None,
 ) -> tuple[str, ...]:
     validate_slurm_resources(resources)
     directives = [f"#SBATCH --job-name={job_name}"]
@@ -1955,6 +1964,10 @@ def _sbatch_directives(
         directives.append(f"#SBATCH --mem={memory_mib}M")
     if resources.walltime is not None:
         directives.append(f"#SBATCH --time={_slurm_duration(resources.walltime)}")
+    if allow_requeue is False:
+        directives.append("#SBATCH --no-requeue")
+    elif allow_requeue is True:
+        directives.append("#SBATCH --requeue")
     directives.extend(_native_directives(resources))
     return tuple(directives)
 
