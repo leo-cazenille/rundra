@@ -21,7 +21,7 @@ GUIDE_TOPICS = {
     "results": "Prefer fetch auto. When plan reports retrieval_policy: manifest and downstream analysis needs ordinary files, use fetch RUN_ID --mode copy --extract --summary --json. Compact archive fetch verifies exact Task coverage before extraction. Page large manifests with artifacts RUN_ID --offset N --limit N --json. Keep derived outputs separate.",
     "scratch": "Treat target-v10+ execution_storage as an operator-owned Slurm contract. Plan reports CPU/GPU variables and copy-back; doctor --scheduler-probe verifies the CPU scratch path inside one bounded allocation. Rundra stages source, config, and verified images locally, copies every Task output back before success, and never owns or deletes the scheduler-provided scratch root.",
     "partitions": "Target v11 may declare ordered Slurm partition_routes by CPU/GPU class and maximum walltime. Plan stays offline and selects the shortest compatible route. Use doctor --connect --scheduler-inventory --json for read-only operator onboarding; it submits no job. Never guess a partition or bypass a configured route with native options.",
-    "preparation": "Pin acquired images when the intended digest is known. Project v6 may omit a prebuilt SHA-256 only to trust an existing file; Rundra warns, measures and records it, and never pulls an unpinned URI. A declared digest mismatch is fatal and reports expected and observed identities. Definition projects v4+ declare an explicit context include list; Rundra hashes only that context plus the definition for image-cache identity. Scientific jobs use Rundra-owned afterok dependencies and must not be resubmitted while preparation runs.",
+    "preparation": "Pin acquired images when the intended digest is known. Project v6 may omit a prebuilt SHA-256 only to trust an existing file; Rundra warns, measures and records it, and never pulls an unpinned URI. A declared digest mismatch is fatal and reports expected and observed identities. Definition projects v4+ declare an explicit context include list; Rundra hashes only that context plus the definition for image-cache identity. Scientific jobs use Rundra-owned afterok dependencies and must not be resubmitted while preparation runs. Slurm preparation jobs disable scheduler requeue; an irrecoverable launch-failure hold fails preparation and cancels dependent work.",
     "provenance": "Inspect the Run record after submission. Prepared Runs record the verified image digest; actual launches record container_runtime and container_runtime_version when available. Plan and doctor intentionally do not claim execution-time runtime identity.",
     "recovery": "Definition preparation and scientific work use a durable afterok dependency, so submit does not wait for the image build. After any interrupted submit, resume the same Run ID; never submit a duplicate. Resolve manually only after proving no scheduler job exists.",
 }
@@ -95,6 +95,10 @@ GUIDE = f"""{START_MARKER}
   merges identical events that overlap during atomic publication, and reports
   malformed or contradictory outcomes as corruption. Do not bypass a Rundra
   journal error by inferring success from scheduler output alone.
+- Slurm pending reasons remain visible in native status. Ordinary resource,
+  dependency, priority, and manual-hold reasons stay nonterminal. A
+  `launch_failed_requeued_held` preparation is terminal: Rundra marks the Run
+  failed and cancels its dependent scientific jobs.
 - ETA is intentionally absent until at least 20 Tasks and 10 percent of the Run
   have finished over at least 60 seconds. Treat any ETA as an estimate for the
   observed workload mix, not a deadline for heterogeneous Tasks.

@@ -67,6 +67,10 @@
   merges identical events that overlap during atomic publication, and reports
   malformed or contradictory outcomes as corruption. Do not bypass a Rundra
   journal error by inferring success from scheduler output alone.
+- Slurm pending reasons remain visible in native status. Ordinary resource,
+  dependency, priority, and manual-hold reasons stay nonterminal. A
+  `launch_failed_requeued_held` preparation is terminal: Rundra marks the Run
+  failed and cancels its dependent scientific jobs.
 - ETA is intentionally absent until at least 20 Tasks and 10 percent of the Run
   have finished over at least 60 seconds. Treat any ETA as an estimate for the
   observed workload mix, not a deadline for heterogeneous Tasks.

@@ -315,6 +315,10 @@ Do not use SSH port forwarding or agent forwarding.
   merges identical events that overlap during atomic publication, and reports
   malformed or contradictory outcomes as corruption. Do not bypass a Rundra
   journal error by inferring success from scheduler output alone.
+- Slurm pending reasons remain visible in native status. Ordinary resource,
+  dependency, priority, and manual-hold reasons stay nonterminal. A
+  `launch_failed_requeued_held` preparation is terminal: Rundra marks the Run
+  failed and cancels its dependent scientific jobs.
 - ETA is intentionally absent until at least 20 Tasks and 10 percent of the Run
   have finished over at least 60 seconds. Treat any ETA as an estimate for the
   observed workload mix, not a deadline for heterogeneous Tasks.
@@ -342,6 +346,11 @@ Do not use SSH port forwarding or agent forwarding.
   file, retain the `campaign_*` ID and child Run IDs, and use
   `launch-name/task_NNNNNN` selectors. Resume an interrupted campaign; resolve
   an unknown submission only through the reported child Run ID.
+- Automatic placement is one-shot campaign planning, not a composite target or
+  broker. Use `--placement auto` or a project-v8 policy, review the live
+  accepted/rejected target observations and seed split, and keep the resulting
+  `campaign_*` ID. `resume` reuses the frozen explicit campaign and must not be
+  replaced by a new placement request after partial submission.
 - Use paginated `rundr list --json` Run summaries for discovery. Use `status
   --summary --json` and `inspect --summary --json` for bounded diagnostics,
   then page detail with `tasks RUN_ID --json` and `artifacts RUN_ID --json`.

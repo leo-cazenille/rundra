@@ -866,6 +866,13 @@ Do not add `--offline` to a cold first Run. Offline readiness means every
 required immutable source and image input is already available in the selected
 cache.
 
+On Slurm, Rundra submits target-side preparation as a distinct
+`rundra-prepare` job with scheduler requeue disabled. `status`, `wait`, and
+`inspect` preserve pending reasons. A node-launch failure that Slurm reports as
+`launch_failed_requeued_held` fails preparation and cancels dependent scientific
+jobs instead of leaving the Run queued indefinitely. Normal resource,
+dependency, priority, and intentional hold reasons remain pending.
+
 ## Results and provenance
 
 Raw outputs remain separate from derived analysis. `fetch` defaults to `auto`:

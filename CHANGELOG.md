@@ -35,6 +35,12 @@ All notable user-visible changes are recorded here.
 
 ### Fixed
 
+- Slurm preparation jobs now use a distinct `rundra-prepare` name and
+  `--no-requeue`, preventing node-launch failures from becoming indefinitely
+  held jobs. Scheduler queries preserve pending reasons; the specific
+  `launch_failed_requeued_held` condition fails preparation and automatically
+  cancels dependent scientific jobs, while ordinary queue and manual-hold
+  reasons remain nonterminal.
 - Preparation cache receipts are trusted only for sealed, non-writable SIF
   entries. Legacy writable entries receive one full SHA-256 verification and
   are sealed before receipt migration. Scratch preparation tests also preserve

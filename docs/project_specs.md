@@ -1636,6 +1636,9 @@ The target preparation design extends this lifecycle with one bounded Slurm
 job on a remote cache miss. Compilation must not run in an SSH login process,
 and experiment jobs use a framework-owned `afterok` dependency. Preparation
 state and scheduler identity remain separate from scientific Task identities.
+Preparation submissions have an explicit portable preparation role; Slurm
+renders that role with the `rundra-prepare` job name and `--no-requeue` so a
+node-launch failure becomes terminal rather than remaining requeued and held.
 Prebuilt-image recipes without an application build use a framework-owned
 preparation request of one CPU, 2 GiB memory, and 15 minutes for source sealing
 and verified image resolution; they do not require or record a synthetic build.
@@ -1847,6 +1850,11 @@ available, and exit code when known.
 Version-2 status additionally reports the preparation job's separate scheduler
 identity, portable and native states, and builder location. A failed
 preparation marks the Run failed before scientific work can execute.
+Slurm observations retain scheduler pending reasons. Ordinary resource,
+priority, dependency, and manual-hold reasons remain nonterminal. The
+irrecoverable `launch_failed_requeued_held` reason maps to a failed preparation,
+preserves that reason in the native state, and cancels every framework-owned
+dependent scientific job.
 
 For definition-image builds, the prepared image has a deterministic recipe-key
 publication path. Rundra may therefore submit scientific work immediately with a
