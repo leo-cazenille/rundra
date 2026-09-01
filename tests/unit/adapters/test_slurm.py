@@ -1469,7 +1469,7 @@ def test_slurm_query_combines_queue_and_accounting_in_request_order() -> None:
             "--jobs",
             "123,456",
             "--format",
-            "%i|%T|%S|%N",
+            "%i|%T|%S|%N|%R",
         )
     )
     sacct_command = Command(
@@ -1480,7 +1480,7 @@ def test_slurm_query_combines_queue_and_accounting_in_request_order() -> None:
             "--jobs",
             "456",
             "--format",
-            "JobID,State%32,ExitCode,Start,End,NodeList",
+            "JobID,State%32,ExitCode,Start,End,NodeList,Reason",
         )
     )
     transport.results.extend(
