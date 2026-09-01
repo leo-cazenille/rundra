@@ -194,13 +194,13 @@ def test_docker_campaign_places_tasks_across_available_targets(
     assert placement["policy"] == "auto"
     assert set(placement["selected_targets"]) == set(_TARGETS)
     assert planned["campaign"]["safety"]["contacts_targets"] is True
-    assert sum(
-        int(item["task_count"]) for item in planned["campaign"]["launches"]
-    ) == 8
+    assert sum(int(item["task_count"]) for item in planned["campaign"]["launches"]) == 8
 
     submitted = _rundr("submit", *common)
     campaign_id = next(iter(_matching_strings(submitted, "campaign_")))
-    waited = _rundr("wait", campaign_id, "--timeout", "300", "--data-dir", str(data_dir))
+    waited = _rundr(
+        "wait", campaign_id, "--timeout", "300", "--data-dir", str(data_dir)
+    )
     assert "SUCCEEDED" in _matching_strings(waited, "SUCCEEDED")
 
     _rundr(

@@ -383,9 +383,7 @@ placements:
 
 def test_explicit_target_overrides_project_placement(tmp_path: Path) -> None:
     source = tmp_path / "rundra.yaml"
-    source.write_text(
-        "version: 8\ndefaults: {placement: auto}\n", encoding="utf-8"
-    )
+    source.write_text("version: 8\ndefaults: {placement: auto}\n", encoding="utf-8")
 
     resolved = resolve_launch(
         cli=LaunchValues(target="shoal"),

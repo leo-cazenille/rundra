@@ -99,9 +99,7 @@ def placement_doctor_operation(
             experiment_source=planned.value.experiment_source,
             config_source=inputs.config,
             cache_root=(
-                None
-                if storage.cache_root is None
-                else Path(str(storage.cache_root))
+                None if storage.cache_root is None else Path(str(storage.cache_root))
             ),
             preparation=inputs.preparation_plan,
             preparation_storage=storage,
@@ -228,20 +226,32 @@ def placement_plan_operation(
             ),
         )
     except (LaunchResolutionError, ValueError) as error:
-        code = error.code if isinstance(error, LaunchResolutionError) else "INVALID_PLACEMENT"
-        message = error.message if isinstance(error, LaunchResolutionError) else str(error)
+        code = (
+            error.code
+            if isinstance(error, LaunchResolutionError)
+            else "INVALID_PLACEMENT"
+        )
+        message = (
+            error.message if isinstance(error, LaunchResolutionError) else str(error)
+        )
         return _failure(code, message)
 
-    candidate_names = candidates_override or policy.candidates or tuple(
-        name
-        for name, configured in target_config.targets.items()
-        if configured.transport.kind != "local"
+    candidate_names = (
+        candidates_override
+        or policy.candidates
+        or tuple(
+            name
+            for name, configured in target_config.targets.items()
+            if configured.transport.kind != "local"
+        )
     )
     if not candidate_names:
         return _failure(
             "PLACEMENT_NO_CANDIDATES", "No remote candidate targets are configured"
         )
-    unknown = tuple(name for name in candidate_names if name not in target_config.targets)
+    unknown = tuple(
+        name for name in candidate_names if name not in target_config.targets
+    )
     if unknown:
         return OperationResult.failure(
             "plan",
@@ -353,7 +363,9 @@ def placement_plan_operation(
             continue
         observation = active_observer(resolved_targets_file, candidate)
         if not observation.ok:
-            reason = observation.error.code.lower() if observation.error else "unreachable"
+            reason = (
+                observation.error.code.lower() if observation.error else "unreachable"
+            )
             decisions.append(PlacementTargetDecision(candidate, False, reason))
             continue
         assert observation.value is not None
@@ -491,7 +503,11 @@ def placement_plan_operation(
     destination_root = (
         destination.expanduser().resolve()
         if destination is not None
-        else ((project.project_root if project is not None else experiment_source.parent) / "retrieved" / campaign_name).resolve()
+        else (
+            (project.project_root if project is not None else experiment_source.parent)
+            / "retrieved"
+            / campaign_name
+        ).resolve()
     )
     explicit_launches: list[CampaignLaunchConfig] = []
     launch_plans: list[CampaignLaunchPlanValue] = []
@@ -592,9 +608,7 @@ def placement_plan_operation(
     )
 
 
-def _policy(
-    name: str, project: ProjectLaunchConfig | None
-) -> PlacementPolicy:
+def _policy(name: str, project: ProjectLaunchConfig | None) -> PlacementPolicy:
     if name == "auto":
         return automatic_placement_policy()
     if project is None or name not in project.placements:
@@ -607,9 +621,13 @@ def _observe_target(
 ) -> OperationResult[tuple[SchedulerPartition, ...]]:
     checked = target_doctor_operation(targets_file, target_name, connect=True)
     if not checked.ok or checked.value is None:
-        return _failure("PLACEMENT_TARGET_UNREACHABLE", "Target capability check failed")
+        return _failure(
+            "PLACEMENT_TARGET_UNREACHABLE", "Target capability check failed"
+        )
     if any(item.status == "fail" for item in checked.value.checks):
-        return _failure("PLACEMENT_TARGET_UNREACHABLE", "Target capability check failed")
+        return _failure(
+            "PLACEMENT_TARGET_UNREACHABLE", "Target capability check failed"
+        )
     inventory, checks = _scheduler_inventory(checked.value.target)
     if any(item.status == "fail" for item in checks):
         return _failure(

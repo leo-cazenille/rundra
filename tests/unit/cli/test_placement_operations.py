@@ -34,7 +34,7 @@ outputs: {include: ['results/**']}
     scheduler: {{type: slurm}}
     staging: {{type: rsync}}
     container: {{type: apptainer}}
-    workspace: {tmp_path / 'workspace'}
+    workspace: {tmp_path / "workspace"}
 """
     targets.write_text(
         "version: 1\ntargets:\n"
@@ -59,7 +59,9 @@ placements:
     return experiment, targets, project
 
 
-def _partition(*, idle: int, allocated: int, availability: str = "up") -> SchedulerPartition:
+def _partition(
+    *, idle: int, allocated: int, availability: str = "up"
+) -> SchedulerPartition:
     total = idle + allocated
     return SchedulerPartition(
         "cpu",

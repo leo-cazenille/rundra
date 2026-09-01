@@ -530,7 +530,9 @@ def _placement_requested(arguments: argparse.Namespace) -> bool:
     )
 
 
-def _placement_plan(arguments: argparse.Namespace) -> OperationResult[CampaignPlanValue]:
+def _placement_plan(
+    arguments: argparse.Namespace,
+) -> OperationResult[CampaignPlanValue]:
     return placement_plan_operation(
         arguments.experiment,
         placement=arguments.placement,

@@ -52,10 +52,15 @@ class PlacementDecision:
             raise ValueError("Placement policy name must be nonblank")
         if self.strategy != "available_capacity":
             raise ValueError("Placement strategy is unsupported")
-        if not isinstance(self.observed_at, datetime) or self.observed_at.utcoffset() is None:
+        if (
+            not isinstance(self.observed_at, datetime)
+            or self.observed_at.utcoffset() is None
+        ):
             raise ValueError("Placement observation time must be timezone-aware")
         targets = tuple(self.targets)
-        if not targets or any(type(item) is not PlacementTargetDecision for item in targets):
+        if not targets or any(
+            type(item) is not PlacementTargetDecision for item in targets
+        ):
             raise ValueError("Placement decision targets are invalid")
         if len({item.target for item in targets}) != len(targets):
             raise ValueError("Placement decision targets must be unique")

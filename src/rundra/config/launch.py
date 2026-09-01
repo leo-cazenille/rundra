@@ -189,7 +189,9 @@ class ProjectLaunchConfig:
         }
         missing = referenced - set(placements)
         if missing:
-            raise ValueError(f"Unknown placement policies: {', '.join(sorted(missing))}")
+            raise ValueError(
+                f"Unknown placement policies: {', '.join(sorted(missing))}"
+            )
         object.__setattr__(self, "placements", MappingProxyType(placements))
 
     @property

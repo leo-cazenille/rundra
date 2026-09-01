@@ -14,6 +14,7 @@ from rundra.config._schema import (
     expect_string_list,
     fail,
 )
+
 _PLACEMENT_FIELDS = frozenset(
     {
         "candidates",
@@ -91,9 +92,7 @@ def _parse_policy(
         path=path,
     )
     strategy = (
-        expect_string(
-            document["strategy"], source=source, path=(*path, "strategy")
-        )
+        expect_string(document["strategy"], source=source, path=(*path, "strategy"))
         if "strategy" in document
         else "available_capacity"
     )
