@@ -3,8 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from rundra.cli.campaign_operations import (
+    CampaignChildRecovery,
     CampaignLaunchPlanValue,
     campaign_plan_operation,
+    campaign_resume_operation,
     campaign_submit_operation,
 )
 from rundra.domain.campaigns import (
@@ -312,4 +314,35 @@ def test_campaign_submit_unknown_outcome_halts_without_policy_action(
     assert [item.submission_state for item in record.launches] == [
         CampaignSubmissionState.UNKNOWN,
         CampaignSubmissionState.PENDING,
+    ]
+
+    submitted: list[RunId] = []
+
+    def resumer(
+        run_id: RunId, data_dir: Path
+    ) -> OperationResult[CampaignChildRecovery]:
+        return OperationResult.success(
+            "resume", CampaignChildRecovery(run_id, True, "resumed")
+        )
+
+    def resumed_submitter(
+        launch: CampaignLaunchPlanValue,
+        run_id: RunId,
+        confirmed: int | None,
+    ) -> OperationResult[RunId]:
+        submitted.append(run_id)
+        return OperationResult.success("submit", run_id)
+
+    resumed = campaign_resume_operation(
+        planned.value,
+        campaign_id,
+        resumer=resumer,
+        submitter=resumed_submitter,
+    )
+
+    assert resumed.ok and resumed.value is not None
+    assert submitted == [record.launches[1].run_id]
+    assert [item.submission_state for item in resumed.value.record.launches] == [
+        CampaignSubmissionState.SUBMITTED,
+        CampaignSubmissionState.SUBMITTED,
     ]
