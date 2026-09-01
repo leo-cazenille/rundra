@@ -1302,7 +1302,7 @@ def _result_format_version(value: object) -> int:
 
 
 def _campaign_plan_document(value: CampaignPlanValue) -> dict[str, Any]:
-    return {
+    document = {
         "name": value.name,
         "source": str(value.definition.source),
         "experiment": str(value.experiment_source),
@@ -1333,6 +1333,29 @@ def _campaign_plan_document(value: CampaignPlanValue) -> dict[str, Any]:
             for item in value.launches
         ],
     }
+    if value.placement is not None:
+        document["placement"] = {
+            "policy": value.placement.policy,
+            "strategy": value.placement.strategy,
+            "observed_at": value.placement.observed_at.isoformat(),
+            "selected_targets": list(value.placement.selected_targets),
+            "targets": [
+                {
+                    "target": item.target,
+                    "accepted": item.accepted,
+                    "reason": item.reason,
+                    "partition": item.partition,
+                    "utilization_percent": item.utilization_percent,
+                    "idle_cpus": item.idle_cpus,
+                    "planned_capacity": item.planned_capacity,
+                    "usable_capacity": item.usable_capacity,
+                    "assigned_seed_start": item.assigned_seed_start,
+                    "assigned_seed_stop": item.assigned_seed_stop,
+                }
+                for item in value.placement.targets
+            ],
+        }
+    return document
 
 
 def _campaign_status_document(value: CampaignStatusValue) -> dict[str, Any]:

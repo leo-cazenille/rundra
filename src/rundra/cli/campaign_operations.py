@@ -52,6 +52,7 @@ from rundra.domain.campaigns import (
     CampaignSubmissionState,
 )
 from rundra.domain.models import Artifact, RunId
+from rundra.domain.placement import PlacementDecision
 from rundra.domain.preparation import PreparationStorageConfig
 from rundra.domain.scaling import SeedRange
 from rundra.domain.states import ExecutionState
@@ -110,6 +111,7 @@ class CampaignPlanValue:
     launches: tuple[CampaignLaunchPlanValue, ...]
     warnings: tuple[str, ...] = ()
     format_version: int = 1
+    placement: PlacementDecision | None = None
 
     def __post_init__(self) -> None:
         if type(self.definition) is not CampaignDefinition:
@@ -131,6 +133,8 @@ class CampaignPlanValue:
             raise ValueError("Campaign plan warnings are invalid")
         if self.format_version != 1:
             raise ValueError("Campaign plan format version must be 1")
+        if self.placement is not None and type(self.placement) is not PlacementDecision:
+            raise TypeError("Campaign plan placement decision is invalid")
         object.__setattr__(self, "launches", launches)
         object.__setattr__(self, "warnings", tuple(self.warnings))
 
