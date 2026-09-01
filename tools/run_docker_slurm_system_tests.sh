@@ -90,7 +90,7 @@ chmod 600 "$state/home/.ssh/config" "$state/id_ed25519"
 cat > "$state/targets.yaml" <<EOF
 version: 11
 targets:
-  docker-slurm:
+  docker-slurm: &docker-slurm
     transport:
       type: ssh
       host: rundra-docker-slurm
@@ -136,9 +136,26 @@ targets:
         tasks_per_lease: 100
         infrastructure_retry_limit: 1
         requeue_limit: 2
+  docker-campaign-a:
+    <<: *docker-slurm
+  docker-campaign-b:
+    <<: *docker-slurm
 EOF
+
+case "${RUNDRA_DOCKER_SLURM_SUITE:-scale}" in
+    scale)
+        test_source=tests/system/test_docker_slurm_scale.py
+        ;;
+    campaign)
+        test_source=tests/system/test_docker_campaign.py
+        ;;
+    *)
+        echo "RUNDRA_DOCKER_SLURM_SUITE must be scale or campaign" >&2
+        exit 64
+        ;;
+esac
 
 HOME="$state/home" \
 RUNDRA_DOCKER_SLURM_TARGETS_FILE="$state/targets.yaml" \
-uv run pytest tests/system/test_docker_slurm_scale.py \
+uv run pytest "$test_source" \
     --run-docker-slurm-system-tests

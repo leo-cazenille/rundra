@@ -11,6 +11,9 @@ All notable user-visible changes are recorded here.
   schema version 7 adds named campaigns; standalone version-1 campaign files,
   durable CampaignRecords, aggregate lifecycle commands, paginated selectors,
   cascading fetch/cancel/purge, recovery, JSON, and MCP parity are included.
+- A scheduled/manual Docker campaign system workflow exercises two concurrent
+  child Runs through distinct target names, aggregate waiting, campaign fetch,
+  Task selectors, compute-node evidence, and child provenance.
 
 - Project configuration version 6 permits `prebuilt.sha256` to be omitted.
   Rundra then trusts only an existing project or configured image-search-path

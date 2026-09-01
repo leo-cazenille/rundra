@@ -5,6 +5,7 @@
 [![Docker Slurm system](https://github.com/leo-cazenille/rundra/actions/workflows/docker-slurm-system.yml/badge.svg)](https://github.com/leo-cazenille/rundra/actions/workflows/docker-slurm-system.yml)
 [![Docker OpenPBS system](https://github.com/leo-cazenille/rundra/actions/workflows/docker-pbs-system.yml/badge.svg)](https://github.com/leo-cazenille/rundra/actions/workflows/docker-pbs-system.yml)
 [![Docker HTCondor system](https://github.com/leo-cazenille/rundra/actions/workflows/docker-htcondor-system.yml/badge.svg)](https://github.com/leo-cazenille/rundra/actions/workflows/docker-htcondor-system.yml)
+[![Docker campaign system](https://github.com/leo-cazenille/rundra/actions/workflows/docker-campaign-system.yml/badge.svg)](https://github.com/leo-cazenille/rundra/actions/workflows/docker-campaign-system.yml)
 
 Rundra runs reproducible scientific experiments on a workstation or a shared
 compute cluster. An experiment combines an executable command, a configuration,

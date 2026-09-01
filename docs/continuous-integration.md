@@ -52,9 +52,13 @@ regressions without Docker or cluster credentials.
 | `docker-slurm-system` | nightly at 02:23 UTC | yes | Slurm lifecycle, scale, failure, cancellation, and retrieval |
 | `docker-pbs-system` | Wednesdays at 03:41 UTC | yes | OpenPBS arrays, failure, cancellation, and retrieval |
 | `docker-htcondor-system` | Thursdays at 04:17 UTC | yes | HTCondor submission, lifecycle, cancellation, and retrieval |
+| `docker-campaign-system` | Tuesdays at 03:07 UTC | yes | Two-target campaign planning, concurrent child Runs, aggregate lifecycle, and retrieval |
 | `Docker Slurm cgroup system` | none | yes | privileged cgroup-v2 memory enforcement |
 | Shoal system tests | none | local explicit opt-ins only | live reference-cluster acceptance evidence |
 
+The campaign workflow reuses the Docker Slurm image but selects a focused
+campaign suite with two independently named detached targets. It requires both
+child Runs to be observed running concurrently before aggregate wait and fetch.
 The OpenPBS workflow caches the shared Slurm/Apptainer base-image layers. The
 OpenPBS layer itself is built from the pinned source in the checked Dockerfile.
 The Slurm and OpenPBS lifecycle workflows upload a 14-day diagnostic artifact
