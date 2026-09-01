@@ -171,8 +171,9 @@ Potential future high-level capabilities include:
 - integration with workflow engines;
 - automated experimental loops.
 
-Static multi-target campaigns are implemented as a coordination layer over
-ordinary Runs. Adaptive campaigns remain a future design goal.
+Static multi-target campaigns and one-shot automatic target placement are
+implemented as coordination layers over ordinary Runs. Adaptive rebalancing and
+Task migration remain future design goals.
 
 ---
 
@@ -817,9 +818,9 @@ and cleanup probe. New RunRecords preserve the policy and selected variable in
 flat `execution_storage.*` scheduler metadata. Scheduler-provided concrete
 scratch paths are intentionally not persisted.
 
-M31 does not implement target budgets, automatic target choice, automatic campaign
-placement, or post-retrieval retention cleanup. Those remain separate policy
-milestones.
+M31 does not implement target budgets or post-retrieval retention cleanup.
+One-shot automatic campaign placement is a separate project-owned policy
+surface; it does not alter target-owned execution limits.
 
 ### 10.4 Target-owned Slurm partition routing
 
@@ -2190,8 +2191,9 @@ operation payload.
 ### 22.5 Static multi-target campaigns
 
 A campaign is a durable coordination parent for several ordinary single-target
-Runs of one experiment. It is not a scheduler backend, composite target, DAG,
-or automatic placement policy. Target definitions remain site-owned backend
+Runs of one experiment. It is not a scheduler backend, composite target, or
+DAG. Automatic placement is a separate resolver that freezes an ordinary
+explicit campaign before submission. Target definitions remain site-owned backend
 stacks in `targets.yaml`; scientific assignment remains project-owned.
 
 Project configuration version 7 may declare named `campaigns`. A standalone
@@ -2230,6 +2232,39 @@ confirmation. Stable campaign Task selectors use
 `launch-name/task_NNNNNN`. `list --kind run|campaign|all` controls discovery.
 MCP tools branch on the same IDs and operation objects rather than exposing a
 second campaign namespace.
+
+### 22.6 One-shot automatic target placement
+
+Project configuration version 8 adds named `placements`, selected by a
+`defaults` or profile `placement` value. `--placement auto` uses a conservative
+built-in policy without project configuration, and repeated
+`--candidate-target` options restrict candidate targets for one invocation.
+`--target` and automatic placement are mutually exclusive.
+
+Placement sits between launch resolution and static campaign planning. It
+resolves the experiment, immutable preparation recipe, TaskSpace, and target
+policy for each candidate; performs read-only target capability and scheduler
+inventory queries; rejects local, unreachable, unavailable, incompatible,
+over-threshold, and capacity-unknown targets; and ranks eligible targets by
+usable concurrent Task capacity. It selects the smallest useful ranked prefix,
+using one target when that target covers the logical Task count and multiple
+targets otherwise. Contiguous seeds are divided proportionally with a stable
+largest-remainder rule and deterministic target-name tie breaking.
+
+Automatic placement is an explicit exception to the ordinary offline `plan`
+contract. Its plan safety document reports target contact while continuing to
+guarantee no workspace, Run, or scheduler submission. Every observation records
+its timestamp, partition, utilization, idle CPUs, planned and usable capacity,
+acceptance decision, reason, and assigned seed interval. A failed observation
+cannot silently become an eligible target.
+
+Submission persists CampaignRecord version 2 with those observations and writes
+an atomic explicit standalone campaign snapshot under the selected Run store.
+Recovery and `resume` load that snapshot, so they never repeat placement or
+silently move work after a partial submission. Lifecycle operations remain the
+existing campaign operations and return a `campaign_*` ID even when one target
+was selected. This milestone does not implement continuous rebalancing,
+migration, cost/fair-share prediction, or a resource broker daemon.
 
 ---
 

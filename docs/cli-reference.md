@@ -8,9 +8,9 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 | Command | Positional | Options | Semantics |
 |---|---|---|---|
 | `validate` | `EXPERIMENT` or `CAMPAIGN_FILE` | `--campaign`, `--project-file`, `--json` | Validate experiment or campaign YAML without executing. |
-| `plan` | `EXPERIMENT` or `CAMPAIGN_FILE` | launch options, `--campaign`, `--source-root`, preparation options, `--execution-strategy`, `--retrieval`, `--workers`, `--task-slots-per-worker`, `--json` | Resolve and inspect execution without target contact or state changes. |
+| `plan` | `EXPERIMENT` or `CAMPAIGN_FILE` | launch options, `--campaign`, `--placement`, repeated `--candidate-target`, `--source-root`, preparation options, `--execution-strategy`, `--retrieval`, `--workers`, `--task-slots-per-worker`, `--json` | Resolve and inspect execution. Ordinary plans are offline; automatic placement performs declared read-only target observations. |
 | `targets` | none | `--targets-file`, `--json` | Validate and list configured targets. |
-| `doctor` | optional `EXPERIMENT` | launch path overrides, `--connect`, `--offline`, `--local-target-access`, `--prepare-location`, `--scheduler-inventory`, `--scheduler-probe`, `--probe-timeout`, `--no-write-probe`, `--agent`, `--verify-run-store TOKEN`, `--json` | Audit installation, durable sandbox storage, target access, reversible staging, preparation caches, read-only scheduler inventory, and an optional bounded scheduler submission. |
+| `doctor` | optional `EXPERIMENT` | launch path overrides, seed selectors for placement, `--placement`, repeated `--candidate-target`, `--connect`, `--offline`, `--local-target-access`, `--prepare-location`, `--scheduler-inventory`, `--scheduler-probe`, `--probe-timeout`, `--no-write-probe`, `--agent`, `--verify-run-store TOKEN`, `--json` | Audit installation, durable sandbox storage, target access, reversible staging, preparation caches, read-only scheduler inventory, and an optional bounded scheduler submission. |
 | `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--workers`, `--task-slots-per-worker`, `--verbose`, `--progress`, `--progress-interval`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
 | `wait` | `RUN_ID` or `--last` | `--timeout`, `--poll-interval`, `--query-failure-limit N`, `--notify`, `--notify-file PATH`, `--data-dir`, `--verbose`, `--progress`, `--progress-interval`, `--json` | Reconcile until terminal or a renewable timeout; optionally emit an alert or atomic terminal JSON file. |
 | `await` | one or more `RUN_ID` values | `--until all`/`any`, `--timeout`, `--poll-interval`, `--query-failure-limit N`, `--fail-on-run-failure`, `--notify-file PATH`, `--data-dir`, `--json` | Wait silently for an aggregate terminal condition and emit one compact final result. |
@@ -59,6 +59,14 @@ rejected unless the definition explicitly opts in. Submission policy is
 must be recovered with `resume CAMPAIGN_ID`. Manual outcome resolution still
 requires the uncertain child Run ID. Purging a campaign cascades to eligible
 child Runs and requires `--confirm CAMPAIGN_ID`.
+
+`--placement auto` creates the same static campaign plan from read-only live
+target observations. Project-v8 `placements` provide named candidate lists and
+utilization/capacity thresholds in `rundra.yaml`; no additional file type is
+required. Automatic placement currently requires structured scheduler CPU
+inventory and returns a campaign ID even when one target is selected. Its plan
+JSON sets `campaign.safety.contacts_targets` and records accepted/rejected
+candidates. Submission persists a frozen explicit campaign for recovery.
 Progress redraws are deduplicated and throttled to `--progress-interval`
 seconds (10 by default), except for phase and terminal updates. Captured
 `--json --progress` emits a warning because terminal redraws may inflate agent
@@ -218,8 +226,9 @@ SSH targets may set an absolute `transport.config_file` and optional
 `transport.executable`; these are used consistently by execution, retrieval,
 and `doctor`.
 
-`plan` deliberately has no `--destination` or `--data-dir` because it creates
-no snapshot, retrieval, or RunRecord. Local `submit` returns
+`plan` creates no snapshot, retrieval, or RunRecord. Automatic placement derives
+preview child destinations from project defaults; `run` and `submit` accept
+explicit destination and Run-store overrides. Local `submit` returns
 `ASYNC_UNAVAILABLE`; SSH/Slurm, SSH/OpenPBS, and SSH/HTCondor submission persist
 scheduler identities before returning so later processes can operate by Run ID.
 

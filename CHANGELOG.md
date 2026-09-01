@@ -6,6 +6,18 @@ All notable user-visible changes are recorded here.
 
 ### Added
 
+- Project configuration version 8 and `--placement auto` add one-shot,
+  capacity-aware target selection above static campaigns. Read-only Slurm
+  inventory rejects unreachable, down, overloaded, or capacity-unknown targets;
+  deterministic plans select one or several targets, preserve rejection
+  reasons and seed ranges, and submit through the existing campaign lifecycle.
+- CampaignRecord version 2 preserves automatic placement observations, while an
+  atomic explicit campaign snapshot guarantees that interrupted submission and
+  `resume` never perform a different live placement decision.
+- The Docker campaign workflow now exercises automatic selection, concurrent
+  child Runs, aggregate waiting, extraction, and complete seed coverage across
+  two target names.
+
 - Static multi-target campaigns coordinate explicit seed assignments across
   detached targets while preserving one ordinary RunRecord per launch. Project
   schema version 7 adds named campaigns; standalone version-1 campaign files,

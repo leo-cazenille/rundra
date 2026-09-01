@@ -691,6 +691,55 @@ Standalone files are auto-detected, so use `rundr plan campaign.yaml` and
 `rundr submit campaign.yaml`. See the checked
 [`examples/campaign`](examples/campaign) files for both forms.
 
+### Automatic target placement
+
+Automatic placement uses the same campaign lifecycle without requiring another
+configuration file. The built-in policy considers every configured remote
+target, discards targets that are unreachable, down, too occupied, or unable to
+report capacity, and selects one target when it can cover the requested Task
+set or several targets when useful:
+
+```bash
+rundr doctor experiment.yaml --seeds 0:4999 --placement auto --connect
+rundr plan experiment.yaml --seeds 0:4999 --placement auto
+rundr submit experiment.yaml --seeds 0:4999 --placement auto
+```
+
+Restrict a one-off decision without editing YAML by repeating
+`--candidate-target TARGET`. Automatic placement currently requires the
+candidate scheduler to provide structured partition and CPU inventory; Slurm is
+the reference implementation. `plan` is normally offline, but an automatic
+placement plan explicitly performs read-only connectivity and scheduler
+inventory queries. Plan JSON records the observation time, every accepted or
+rejected target and reason, utilization, idle CPUs, usable capacity, and the
+resolved seed ranges. It still creates no Run and submits nothing.
+
+Project configuration version 8 stores reusable policies in the existing
+`rundra.yaml`:
+
+```yaml
+version: 8
+
+profiles:
+  distributed:
+    placement: balanced
+
+placements:
+  balanced:
+    candidates: [shoal, isircluster, knight]
+    strategy: available_capacity
+    max_utilization_percent: 85
+    minimum_idle_cpus: 4
+    max_targets: 3
+```
+
+Then use `--profile distributed` instead of `--placement`. A concrete
+`--target` overrides project placement, while an explicit `--placement`
+overrides a project target. Submission persists an explicit standalone campaign
+snapshot and the placement observations. `resume` therefore reuses the frozen
+targets and seed ranges rather than making a new placement decision. Automatic
+placement returns a `campaign_*` ID even when it selects one target.
+
 ## Everyday workflow
 
 Use `run` for short synchronous work. For long or remote experiments, submit

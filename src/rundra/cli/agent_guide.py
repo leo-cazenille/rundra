@@ -14,7 +14,7 @@ GUIDE_TOPICS = {
     "setup": "Run doctor --agent codex --json first. If run_store_durability contains verification_argv, execute that argv as a separate command so command-local overlays are detected. Grant only reported paths and network access, select a persistent --data-dir when required, restart the sandbox when permissions change, then rerun doctor until ready is true.",
     "upgrade": "After installing a new Rundra release, run rundr version, review the release's Agent action required section in CHANGELOG.md or the PyPI changelog, refresh managed instructions with rundr agent-guide --write AGENTS.md, and rerun rundr doctor --agent codex --json before submitting work.",
     "launch": "Validate and plan before submit. Use explicit seeds, review task count/resources/concurrency, retain the returned Run ID and data directory, and submit only once.",
-    "campaigns": "Define static multi-target assignment in project-v7 campaigns or a standalone campaign file, never in targets.yaml. Plan the aggregate, retain the campaign ID and child Run IDs, use launch-name/task_NNNNNN selectors, and resume an interrupted campaign instead of duplicating it. Unknown outcomes are resolved only through the reported child Run ID.",
+    "campaigns": "Define explicit assignment in project-v7 campaigns or a standalone campaign file. For one-shot automatic selection, use --placement auto or a project-v8 placement policy, review every accepted/rejected target and the observation timestamp, then retain the campaign ID. Placement policy belongs in rundra.yaml, never targets.yaml. Resume the frozen campaign instead of placing again.",
     "large-runs": "Use worker-pool execution only when plan.target.scheduler.capabilities.compact_worker_pool is true. Runs with at least 1,000 Tasks automatically use compact durable Task state; inspect individuals with paginated tasks JSON, use bounded wait calls without progress, retain archive retrieval, and pass an exact confirm-tasks value after plan review. OpenPBS worker targets require requeue_limit 0 because scheduler rerun recovery is not supported.",
     "htcondor": "Use targets version 9 and require the operator to confirm shared_workspace: true only when the access point and execute nodes see the workspace at the same absolute path. HTCondor supports detached Task clusters and arrays, but not Rundra compact workers, preparation dependencies, file transfer, or scheduler rerun recovery. Inspect plan.target.scheduler.capabilities instead of inferring support from the backend name.",
     "lifecycle": "Use submit, await for one or several long Runs, status/tasks, fetch, then purge. Await emits one final compact result and supports all/any aggregate conditions, avoiding model-driven polling. Dependency-pending workers remain queued before journals exist; Rundra retries bounded transient journal reads, merges identical atomic fragments, and rejects malformed or contradictory outcomes immediately. ETA is omitted until at least 20 Tasks, 10% completion, and 60 seconds of evidence. Agents should use explicit Run IDs rather than --last.",
@@ -122,6 +122,11 @@ GUIDE = f"""{START_MARKER}
   file, retain the `campaign_*` ID and child Run IDs, and use
   `launch-name/task_NNNNNN` selectors. Resume an interrupted campaign; resolve
   an unknown submission only through the reported child Run ID.
+- Automatic placement is one-shot campaign planning, not a composite target or
+  broker. Use `--placement auto` or a project-v8 policy, review the live
+  accepted/rejected target observations and seed split, and keep the resulting
+  `campaign_*` ID. `resume` reuses the frozen explicit campaign and must not be
+  replaced by a new placement request after partial submission.
 - Use paginated `rundr list --json` Run summaries for discovery. Use `status
   --summary --json` and `inspect --summary --json` for bounded diagnostics,
   then page detail with `tasks RUN_ID --json` and `artifacts RUN_ID --json`.
