@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+
+import pytest
 
 from rundra.cli.campaign_operations import (
     CampaignChildRecovery,
@@ -11,6 +14,7 @@ from rundra.cli.campaign_operations import (
     campaign_status_operation,
     campaign_submit_operation,
 )
+from rundra.cli.main import main
 from rundra.domain.campaigns import (
     CampaignFailurePolicy,
     CampaignId,
@@ -393,3 +397,38 @@ def test_campaign_status_reports_unknown_without_querying_missing_child_run(
     assert status.value.task_counts == {"unknown": 1}
     assert inspected.ok and inspected.value is not None
     assert inspected.value.record.id == campaign_id
+
+
+def test_cli_plan_renders_named_campaign(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    experiment = _write_inputs(
+        tmp_path,
+        campaigns="""\
+  split:
+    launches:
+      - {name: first, seeds: '0:1'}
+      - {name: second, seeds: '2:3'}
+""",
+    )
+
+    exit_code = main(
+        (
+            "plan",
+            str(experiment),
+            "--campaign",
+            "split",
+            "--targets-file",
+            str(tmp_path / "targets.yaml"),
+            "--json",
+        )
+    )
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    document = json.loads(output)
+    assert document["campaign"]["total_tasks"] == 4
+    assert [item["name"] for item in document["campaign"]["launches"]] == [
+        "first",
+        "second",
+    ]

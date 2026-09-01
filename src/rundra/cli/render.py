@@ -8,6 +8,24 @@ from hashlib import sha256
 from typing import Any
 
 from rundra.cli.agent_guide import AgentGuideValue
+from rundra.cli.campaign_operations import (
+    CampaignAndRunListValue,
+    CampaignArtifactsValue,
+    CampaignCancelValue,
+    CampaignDoctorValue,
+    CampaignFetchValue,
+    CampaignInspectValue,
+    CampaignListValue,
+    CampaignLogsValue,
+    CampaignPlanValue,
+    CampaignPurgeValue,
+    CampaignRunValue,
+    CampaignStatusValue,
+    CampaignSubmitValue,
+    CampaignTasksValue,
+    CampaignValidationValue,
+    CampaignWaitValue,
+)
 from rundra.cli.capability_doctor import DoctorValue
 from rundra.cli.operations import (
     ArtifactsValue,
@@ -42,6 +60,7 @@ from rundra.domain.records import RunRecord
 from rundra.domain.states import ExecutionState, RetrievalState
 from rundra.orchestration.models import ExecutionPlan, ExecutionUnit
 from rundra.persistence import receipt_document, record_to_dict
+from rundra.persistence.campaign_store import campaign_record_to_dict
 from rundra.results import OperationResult
 from rundra.scheduler_registry import scheduler_capabilities_document
 
@@ -72,7 +91,152 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
             "details": dict(result.error.details),
         }
         return document
-    if isinstance(value, ValidationValue):
+    if isinstance(value, CampaignValidationValue):
+        document["campaign"] = {
+            "name": value.definition.name,
+            "schema_version": value.definition.version,
+            "source": str(value.definition.source),
+            "experiment": str(value.experiment.source),
+            "launches": [item.name for item in value.definition.launches],
+        }
+    elif isinstance(value, CampaignPlanValue):
+        document["campaign"] = _campaign_plan_document(value)
+    elif isinstance(value, CampaignDoctorValue):
+        document["campaign_doctor"] = {
+            "name": value.plan.name,
+            "ready": value.ready,
+            "complete": value.complete,
+            "launches": [
+                {
+                    "name": item.name,
+                    "target": (
+                        None if item.doctor.target is None else item.doctor.target.name
+                    ),
+                    "ready": item.doctor.ready,
+                    "complete": item.doctor.complete,
+                    "connected": item.doctor.connected,
+                    "checks": [
+                        {
+                            "name": check.name,
+                            "status": check.status,
+                            "message": check.message,
+                        }
+                        for check in item.doctor.checks
+                    ],
+                }
+                for item in value.launches
+            ],
+        }
+    elif isinstance(value, CampaignRunValue):
+        document["campaign_run"] = {
+            "campaign_id": str(value.submission.campaign_id),
+            "state": value.wait.status.state,
+            "timed_out": value.wait.timed_out,
+            "fetch": _campaign_fetch_document(value.fetch),
+        }
+    elif isinstance(value, CampaignSubmitValue):
+        document["campaign"] = campaign_record_to_dict(value.record)
+    elif isinstance(value, CampaignStatusValue):
+        document["campaign_status"] = _campaign_status_document(value)
+    elif isinstance(value, CampaignWaitValue):
+        document["campaign_wait"] = {
+            "campaign_id": str(value.status.record.id),
+            "state": value.status.state,
+            "terminal": value.status.terminal,
+            "timed_out": value.timed_out,
+            "elapsed_seconds": value.elapsed_seconds,
+            "status": _campaign_status_document(value.status),
+        }
+    elif isinstance(value, CampaignFetchValue):
+        document["campaign_fetch"] = _campaign_fetch_document(value)
+    elif isinstance(value, CampaignCancelValue):
+        document["campaign_cancel"] = {
+            "campaign_id": str(value.record.id),
+            "cancelled_run_ids": [str(item) for item in value.cancelled_run_ids],
+            "record": campaign_record_to_dict(value.record),
+        }
+    elif isinstance(value, CampaignInspectValue):
+        document["campaign_record"] = campaign_record_to_dict(value.record)
+    elif isinstance(value, CampaignTasksValue):
+        document["campaign_tasks"] = {
+            "campaign_id": str(value.campaign_id),
+            "total": value.total,
+            "offset": value.offset,
+            "limit": value.limit,
+            "returned": len(value.tasks),
+            "items": [
+                _campaign_task_document(
+                    item.selector, item.launch, item.run_id, item.value
+                )
+                for item in value.tasks
+            ],
+        }
+    elif isinstance(value, CampaignArtifactsValue):
+        document["campaign_artifacts"] = {
+            "campaign_id": str(value.campaign_id),
+            "total": value.total,
+            "offset": value.offset,
+            "limit": value.limit,
+            "returned": len(value.artifacts),
+            "items": [
+                {
+                    "launch": item.launch,
+                    "run_id": str(item.run_id),
+                    "artifact": _artifact_document(item.artifact),
+                }
+                for item in value.artifacts
+            ],
+        }
+    elif isinstance(value, CampaignLogsValue):
+        logs = value.value
+        document["campaign_logs"] = {
+            "campaign_id": str(value.campaign_id),
+            "launch": value.launch,
+            "run_id": str(logs.run_id),
+            "kind": "preparation" if isinstance(logs, PreparationLogsValue) else "task",
+            "scheduler_id": (
+                logs.scheduler_id if isinstance(logs, PreparationLogsValue) else None
+            ),
+            "task_id": str(logs.task_id) if isinstance(logs, LogsValue) else None,
+            "stdout": logs.stdout,
+            "stderr": logs.stderr,
+            "stdout_path": str(logs.stdout_path),
+            "stderr_path": str(logs.stderr_path),
+        }
+    elif isinstance(value, CampaignPurgeValue):
+        document["campaign_purge"] = {
+            "campaign_id": str(value.record.id),
+            "dry_run": value.dry_run,
+            "deleted": value.deleted,
+            "children": [
+                {
+                    "launch": name,
+                    "run_id": str(child.run_id),
+                    "scope": child.scope.value,
+                    "outcome": child.result.outcome.value,
+                    "path": str(child.result.path),
+                }
+                for name, child in value.children
+            ],
+        }
+    elif isinstance(value, CampaignListValue):
+        document["campaigns"] = [
+            campaign_record_to_dict(item) for item in value.campaigns
+        ]
+        document["page"] = {
+            "offset": value.offset,
+            "limit": value.limit,
+            "returned": len(value.campaigns),
+            "total": value.total,
+        }
+    elif isinstance(value, CampaignAndRunListValue):
+        if not isinstance(value.runs, ListRunsValue):
+            raise TypeError("Combined list has invalid Run values")
+        document["runs"] = [_status_document(item) for item in value.runs.runs]
+        document["campaigns"] = [
+            campaign_record_to_dict(item) for item in value.campaigns.campaigns
+        ]
+    elif isinstance(value, ValidationValue):
         document["experiment"] = {
             "name": value.experiment.name,
             "schema_version": value.experiment.version,
@@ -342,6 +506,138 @@ def render_human(result: OperationResult[Any]) -> str:
         hint = _error_hint(result.error.code, result.error.details)
         return rendered if hint is None else f"{rendered}\nNext: {hint}"
     value = result.value
+    if isinstance(value, CampaignValidationValue):
+        return (
+            f"Valid campaign: {value.definition.name} "
+            f"({len(value.definition.launches)} launches, "
+            f"experiment {value.experiment.experiment.name})"
+        )
+    if isinstance(value, CampaignPlanValue):
+        lines = [
+            f"Campaign plan: {value.name}",
+            f"Launches: {len(value.launches)}",
+            f"Tasks: {value.total_tasks}",
+            f"Concurrent capacity: {value.total_concurrent_task_capacity}",
+            f"On submit failure: {value.on_submit_failure.value}",
+        ]
+        lines.extend(
+            f"  {item.name}: target={item.target} tasks={item.task_count} "
+            f"capacity={item.concurrent_task_capacity} destination={item.destination}"
+            for item in value.launches
+        )
+        lines.extend(f"WARNING: {warning}" for warning in value.warnings)
+        return "\n".join(lines)
+    if isinstance(value, CampaignDoctorValue):
+        lines = [
+            f"Doctor for campaign {value.plan.name}:",
+            f"Ready: {'yes' if value.ready else 'no'}",
+            f"Verification complete: {'yes' if value.complete else 'no'}",
+        ]
+        lines.extend(
+            f"  {item.name}: target="
+            f"{item.doctor.target.name if item.doctor.target else '-'} "
+            f"ready={'yes' if item.doctor.ready else 'no'}"
+            for item in value.launches
+        )
+        return "\n".join(lines)
+    if isinstance(value, CampaignRunValue):
+        return (
+            f"Campaign: {value.submission.campaign_id}\n"
+            f"State: {value.wait.status.state}\n"
+            f"Fetched launches: {len(value.fetch.launches)}"
+        )
+    if isinstance(value, CampaignSubmitValue):
+        lines = [
+            f"Campaign: {value.campaign_id}",
+            f"Name: {value.record.name}",
+            f"Launches: {len(value.record.launches)}",
+        ]
+        lines.extend(
+            f"  {item.name}: run={item.run_id} target={item.target} "
+            f"submission={item.submission_state.value}"
+            for item in value.record.launches
+        )
+        return "\n".join(lines)
+    if isinstance(value, CampaignStatusValue):
+        counts = ", ".join(
+            f"{name}={count}" for name, count in sorted(value.task_counts.items())
+        )
+        lines = [
+            f"Campaign: {value.record.id}",
+            f"State: {value.state}",
+            f"Tasks: {counts}",
+        ]
+        lines.extend(
+            f"  {item.name}: run={item.run_id} "
+            f"state={item.status.state.value if item.status else item.submission_state.value}"
+            for item in value.launches
+        )
+        return "\n".join(lines)
+    if isinstance(value, CampaignWaitValue):
+        return (
+            f"Campaign: {value.status.record.id}\n"
+            f"State: {value.status.state}\n"
+            f"Terminal: {'yes' if value.status.terminal else 'no'}\n"
+            f"Timed out: {'yes' if value.timed_out else 'no'}\n"
+            f"Waited: {value.elapsed_seconds:.1f}s"
+        )
+    if isinstance(value, CampaignFetchValue):
+        return (
+            f"Campaign: {value.record.id}\n"
+            f"Fetched launches: {len(value.launches)}\n"
+            f"Destination root: {value.destination or 'persisted per-launch destinations'}"
+        )
+    if isinstance(value, CampaignCancelValue):
+        return (
+            f"Campaign: {value.record.id}\n"
+            f"Cancelled Runs: {len(value.cancelled_run_ids)}"
+        )
+    if isinstance(value, CampaignInspectValue):
+        return (
+            f"Campaign: {value.record.id}\n"
+            f"Name: {value.record.name}\n"
+            f"Launches: {len(value.record.launches)}\n"
+            f"Policy: {value.record.on_submit_failure.value}"
+        )
+    if isinstance(value, CampaignTasksValue):
+        lines = [
+            f"Campaign: {value.campaign_id}",
+            f"Tasks: offset={value.offset} returned={len(value.tasks)} total={value.total}",
+        ]
+        lines.extend(f"  {item.selector}" for item in value.tasks)
+        return "\n".join(lines)
+    if isinstance(value, CampaignArtifactsValue):
+        return (
+            f"Campaign: {value.campaign_id}\n"
+            f"Artifacts: offset={value.offset} returned={len(value.artifacts)} "
+            f"total={value.total}"
+        )
+    if isinstance(value, CampaignLogsValue):
+        logs = value.value
+        return (
+            f"Campaign: {value.campaign_id}\nLaunch: {value.launch}\n"
+            f"--- stdout ---\n{logs.stdout}"
+            f"--- stderr ---\n{logs.stderr}"
+        ).rstrip()
+    if isinstance(value, CampaignPurgeValue):
+        return (
+            f"Campaign: {value.record.id}\n"
+            f"Dry run: {'yes' if value.dry_run else 'no'}\n"
+            f"Deleted: {'yes' if value.deleted else 'no'}\n"
+            f"Child purges: {len(value.children)}"
+        )
+    if isinstance(value, CampaignListValue):
+        lines = [
+            f"Campaigns: offset={value.offset} returned={len(value.campaigns)} total={value.total}"
+        ]
+        lines.extend(f"  {item.id}: {item.name}" for item in value.campaigns)
+        return "\n".join(lines)
+    if isinstance(value, CampaignAndRunListValue):
+        if not isinstance(value.runs, ListRunsValue):
+            raise TypeError("Combined list has invalid Run values")
+        return (
+            f"Runs: {len(value.runs.runs)}\nCampaigns: {len(value.campaigns.campaigns)}"
+        )
     if isinstance(value, ValidationValue):
         rendered = (
             f"Valid experiment: {value.experiment.name} "
@@ -938,6 +1234,28 @@ def _preparation_document(plan: PreparationPlan) -> dict[str, Any]:
 
 
 def _result_format_version(value: object) -> int:
+    if isinstance(
+        value,
+        (
+            CampaignValidationValue,
+            CampaignPlanValue,
+            CampaignDoctorValue,
+            CampaignRunValue,
+            CampaignSubmitValue,
+            CampaignStatusValue,
+            CampaignWaitValue,
+            CampaignFetchValue,
+            CampaignCancelValue,
+            CampaignInspectValue,
+            CampaignTasksValue,
+            CampaignArtifactsValue,
+            CampaignLogsValue,
+            CampaignPurgeValue,
+            CampaignListValue,
+            CampaignAndRunListValue,
+        ),
+    ):
+        return value.format_version
     if isinstance(value, PlanValue):
         return value.format_version
     if isinstance(value, RunValue):
@@ -981,6 +1299,105 @@ def _result_format_version(value: object) -> int:
     ):
         return 2
     return _FORMAT_VERSION
+
+
+def _campaign_plan_document(value: CampaignPlanValue) -> dict[str, Any]:
+    return {
+        "name": value.name,
+        "source": str(value.definition.source),
+        "experiment": str(value.experiment_source),
+        "on_submit_failure": value.on_submit_failure.value,
+        "allow_duplicate_tasks": value.definition.allow_duplicate_tasks,
+        "total_tasks": value.total_tasks,
+        "total_concurrent_task_capacity": value.total_concurrent_task_capacity,
+        "warnings": list(value.warnings),
+        "launches": [
+            {
+                "name": item.name,
+                "target": item.target,
+                "destination": str(item.destination),
+                "task_count": item.task_count,
+                "concurrent_task_capacity": item.concurrent_task_capacity,
+                "plan": _plan_document(item.plan.plan),
+                "source_snapshot": (
+                    None
+                    if item.plan.source_snapshot is None
+                    else _source_snapshot_document(item.plan.source_snapshot)
+                ),
+                "launch": (
+                    None
+                    if item.plan.launch is None
+                    else _launch_document(item.plan.launch)
+                ),
+            }
+            for item in value.launches
+        ],
+    }
+
+
+def _campaign_status_document(value: CampaignStatusValue) -> dict[str, Any]:
+    return {
+        "campaign_id": str(value.record.id),
+        "name": value.record.name,
+        "state": value.state,
+        "terminal": value.terminal,
+        "task_counts": value.task_counts,
+        "launches": [
+            {
+                "name": item.name,
+                "run_id": str(item.run_id),
+                "submission_state": item.submission_state.value,
+                "status": (
+                    None if item.status is None else _status_document(item.status)
+                ),
+            }
+            for item in value.launches
+        ],
+    }
+
+
+def _campaign_fetch_document(value: CampaignFetchValue) -> dict[str, Any]:
+    launches = []
+    for item in value.launches:
+        fetch = item.value
+        if not isinstance(fetch, FetchValue):
+            raise TypeError("Campaign fetch launch has an invalid value")
+        launches.append(
+            {
+                "name": item.name,
+                "run_id": str(fetch.run_id),
+                "destination": str(fetch.destination),
+                "retrieval_state": fetch.retrieval_state.value,
+                "artifact_total": fetch.artifact_total,
+                "artifacts_included": fetch.artifacts_included,
+                "artifacts": [_artifact_document(value) for value in fetch.artifacts],
+            }
+        )
+    return {
+        "campaign_id": str(value.record.id),
+        "destination": None if value.destination is None else str(value.destination),
+        "launches": launches,
+    }
+
+
+def _campaign_task_document(
+    selector: str, launch: str, run_id: object, value: object
+) -> dict[str, Any]:
+    task: Any = value
+    return {
+        "selector": selector,
+        "launch": launch,
+        "run_id": str(run_id),
+        "task_id": str(task.coordinate.task_id),
+        "ordinal": task.coordinate.ordinal,
+        "seed": task.coordinate.seed,
+        "state": task.execution_state.value,
+        "retrieval_state": task.retrieval_state.value,
+        "scheduler_id": task.scheduler_id,
+        "native_state": task.native_state,
+        "exit_code": task.exit_code,
+        "attempt": task.attempt,
+    }
 
 
 def _error_hint(code: str, details: Mapping[str, object]) -> str | None:

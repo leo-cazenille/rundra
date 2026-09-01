@@ -12,6 +12,26 @@ from rundra.cli.agent_guide import (
     AgentGuideValue,
     agent_guide_operation,
 )
+from rundra.cli.campaign_operations import (
+    CampaignAndRunListValue,
+    CampaignPlanValue,
+    campaign_artifacts_operation,
+    campaign_cancel_operation,
+    campaign_doctor_operation,
+    campaign_fetch_operation,
+    campaign_inspect_operation,
+    campaign_list_operation,
+    campaign_logs_operation,
+    campaign_plan_operation,
+    campaign_purge_operation,
+    campaign_resume_operation,
+    campaign_run_operation,
+    campaign_status_operation,
+    campaign_submit_operation,
+    campaign_tasks_operation,
+    campaign_validate_operation,
+    campaign_wait_operation,
+)
 from rundra.cli.capability_doctor import DoctorValue, doctor_operation
 from rundra.cli.notification import write_await_notification, write_wait_notification
 from rundra.cli.operations import (
@@ -46,7 +66,9 @@ from rundra.cli.progress import (
     create_progress_reporter,
 )
 from rundra.cli.render import render_human, render_json
+from rundra.config.campaigns import is_campaign_source
 from rundra.config.targets import builtin_targets_source
+from rundra.domain.campaigns import CampaignId, CampaignRecord, CampaignSubmissionState
 from rundra.persistence import (
     JsonRunStore,
     PurgeReceiptStore,
@@ -113,6 +135,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     validate = subparsers.add_parser("validate", help="validate an experiment")
     validate.add_argument("experiment", type=Path)
+    validate.add_argument("--campaign")
+    validate.add_argument("--project-file", type=Path)
     _add_json_option(validate)
 
     plan = subparsers.add_parser("plan", help="inspect a plan without executing it")
@@ -126,6 +150,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--targets-file", type=Path)
     plan.add_argument("--project-file", type=Path)
     plan.add_argument("--profile")
+    plan.add_argument("--campaign")
     plan.add_argument("--source-root", type=Path)
     plan.add_argument("--fetch-mode", choices=("auto", "copy", "reference", "archive"))
     _add_worker_scale_arguments(plan)
@@ -158,6 +183,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--data-dir", type=Path)
     doctor.add_argument("--project-file", type=Path)
     doctor.add_argument("--profile")
+    doctor.add_argument("--campaign")
     doctor.add_argument("--connect", action="store_true")
     doctor.add_argument("--scheduler-probe", action="store_true")
     doctor.add_argument("--scheduler-inventory", action="store_true")
@@ -190,6 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--destination", type=Path)
     run.add_argument("--project-file", type=Path)
     run.add_argument("--profile")
+    run.add_argument("--campaign")
     run.add_argument("--fetch-mode", choices=("auto", "copy", "reference", "archive"))
     run.add_argument("--confirm-tasks", type=int)
     _add_worker_scale_arguments(run)
@@ -206,6 +233,7 @@ def build_parser() -> argparse.ArgumentParser:
     submit.add_argument("--destination", type=Path)
     submit.add_argument("--project-file", type=Path)
     submit.add_argument("--profile")
+    submit.add_argument("--campaign")
     submit.add_argument(
         "--fetch-mode", choices=("auto", "copy", "reference", "archive")
     )
@@ -220,6 +248,10 @@ def build_parser() -> argparse.ArgumentParser:
         "resume", help="recover an interrupted scheduler submission"
     )
     _add_run_selector(resume)
+    resume.add_argument("--targets-file", type=Path)
+    resume.add_argument("--project-file", type=Path)
+    resume.add_argument("--source-root", type=Path)
+    resume.add_argument("--confirm-tasks", type=int)
     _add_store_option(resume)
     _add_json_option(resume)
 
@@ -313,6 +345,7 @@ def build_parser() -> argparse.ArgumentParser:
     list_runs = subparsers.add_parser("list", help="list persisted Runs")
     list_runs.add_argument("--offset", type=int, default=0)
     list_runs.add_argument("--limit", type=int, default=100)
+    list_runs.add_argument("--kind", choices=("run", "campaign", "all"), default="run")
     list_runs.add_argument(
         "--include-tasks",
         action="store_true",
@@ -329,6 +362,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="TASK_ID_OR_INDEX",
         help="select one Task by stable ID or zero-based ordinal",
     )
+    logs.add_argument("--launch", help="select one campaign launch")
     log_selection.add_argument(
         "--preparation",
         action="store_true",
@@ -465,6 +499,106 @@ def _default_targets_file() -> Path:
 
 def _default_data_dir() -> Path:
     return Path("~/.local/share/rundra/runs").expanduser()
+
+
+def _campaign_requested(source: Path, campaign_name: str | None) -> bool:
+    return campaign_name is not None or is_campaign_source(source)
+
+
+def _is_campaign_id(value: str) -> bool:
+    try:
+        CampaignId(value)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _campaign_override_error(
+    arguments: argparse.Namespace,
+) -> OperationResult[Any] | None:
+    fields = {
+        "config": getattr(arguments, "config", None),
+        "seed": getattr(arguments, "seed", None),
+        "seeds": getattr(arguments, "seeds", None),
+        "random_seed": getattr(arguments, "random_seed", False),
+        "target": getattr(arguments, "target", None),
+        "profile": getattr(arguments, "profile", None),
+        "workers": getattr(arguments, "workers", None),
+        "task_slots_per_worker": getattr(arguments, "task_slots_per_worker", None),
+        "fetch_mode": getattr(arguments, "fetch_mode", None),
+    }
+    selected = tuple(
+        name for name, value in fields.items() if value not in (None, False)
+    )
+    if not selected:
+        return None
+    return OperationResult.failure(
+        arguments.command,
+        OperationError(
+            "CAMPAIGN_OVERRIDE_UNSUPPORTED",
+            "Campaign Tasks must be assigned in the campaign definition",
+            {"fields": selected},
+        ),
+    )
+
+
+def _campaign_plan_for_record(
+    record: CampaignRecord,
+    data_dir: Path,
+    *,
+    targets_file: Path | None,
+    project_file: Path | None,
+    source_root: Path | None,
+) -> OperationResult[CampaignPlanValue]:
+    source = Path(str(record.source))
+    if is_campaign_source(source):
+        return campaign_plan_operation(
+            source,
+            project_file=project_file,
+            targets_file=targets_file,
+            data_dir=data_dir,
+            source_root=source_root,
+        )
+    return campaign_plan_operation(
+        Path(str(record.experiment_source)),
+        campaign_name=record.name,
+        project_file=project_file or source,
+        targets_file=targets_file,
+        data_dir=data_dir,
+        source_root=source_root,
+    )
+
+
+def _expand_campaign_run_ids(
+    selectors: Sequence[str], data_dir: Path
+) -> OperationResult[tuple[str, ...]]:
+    expanded: list[str] = []
+    for selector in selectors:
+        if not _is_campaign_id(selector):
+            expanded.append(selector)
+            continue
+        inspected = campaign_inspect_operation(CampaignId(selector), data_dir)
+        if not inspected.ok:
+            assert inspected.error is not None
+            return OperationResult.failure("await", inspected.error)
+        assert inspected.value is not None
+        expanded.extend(
+            str(item.run_id)
+            for item in inspected.value.record.launches
+            if item.submission_state
+            not in {
+                CampaignSubmissionState.PENDING,
+                CampaignSubmissionState.NOT_ATTEMPTED,
+            }
+        )
+    if not expanded:
+        return OperationResult.failure(
+            "await",
+            OperationError(
+                "CAMPAIGN_HAS_NO_RUNS", "Selected campaigns have no submitted Runs"
+            ),
+        )
+    return OperationResult.success("await", tuple(expanded))
 
 
 def _add_store_option(
@@ -675,52 +809,98 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     result: OperationResult[Any]
     if arguments.command == "validate":
-        result = validate_operation(arguments.experiment)
-    elif arguments.command == "plan":
-        resolved_plan = resolve_plan_inputs_operation(
-            arguments.experiment,
-            config=arguments.config,
-            seed=arguments.seed,
-            seeds=arguments.seeds,
-            target=arguments.target,
-            targets_file=arguments.targets_file,
-            project_file=arguments.project_file,
-            profile=arguments.profile,
-            random_seed=arguments.random_seed,
-            source_root=arguments.source_root,
-            prepare_location=arguments.prepare_location,
-            rebuild=arguments.rebuild,
-            rebuild_image=arguments.rebuild_image,
-            offline=arguments.offline,
-            workers=arguments.workers,
-            task_slots_per_worker=arguments.task_slots_per_worker,
-            fetch_mode=arguments.fetch_mode,
-        )
-        if not resolved_plan.ok:
-            result = resolved_plan
-        else:
-            assert resolved_plan.value is not None
-            plan_inputs = resolved_plan.value
-            result = plan_operation(
+        result = (
+            campaign_validate_operation(
                 arguments.experiment,
-                plan_inputs.config,
-                plan_inputs.targets_file,
-                plan_inputs.target,
-                seed=plan_inputs.seed,
-                seeds=plan_inputs.seeds,
-                launch=plan_inputs.launch,
-                preparation=plan_inputs.preparation_plan,
-                sweep=plan_inputs.sweep,
+                campaign_name=arguments.campaign,
+                project_file=arguments.project_file,
+            )
+            if _campaign_requested(arguments.experiment, arguments.campaign)
+            else validate_operation(arguments.experiment)
+        )
+    elif arguments.command == "plan":
+        if _campaign_requested(arguments.experiment, arguments.campaign):
+            override = _campaign_override_error(arguments)
+            result = override or campaign_plan_operation(
+                arguments.experiment,
+                campaign_name=arguments.campaign,
+                project_file=arguments.project_file,
+                targets_file=arguments.targets_file,
+                source_root=arguments.source_root,
+                prepare_location=arguments.prepare_location,
+                rebuild=arguments.rebuild,
+                rebuild_image=arguments.rebuild_image,
+                offline=arguments.offline,
                 execution_strategy=arguments.execution_strategy,
                 retrieval_policy=arguments.retrieval,
-                workers=plan_inputs.workers,
-                task_slots_per_worker=plan_inputs.task_slots_per_worker,
-                source_root=plan_inputs.source_root,
             )
+        else:
+            resolved_plan = resolve_plan_inputs_operation(
+                arguments.experiment,
+                config=arguments.config,
+                seed=arguments.seed,
+                seeds=arguments.seeds,
+                target=arguments.target,
+                targets_file=arguments.targets_file,
+                project_file=arguments.project_file,
+                profile=arguments.profile,
+                random_seed=arguments.random_seed,
+                source_root=arguments.source_root,
+                prepare_location=arguments.prepare_location,
+                rebuild=arguments.rebuild,
+                rebuild_image=arguments.rebuild_image,
+                offline=arguments.offline,
+                workers=arguments.workers,
+                task_slots_per_worker=arguments.task_slots_per_worker,
+                fetch_mode=arguments.fetch_mode,
+            )
+            if not resolved_plan.ok:
+                result = resolved_plan
+            else:
+                assert resolved_plan.value is not None
+                plan_inputs = resolved_plan.value
+                result = plan_operation(
+                    arguments.experiment,
+                    plan_inputs.config,
+                    plan_inputs.targets_file,
+                    plan_inputs.target,
+                    seed=plan_inputs.seed,
+                    seeds=plan_inputs.seeds,
+                    launch=plan_inputs.launch,
+                    preparation=plan_inputs.preparation_plan,
+                    sweep=plan_inputs.sweep,
+                    execution_strategy=arguments.execution_strategy,
+                    retrieval_policy=arguments.retrieval,
+                    workers=plan_inputs.workers,
+                    task_slots_per_worker=plan_inputs.task_slots_per_worker,
+                    source_root=plan_inputs.source_root,
+                )
     elif arguments.command == "targets":
         result = targets_operation(arguments.targets_file)
     elif arguments.command == "doctor":
-        if arguments.experiment is None:
+        if arguments.experiment is not None and _campaign_requested(
+            arguments.experiment, arguments.campaign
+        ):
+            override = _campaign_override_error(arguments)
+            result = override or campaign_doctor_operation(
+                arguments.experiment,
+                campaign_name=arguments.campaign,
+                project_file=arguments.project_file,
+                targets_file=arguments.targets_file,
+                data_dir=arguments.data_dir,
+                destination=arguments.destination,
+                source_root=arguments.source_root,
+                prepare_location=arguments.prepare_location,
+                offline=arguments.offline,
+                connect=arguments.connect,
+                scheduler_probe=arguments.scheduler_probe,
+                scheduler_inventory=arguments.scheduler_inventory,
+                probe_timeout=arguments.probe_timeout,
+                write_probe=not arguments.no_write_probe,
+                local_target_access=arguments.local_target_access,
+                agent=arguments.agent,
+            )
+        elif arguments.experiment is None:
             result = doctor_operation(
                 arguments.targets_file or _default_targets_file(),
                 arguments.target,
@@ -784,207 +964,379 @@ def main(argv: Sequence[str] | None = None) -> int:
                     verify_run_store=arguments.verify_run_store,
                 )
     elif arguments.command == "run":
-        resolved = resolve_run_inputs_operation(
-            arguments.experiment,
-            config=arguments.config,
-            seed=arguments.seed,
-            seeds=arguments.seeds,
-            target=arguments.target,
-            targets_file=arguments.targets_file,
-            source_root=arguments.source_root,
-            destination=arguments.destination,
-            data_dir=arguments.data_dir,
-            project_file=arguments.project_file,
-            profile=arguments.profile,
-            random_seed=arguments.random_seed,
-            prepare_location=arguments.prepare_location,
-            rebuild=arguments.rebuild,
-            rebuild_image=arguments.rebuild_image,
-            offline=arguments.offline,
-            workers=arguments.workers,
-            task_slots_per_worker=arguments.task_slots_per_worker,
-            fetch_mode=arguments.fetch_mode,
-        )
-        if not resolved.ok:
-            result = resolved
-        else:
-            assert resolved.value is not None
-            run_inputs = resolved.value
-            result = run_operation(
+        if _campaign_requested(arguments.experiment, arguments.campaign):
+            override = _campaign_override_error(arguments)
+            planned = override or campaign_plan_operation(
                 arguments.experiment,
-                run_inputs.config,
-                run_inputs.targets_file,
-                run_inputs.target,
-                run_inputs.source_root,
-                run_inputs.destination,
-                JsonRunStore(run_inputs.data_dir),
-                seed=run_inputs.seed,
-                seeds=run_inputs.seeds if run_inputs.seed is None else None,
-                launch=run_inputs.launch,
-                preparation=run_inputs.preparation_plan,
-                preparation_storage=run_inputs.preparation_storage,
-                progress=progress,
-                sweep=run_inputs.sweep,
-                confirm_tasks=arguments.confirm_tasks,
-                workers=run_inputs.workers,
-                task_slots_per_worker=run_inputs.task_slots_per_worker,
-                task_store=SqliteTaskStore(run_inputs.data_dir),
+                campaign_name=arguments.campaign,
+                project_file=arguments.project_file,
+                targets_file=arguments.targets_file,
+                data_dir=arguments.data_dir,
+                destination=arguments.destination,
+                source_root=arguments.source_root,
+                prepare_location=arguments.prepare_location,
+                rebuild=arguments.rebuild,
+                rebuild_image=arguments.rebuild_image,
+                offline=arguments.offline,
             )
+            if not planned.ok:
+                result = planned
+            else:
+                assert planned.value is not None
+                result = campaign_run_operation(
+                    planned.value, confirm_tasks=arguments.confirm_tasks
+                )
+        else:
+            resolved = resolve_run_inputs_operation(
+                arguments.experiment,
+                config=arguments.config,
+                seed=arguments.seed,
+                seeds=arguments.seeds,
+                target=arguments.target,
+                targets_file=arguments.targets_file,
+                source_root=arguments.source_root,
+                destination=arguments.destination,
+                data_dir=arguments.data_dir,
+                project_file=arguments.project_file,
+                profile=arguments.profile,
+                random_seed=arguments.random_seed,
+                prepare_location=arguments.prepare_location,
+                rebuild=arguments.rebuild,
+                rebuild_image=arguments.rebuild_image,
+                offline=arguments.offline,
+                workers=arguments.workers,
+                task_slots_per_worker=arguments.task_slots_per_worker,
+                fetch_mode=arguments.fetch_mode,
+            )
+            if not resolved.ok:
+                result = resolved
+            else:
+                assert resolved.value is not None
+                run_inputs = resolved.value
+                result = run_operation(
+                    arguments.experiment,
+                    run_inputs.config,
+                    run_inputs.targets_file,
+                    run_inputs.target,
+                    run_inputs.source_root,
+                    run_inputs.destination,
+                    JsonRunStore(run_inputs.data_dir),
+                    seed=run_inputs.seed,
+                    seeds=run_inputs.seeds if run_inputs.seed is None else None,
+                    launch=run_inputs.launch,
+                    preparation=run_inputs.preparation_plan,
+                    preparation_storage=run_inputs.preparation_storage,
+                    progress=progress,
+                    sweep=run_inputs.sweep,
+                    confirm_tasks=arguments.confirm_tasks,
+                    workers=run_inputs.workers,
+                    task_slots_per_worker=run_inputs.task_slots_per_worker,
+                    task_store=SqliteTaskStore(run_inputs.data_dir),
+                )
     elif arguments.command == "submit":
-        resolved = resolve_run_inputs_operation(
-            arguments.experiment,
-            config=arguments.config,
-            seed=arguments.seed,
-            seeds=arguments.seeds,
-            target=arguments.target,
-            targets_file=arguments.targets_file,
-            source_root=arguments.source_root,
-            destination=arguments.destination,
-            data_dir=arguments.data_dir,
-            project_file=arguments.project_file,
-            profile=arguments.profile,
-            random_seed=arguments.random_seed,
-            operation="submit",
-            prepare_location=arguments.prepare_location,
-            rebuild=arguments.rebuild,
-            rebuild_image=arguments.rebuild_image,
-            offline=arguments.offline,
-            workers=arguments.workers,
-            task_slots_per_worker=arguments.task_slots_per_worker,
-            fetch_mode=arguments.fetch_mode,
-        )
-        if not resolved.ok:
-            result = resolved
-        else:
-            assert resolved.value is not None
-            submit_inputs = resolved.value
-            result = submit_operation(
+        if _campaign_requested(arguments.experiment, arguments.campaign):
+            override = _campaign_override_error(arguments)
+            planned = override or campaign_plan_operation(
                 arguments.experiment,
-                submit_inputs.config,
-                submit_inputs.targets_file,
-                submit_inputs.target,
-                submit_inputs.source_root,
-                submit_inputs.destination,
-                JsonRunStore(submit_inputs.data_dir),
-                seed=submit_inputs.seed,
-                seeds=submit_inputs.seeds if submit_inputs.seed is None else None,
-                launch=submit_inputs.launch,
-                preparation=submit_inputs.preparation_plan,
-                preparation_storage=submit_inputs.preparation_storage,
-                progress=progress,
-                sweep=submit_inputs.sweep,
-                confirm_tasks=arguments.confirm_tasks,
-                workers=submit_inputs.workers,
-                task_slots_per_worker=submit_inputs.task_slots_per_worker,
-                submission_receipts=SubmissionReceiptStore(submit_inputs.data_dir),
-                task_store=SqliteTaskStore(submit_inputs.data_dir),
+                campaign_name=arguments.campaign,
+                project_file=arguments.project_file,
+                targets_file=arguments.targets_file,
+                data_dir=arguments.data_dir,
+                destination=arguments.destination,
+                source_root=arguments.source_root,
+                prepare_location=arguments.prepare_location,
+                rebuild=arguments.rebuild,
+                rebuild_image=arguments.rebuild_image,
+                offline=arguments.offline,
             )
+            if not planned.ok:
+                result = planned
+            else:
+                assert planned.value is not None
+                result = campaign_submit_operation(
+                    planned.value, confirm_tasks=arguments.confirm_tasks
+                )
+        else:
+            resolved = resolve_run_inputs_operation(
+                arguments.experiment,
+                config=arguments.config,
+                seed=arguments.seed,
+                seeds=arguments.seeds,
+                target=arguments.target,
+                targets_file=arguments.targets_file,
+                source_root=arguments.source_root,
+                destination=arguments.destination,
+                data_dir=arguments.data_dir,
+                project_file=arguments.project_file,
+                profile=arguments.profile,
+                random_seed=arguments.random_seed,
+                operation="submit",
+                prepare_location=arguments.prepare_location,
+                rebuild=arguments.rebuild,
+                rebuild_image=arguments.rebuild_image,
+                offline=arguments.offline,
+                workers=arguments.workers,
+                task_slots_per_worker=arguments.task_slots_per_worker,
+                fetch_mode=arguments.fetch_mode,
+            )
+            if not resolved.ok:
+                result = resolved
+            else:
+                assert resolved.value is not None
+                submit_inputs = resolved.value
+                result = submit_operation(
+                    arguments.experiment,
+                    submit_inputs.config,
+                    submit_inputs.targets_file,
+                    submit_inputs.target,
+                    submit_inputs.source_root,
+                    submit_inputs.destination,
+                    JsonRunStore(submit_inputs.data_dir),
+                    seed=submit_inputs.seed,
+                    seeds=submit_inputs.seeds if submit_inputs.seed is None else None,
+                    launch=submit_inputs.launch,
+                    preparation=submit_inputs.preparation_plan,
+                    preparation_storage=submit_inputs.preparation_storage,
+                    progress=progress,
+                    sweep=submit_inputs.sweep,
+                    confirm_tasks=arguments.confirm_tasks,
+                    workers=submit_inputs.workers,
+                    task_slots_per_worker=submit_inputs.task_slots_per_worker,
+                    submission_receipts=SubmissionReceiptStore(submit_inputs.data_dir),
+                    task_store=SqliteTaskStore(submit_inputs.data_dir),
+                )
     elif arguments.command == "resume":
-        result = resume_operation(
-            arguments.run_id,
-            JsonRunStore(arguments.data_dir),
-            SubmissionReceiptStore(arguments.data_dir),
-        )
+        if _is_campaign_id(arguments.run_id):
+            campaign_id = CampaignId(arguments.run_id)
+            inspected = campaign_inspect_operation(campaign_id, arguments.data_dir)
+            if not inspected.ok:
+                result = inspected
+            else:
+                assert inspected.value is not None
+                planned = _campaign_plan_for_record(
+                    inspected.value.record,
+                    arguments.data_dir,
+                    targets_file=arguments.targets_file,
+                    project_file=arguments.project_file,
+                    source_root=arguments.source_root,
+                )
+                if not planned.ok:
+                    result = planned
+                else:
+                    assert planned.value is not None
+                    result = campaign_resume_operation(
+                        planned.value,
+                        campaign_id,
+                        confirm_tasks=arguments.confirm_tasks,
+                    )
+        else:
+            result = resume_operation(
+                arguments.run_id,
+                JsonRunStore(arguments.data_dir),
+                SubmissionReceiptStore(arguments.data_dir),
+            )
     elif arguments.command == "resolve-submission":
-        result = resolve_submission_operation(
-            arguments.run_id,
-            JsonRunStore(arguments.data_dir),
-            SubmissionReceiptStore(arguments.data_dir),
-            not_submitted=arguments.not_submitted,
-            confirmation=arguments.confirm,
-        )
+        if _is_campaign_id(arguments.run_id):
+            result = OperationResult.failure(
+                "resolve-submission",
+                OperationError(
+                    "CHILD_RUN_REQUIRED",
+                    "resolve-submission requires the uncertain child Run ID",
+                    {"campaign_id": arguments.run_id},
+                ),
+            )
+        else:
+            result = resolve_submission_operation(
+                arguments.run_id,
+                JsonRunStore(arguments.data_dir),
+                SubmissionReceiptStore(arguments.data_dir),
+                not_submitted=arguments.not_submitted,
+                confirmation=arguments.confirm,
+            )
     elif arguments.command == "wait":
-        result = wait_operation(
-            arguments.run_id,
-            JsonRunStore(arguments.data_dir),
-            timeout=arguments.timeout,
-            poll_interval=arguments.poll_interval,
-            query_failure_limit=arguments.query_failure_limit,
-            task_store=SqliteTaskStore(arguments.data_dir),
-            progress=progress,
-        )
+        if _is_campaign_id(arguments.run_id):
+            result = campaign_wait_operation(
+                CampaignId(arguments.run_id),
+                arguments.data_dir,
+                timeout=arguments.timeout,
+                poll_interval=arguments.poll_interval,
+            )
+        else:
+            result = wait_operation(
+                arguments.run_id,
+                JsonRunStore(arguments.data_dir),
+                timeout=arguments.timeout,
+                poll_interval=arguments.poll_interval,
+                query_failure_limit=arguments.query_failure_limit,
+                task_store=SqliteTaskStore(arguments.data_dir),
+                progress=progress,
+            )
     elif arguments.command == "await":
-        result = await_runs_operation(
-            arguments.run_ids,
-            JsonRunStore(arguments.data_dir),
-            until=arguments.until,
-            timeout=arguments.timeout,
-            poll_interval=arguments.poll_interval,
-            query_failure_limit=arguments.query_failure_limit,
-            fail_on_run_failure=arguments.fail_on_run_failure,
-            task_store=SqliteTaskStore(arguments.data_dir),
-        )
+        expanded = _expand_campaign_run_ids(arguments.run_ids, arguments.data_dir)
+        if not expanded.ok:
+            result = expanded
+        else:
+            assert expanded.value is not None
+            result = await_runs_operation(
+                expanded.value,
+                JsonRunStore(arguments.data_dir),
+                until=arguments.until,
+                timeout=arguments.timeout,
+                poll_interval=arguments.poll_interval,
+                query_failure_limit=arguments.query_failure_limit,
+                fail_on_run_failure=arguments.fail_on_run_failure,
+                task_store=SqliteTaskStore(arguments.data_dir),
+            )
     elif arguments.command == "status":
-        result = status_operation(
-            arguments.run_id,
-            JsonRunStore(arguments.data_dir),
-            task_store=SqliteTaskStore(arguments.data_dir),
-            summary=arguments.summary,
-        )
+        if _is_campaign_id(arguments.run_id):
+            result = campaign_status_operation(
+                CampaignId(arguments.run_id),
+                arguments.data_dir,
+                summary=arguments.summary,
+            )
+        else:
+            result = status_operation(
+                arguments.run_id,
+                JsonRunStore(arguments.data_dir),
+                task_store=SqliteTaskStore(arguments.data_dir),
+                summary=arguments.summary,
+            )
     elif arguments.command == "tasks":
-        result = tasks_operation(
-            arguments.run_id,
-            JsonRunStore(arguments.data_dir),
-            SqliteTaskStore(arguments.data_dir),
-            offset=arguments.offset,
-            limit=arguments.limit,
-        )
+        if _is_campaign_id(arguments.run_id):
+            result = campaign_tasks_operation(
+                CampaignId(arguments.run_id),
+                arguments.data_dir,
+                offset=arguments.offset,
+                limit=arguments.limit,
+            )
+        else:
+            result = tasks_operation(
+                arguments.run_id,
+                JsonRunStore(arguments.data_dir),
+                SqliteTaskStore(arguments.data_dir),
+                offset=arguments.offset,
+                limit=arguments.limit,
+            )
     elif arguments.command == "artifacts":
-        result = artifacts_operation(
-            arguments.run_id,
-            JsonRunStore(arguments.data_dir),
-            offset=arguments.offset,
-            limit=arguments.limit,
-        )
+        if _is_campaign_id(arguments.run_id):
+            result = campaign_artifacts_operation(
+                CampaignId(arguments.run_id),
+                arguments.data_dir,
+                offset=arguments.offset,
+                limit=arguments.limit,
+            )
+        else:
+            result = artifacts_operation(
+                arguments.run_id,
+                JsonRunStore(arguments.data_dir),
+                offset=arguments.offset,
+                limit=arguments.limit,
+            )
     elif arguments.command == "list":
-        result = list_runs_operation(
-            JsonRunStore(arguments.data_dir),
-            task_store=SqliteTaskStore(arguments.data_dir),
-            offset=arguments.offset,
-            limit=arguments.limit,
-            include_tasks=arguments.include_tasks,
+        campaign_list = campaign_list_operation(
+            arguments.data_dir, offset=arguments.offset, limit=arguments.limit
         )
+        if arguments.kind == "campaign":
+            result = campaign_list
+        else:
+            run_list = list_runs_operation(
+                JsonRunStore(arguments.data_dir),
+                task_store=SqliteTaskStore(arguments.data_dir),
+                offset=arguments.offset,
+                limit=arguments.limit,
+                include_tasks=arguments.include_tasks,
+            )
+            if arguments.kind == "run" or not run_list.ok:
+                result = run_list
+            elif not campaign_list.ok:
+                result = campaign_list
+            else:
+                assert run_list.value is not None
+                assert campaign_list.value is not None
+                result = OperationResult.success(
+                    "list",
+                    CampaignAndRunListValue(run_list.value, campaign_list.value),
+                )
     elif arguments.command == "logs":
-        result = logs_operation(
-            arguments.run_id,
-            JsonRunStore(arguments.data_dir),
-            task=arguments.task,
-            preparation=arguments.preparation,
-        )
+        if _is_campaign_id(arguments.run_id):
+            result = campaign_logs_operation(
+                CampaignId(arguments.run_id),
+                arguments.data_dir,
+                task=arguments.task,
+                preparation=arguments.preparation,
+                launch_name=arguments.launch,
+            )
+        else:
+            result = logs_operation(
+                arguments.run_id,
+                JsonRunStore(arguments.data_dir),
+                task=arguments.task,
+                preparation=arguments.preparation,
+            )
     elif arguments.command == "fetch":
-        result = fetch_operation(
-            arguments.run_id,
-            JsonRunStore(arguments.data_dir),
-            arguments.destination,
-            tasks=arguments.task,
-            mode=arguments.mode,
-            extract=arguments.extract,
-            progress=progress,
-            task_store=SqliteTaskStore(arguments.data_dir),
-            summary=arguments.summary,
-        )
+        if _is_campaign_id(arguments.run_id):
+            result = campaign_fetch_operation(
+                CampaignId(arguments.run_id),
+                arguments.data_dir,
+                arguments.destination,
+                tasks=arguments.task,
+                mode=arguments.mode,
+                extract=arguments.extract,
+                summary=arguments.summary,
+            )
+        else:
+            result = fetch_operation(
+                arguments.run_id,
+                JsonRunStore(arguments.data_dir),
+                arguments.destination,
+                tasks=arguments.task,
+                mode=arguments.mode,
+                extract=arguments.extract,
+                progress=progress,
+                task_store=SqliteTaskStore(arguments.data_dir),
+                summary=arguments.summary,
+            )
     elif arguments.command == "inspect":
-        result = inspect_operation(
-            arguments.run_id,
-            JsonRunStore(arguments.data_dir),
-            receipts=PurgeReceiptStore(arguments.data_dir),
-            summary=arguments.summary,
-        )
+        if _is_campaign_id(arguments.run_id):
+            result = campaign_inspect_operation(
+                CampaignId(arguments.run_id), arguments.data_dir
+            )
+        else:
+            result = inspect_operation(
+                arguments.run_id,
+                JsonRunStore(arguments.data_dir),
+                receipts=PurgeReceiptStore(arguments.data_dir),
+                summary=arguments.summary,
+            )
     elif arguments.command == "cancel":
-        result = cancel_operation(
-            arguments.run_id,
-            JsonRunStore(arguments.data_dir),
-            task_store=SqliteTaskStore(arguments.data_dir),
-        )
+        if _is_campaign_id(arguments.run_id):
+            result = campaign_cancel_operation(
+                CampaignId(arguments.run_id), arguments.data_dir
+            )
+        else:
+            result = cancel_operation(
+                arguments.run_id,
+                JsonRunStore(arguments.data_dir),
+                task_store=SqliteTaskStore(arguments.data_dir),
+            )
     elif arguments.command == "purge":
-        result = purge_operation(
-            arguments.run_id,
-            JsonRunStore(arguments.data_dir),
-            PurgeReceiptStore(arguments.data_dir),
-            workspace=arguments.workspace,
-            confirm=arguments.confirm,
-            dry_run=arguments.dry_run,
-        )
+        if _is_campaign_id(arguments.run_id):
+            result = campaign_purge_operation(
+                CampaignId(arguments.run_id),
+                arguments.data_dir,
+                workspace=arguments.workspace,
+                confirm=arguments.confirm,
+                dry_run=arguments.dry_run,
+            )
+        else:
+            result = purge_operation(
+                arguments.run_id,
+                JsonRunStore(arguments.data_dir),
+                PurgeReceiptStore(arguments.data_dir),
+                workspace=arguments.workspace,
+                confirm=arguments.confirm,
+                dry_run=arguments.dry_run,
+            )
     elif arguments.command == "agent-guide":
         result = agent_guide_operation(
             write=arguments.write,

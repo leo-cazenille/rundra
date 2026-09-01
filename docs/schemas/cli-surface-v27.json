@@ -1,0 +1,333 @@
+{
+  "format_version": 27,
+  "program": "rundr",
+  "global_options": [
+    "--json",
+    "--version"
+  ],
+  "commands": {
+    "validate": {
+      "positionals": [
+        "experiment"
+      ],
+      "options": [
+        "--campaign",
+        "--json",
+        "--project-file"
+      ]
+    },
+    "plan": {
+      "positionals": [
+        "experiment"
+      ],
+      "options": [
+        "--campaign",
+        "--config",
+        "--execution-strategy",
+        "--fetch-mode",
+        "--json",
+        "--offline",
+        "--prepare-location",
+        "--profile",
+        "--project-file",
+        "--random-seed",
+        "--rebuild",
+        "--rebuild-image",
+        "--retrieval",
+        "--seed",
+        "--seeds",
+        "--source-root",
+        "--target",
+        "--targets-file",
+        "--task-slots-per-worker",
+        "--workers"
+      ]
+    },
+    "targets": {
+      "positionals": [],
+      "options": [
+        "--json",
+        "--targets-file"
+      ]
+    },
+    "doctor": {
+      "positionals": [
+        "experiment"
+      ],
+      "options": [
+        "--agent",
+        "--campaign",
+        "--config",
+        "--connect",
+        "--data-dir",
+        "--destination",
+        "--json",
+        "--local-target-access",
+        "--no-write-probe",
+        "--offline",
+        "--prepare-location",
+        "--probe-timeout",
+        "--profile",
+        "--project-file",
+        "--scheduler-inventory",
+        "--scheduler-probe",
+        "--source-root",
+        "--target",
+        "--targets-file",
+        "--verify-run-store"
+      ]
+    },
+    "run": {
+      "positionals": [
+        "experiment"
+      ],
+      "options": [
+        "--campaign",
+        "--config",
+        "--confirm-tasks",
+        "--data-dir",
+        "--destination",
+        "--fetch-mode",
+        "--json",
+        "--offline",
+        "--prepare-location",
+        "--profile",
+        "--progress",
+        "--progress-interval",
+        "--project-file",
+        "--random-seed",
+        "--rebuild",
+        "--rebuild-image",
+        "--seed",
+        "--seeds",
+        "--source-root",
+        "--target",
+        "--targets-file",
+        "--task-slots-per-worker",
+        "--verbose",
+        "--workers"
+      ]
+    },
+    "submit": {
+      "positionals": [
+        "experiment"
+      ],
+      "options": [
+        "--campaign",
+        "--config",
+        "--confirm-tasks",
+        "--data-dir",
+        "--destination",
+        "--fetch-mode",
+        "--json",
+        "--offline",
+        "--prepare-location",
+        "--profile",
+        "--progress",
+        "--progress-interval",
+        "--project-file",
+        "--random-seed",
+        "--rebuild",
+        "--rebuild-image",
+        "--seed",
+        "--seeds",
+        "--source-root",
+        "--target",
+        "--targets-file",
+        "--task-slots-per-worker",
+        "--verbose",
+        "--workers"
+      ]
+    },
+    "resume": {
+      "positionals": [
+        "run_id"
+      ],
+      "options": [
+        "--confirm-tasks",
+        "--data-dir",
+        "--json",
+        "--last",
+        "--project-file",
+        "--source-root",
+        "--targets-file"
+      ]
+    },
+    "resolve-submission": {
+      "positionals": [
+        "run_id"
+      ],
+      "options": [
+        "--confirm",
+        "--data-dir",
+        "--json",
+        "--last",
+        "--not-submitted"
+      ]
+    },
+    "wait": {
+      "positionals": [
+        "run_id"
+      ],
+      "options": [
+        "--data-dir",
+        "--json",
+        "--last",
+        "--notify",
+        "--notify-file",
+        "--poll-interval",
+        "--progress",
+        "--progress-interval",
+        "--query-failure-limit",
+        "--timeout",
+        "--verbose"
+      ]
+    },
+    "await": {
+      "positionals": [
+        "run_ids"
+      ],
+      "options": [
+        "--data-dir",
+        "--fail-on-run-failure",
+        "--json",
+        "--notify-file",
+        "--poll-interval",
+        "--query-failure-limit",
+        "--timeout",
+        "--until"
+      ]
+    },
+    "status": {
+      "positionals": [
+        "run_id"
+      ],
+      "options": [
+        "--data-dir",
+        "--json",
+        "--last",
+        "--summary"
+      ]
+    },
+    "tasks": {
+      "positionals": [
+        "run_id"
+      ],
+      "options": [
+        "--data-dir",
+        "--json",
+        "--last",
+        "--limit",
+        "--offset"
+      ]
+    },
+    "artifacts": {
+      "positionals": [
+        "run_id"
+      ],
+      "options": [
+        "--data-dir",
+        "--json",
+        "--last",
+        "--limit",
+        "--offset"
+      ]
+    },
+    "list": {
+      "positionals": [],
+      "options": [
+        "--data-dir",
+        "--include-tasks",
+        "--json",
+        "--kind",
+        "--limit",
+        "--offset"
+      ]
+    },
+    "logs": {
+      "positionals": [
+        "run_id"
+      ],
+      "options": [
+        "--data-dir",
+        "--json",
+        "--last",
+        "--launch",
+        "--preparation",
+        "--task"
+      ]
+    },
+    "fetch": {
+      "positionals": [
+        "run_id"
+      ],
+      "options": [
+        "--data-dir",
+        "--destination",
+        "--extract",
+        "--json",
+        "--last",
+        "--mode",
+        "--progress",
+        "--progress-interval",
+        "--summary",
+        "--task",
+        "--verbose"
+      ]
+    },
+    "inspect": {
+      "positionals": [
+        "run_id"
+      ],
+      "options": [
+        "--data-dir",
+        "--json",
+        "--last",
+        "--summary"
+      ]
+    },
+    "cancel": {
+      "positionals": [
+        "run_id"
+      ],
+      "options": [
+        "--data-dir",
+        "--json",
+        "--last"
+      ]
+    },
+    "purge": {
+      "positionals": [
+        "run_id"
+      ],
+      "options": [
+        "--confirm",
+        "--data-dir",
+        "--dry-run",
+        "--json",
+        "--last",
+        "--workspace"
+      ]
+    },
+    "agent-guide": {
+      "positionals": [],
+      "options": [
+        "--check",
+        "--json",
+        "--list-topics",
+        "--topic",
+        "--write"
+      ]
+    },
+    "help": {
+      "positionals": [
+        "topic"
+      ],
+      "options": []
+    },
+    "version": {
+      "positionals": [],
+      "options": []
+    }
+  }
+}

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from importlib.metadata import version
@@ -12,18 +12,29 @@ from rundra.cli.capability_doctor import (
     doctor_operation,
 )
 from rundra.cli.operations import (
+    ArtifactsValue,
+    LogsValue,
     PlanValue,
+    PreparationLogsValue,
+    PurgeValue,
     ResolvedRunInputs,
     RunValue,
     StatusValue,
+    TasksValue,
+    ValidationValue,
     _config_error,
+    artifacts_operation,
     cancel_operation,
     fetch_operation,
+    logs_operation,
     plan_operation,
+    purge_operation,
     resolve_run_inputs_operation,
     resume_operation,
     status_operation,
     submit_operation,
+    tasks_operation,
+    validate_operation,
 )
 from rundra.config.campaigns import (
     CampaignDefinition,
@@ -40,13 +51,14 @@ from rundra.domain.campaigns import (
     CampaignRecord,
     CampaignSubmissionState,
 )
-from rundra.domain.models import RunId
+from rundra.domain.models import Artifact, RunId
 from rundra.domain.preparation import PreparationStorageConfig
 from rundra.domain.scaling import SeedRange
 from rundra.domain.states import ExecutionState
 from rundra.persistence.campaign_store import JsonCampaignStore
 from rundra.persistence.errors import RunStoreError
 from rundra.persistence.json_store import JsonRunStore
+from rundra.persistence.purge_store import PurgeReceiptStore
 from rundra.persistence.submission_store import SubmissionReceiptStore
 from rundra.persistence.task_store import SqliteTaskStore
 from rundra.results import OperationError, OperationResult
@@ -163,6 +175,7 @@ class CampaignDoctorValue:
 @dataclass(frozen=True, slots=True)
 class CampaignSubmitValue:
     record: CampaignRecord
+    format_version: int = 1
 
     @property
     def campaign_id(self) -> CampaignId:
@@ -290,6 +303,93 @@ class CampaignInspectValue:
     format_version: int = 1
 
 
+@dataclass(frozen=True, slots=True)
+class CampaignValidationValue:
+    definition: CampaignDefinition
+    experiment: ValidationValue
+    format_version: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignRunValue:
+    submission: CampaignSubmitValue
+    wait: CampaignWaitValue
+    fetch: CampaignFetchValue
+    format_version: int = 1
+
+    @property
+    def exit_code(self) -> int:
+        return 2 if self.wait.status.state in {"FAILED", "CANCELLED", "PARTIAL"} else 0
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignTaskValue:
+    selector: str
+    launch: str
+    run_id: RunId
+    value: object
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignTasksValue:
+    campaign_id: CampaignId
+    total: int
+    offset: int
+    limit: int
+    tasks: tuple[CampaignTaskValue, ...]
+    format_version: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignArtifactValue:
+    launch: str
+    run_id: RunId
+    artifact: Artifact
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignArtifactsValue:
+    campaign_id: CampaignId
+    total: int
+    offset: int
+    limit: int
+    artifacts: tuple[CampaignArtifactValue, ...]
+    format_version: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignLogsValue:
+    campaign_id: CampaignId
+    launch: str
+    value: LogsValue | PreparationLogsValue
+    format_version: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignPurgeValue:
+    record: CampaignRecord
+    children: tuple[tuple[str, PurgeValue], ...]
+    dry_run: bool
+    deleted: bool
+    format_version: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignListValue:
+    campaigns: tuple[CampaignRecord, ...]
+    offset: int
+    limit: int
+    total: int
+    format_version: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignAndRunListValue:
+    runs: object
+    campaigns: CampaignListValue
+    format_version: int = 1
+
+
 type CampaignChildSubmitter = Callable[
     [CampaignLaunchPlanValue, RunId, int | None], OperationResult[RunId]
 ]
@@ -297,6 +397,30 @@ type CampaignChildCanceller = Callable[[RunId, Path], OperationResult[object]]
 type CampaignChildResumer = Callable[
     [RunId, Path], OperationResult[CampaignChildRecovery]
 ]
+
+
+def campaign_validate_operation(
+    source: Path,
+    *,
+    campaign_name: str | None = None,
+    project_file: Path | None = None,
+) -> OperationResult[CampaignValidationValue]:
+    try:
+        definition, experiment_source, _ = _campaign_request(
+            source, campaign_name, project_file
+        )
+    except ConfigError as error:
+        return OperationResult.failure("validate", _config_error(error))
+    except CampaignResolutionError as error:
+        return OperationResult.failure("validate", error.operation_error)
+    validated = validate_operation(experiment_source)
+    if not validated.ok:
+        assert validated.error is not None
+        return OperationResult.failure("validate", validated.error)
+    assert validated.value is not None
+    return OperationResult.success(
+        "validate", CampaignValidationValue(definition, validated.value)
+    )
 
 
 def campaign_plan_operation(
@@ -980,6 +1104,7 @@ def campaign_fetch_operation(
     data_dir: Path,
     destination: Path | None = None,
     *,
+    tasks: Sequence[str] | None = None,
     mode: str | None = None,
     extract: bool = False,
     summary: bool = False,
@@ -993,6 +1118,19 @@ def campaign_fetch_operation(
     values: list[CampaignLaunchFetchValue] = []
     run_store = JsonRunStore(data_dir)
     task_store = SqliteTaskStore(data_dir)
+    selected_tasks: dict[str, list[str]] = {}
+    for selector in tasks or ():
+        if "/" not in selector:
+            return OperationResult.failure(
+                "fetch",
+                OperationError(
+                    "CAMPAIGN_TASK_SELECTOR_REQUIRED",
+                    "Campaign Task selectors must use launch-name/task_NNNNNN",
+                    {"selector": selector},
+                ),
+            )
+        launch_name, task = selector.split("/", 1)
+        selected_tasks.setdefault(launch_name, []).append(task)
     for launch in record.launches:
         if launch.submission_state not in {
             CampaignSubmissionState.SUBMITTED,
@@ -1006,6 +1144,7 @@ def campaign_fetch_operation(
             str(launch.run_id),
             run_store,
             child_destination,
+            tasks=selected_tasks.get(launch.name),
             mode=mode,
             extract=extract,
             task_store=task_store,
@@ -1054,6 +1193,283 @@ def campaign_cancel_operation(
         cancelled.append(launch.run_id)
     return OperationResult.success(
         "cancel", CampaignCancelValue(current, tuple(cancelled))
+    )
+
+
+def campaign_tasks_operation(
+    campaign_id: CampaignId,
+    data_dir: Path,
+    *,
+    offset: int = 0,
+    limit: int = 100,
+) -> OperationResult[CampaignTasksValue]:
+    if offset < 0 or not 1 <= limit <= 1000:
+        return OperationResult.failure(
+            "tasks", OperationError("INVALID_TASK_PAGE", "Invalid Task page")
+        )
+    try:
+        record = JsonCampaignStore(data_dir).load(campaign_id)
+    except RunStoreError as error:
+        return OperationResult.failure(
+            "tasks", OperationError("CAMPAIGN_STORE_ERROR", str(error))
+        )
+    total = sum(item.task_count for item in record.launches)
+    stop = min(total, offset + limit)
+    cursor = 0
+    items: list[CampaignTaskValue] = []
+    observable = {
+        CampaignSubmissionState.SUBMITTED,
+        CampaignSubmissionState.CANCELLED,
+    }
+    for launch in record.launches:
+        launch_stop = cursor + launch.task_count
+        child_start = max(0, offset - cursor)
+        child_stop = min(launch.task_count, stop - cursor)
+        cursor = launch_stop
+        if child_start >= child_stop or launch.submission_state not in observable:
+            continue
+        result = tasks_operation(
+            str(launch.run_id),
+            JsonRunStore(data_dir),
+            SqliteTaskStore(data_dir),
+            offset=child_start,
+            limit=child_stop - child_start,
+        )
+        if not result.ok:
+            assert result.error is not None
+            return OperationResult.failure(
+                "tasks", _launch_error(launch.name, result.error)
+            )
+        assert isinstance(result.value, TasksValue)
+        items.extend(
+            CampaignTaskValue(
+                f"{launch.name}/{task.coordinate.task_id}",
+                launch.name,
+                launch.run_id,
+                task,
+            )
+            for task in result.value.tasks
+        )
+    return OperationResult.success(
+        "tasks", CampaignTasksValue(campaign_id, total, offset, limit, tuple(items))
+    )
+
+
+def campaign_artifacts_operation(
+    campaign_id: CampaignId,
+    data_dir: Path,
+    *,
+    offset: int = 0,
+    limit: int = 100,
+) -> OperationResult[CampaignArtifactsValue]:
+    if offset < 0 or not 1 <= limit <= 1000:
+        return OperationResult.failure(
+            "artifacts",
+            OperationError("INVALID_ARTIFACT_PAGE", "Invalid artifact page"),
+        )
+    try:
+        record = JsonCampaignStore(data_dir).load(campaign_id)
+    except RunStoreError as error:
+        return OperationResult.failure(
+            "artifacts", OperationError("CAMPAIGN_STORE_ERROR", str(error))
+        )
+    run_store = JsonRunStore(data_dir)
+    totals: list[tuple[CampaignLaunchRecord, int]] = []
+    for launch in record.launches:
+        if launch.submission_state not in {
+            CampaignSubmissionState.SUBMITTED,
+            CampaignSubmissionState.CANCELLED,
+        }:
+            totals.append((launch, 0))
+            continue
+        result = artifacts_operation(str(launch.run_id), run_store, offset=0, limit=1)
+        if not result.ok:
+            assert result.error is not None
+            return OperationResult.failure(
+                "artifacts", _launch_error(launch.name, result.error)
+            )
+        assert isinstance(result.value, ArtifactsValue)
+        totals.append((launch, result.value.total))
+    total = sum(count for _, count in totals)
+    stop = min(total, offset + limit)
+    cursor = 0
+    items: list[CampaignArtifactValue] = []
+    for launch, count in totals:
+        child_start = max(0, offset - cursor)
+        child_stop = min(count, stop - cursor)
+        cursor += count
+        if child_start >= child_stop:
+            continue
+        result = artifacts_operation(
+            str(launch.run_id),
+            run_store,
+            offset=child_start,
+            limit=child_stop - child_start,
+        )
+        assert isinstance(result.value, ArtifactsValue)
+        items.extend(
+            CampaignArtifactValue(launch.name, launch.run_id, artifact)
+            for artifact in result.value.artifacts
+        )
+    return OperationResult.success(
+        "artifacts",
+        CampaignArtifactsValue(campaign_id, total, offset, limit, tuple(items)),
+    )
+
+
+def campaign_logs_operation(
+    campaign_id: CampaignId,
+    data_dir: Path,
+    *,
+    task: str | None = None,
+    preparation: bool = False,
+    launch_name: str | None = None,
+) -> OperationResult[CampaignLogsValue]:
+    try:
+        record = JsonCampaignStore(data_dir).load(campaign_id)
+    except RunStoreError as error:
+        return OperationResult.failure(
+            "logs", OperationError("CAMPAIGN_STORE_ERROR", str(error))
+        )
+    child_task = task
+    if task is not None and "/" in task:
+        selected_launch, child_task = task.split("/", 1)
+        if launch_name is not None and launch_name != selected_launch:
+            return OperationResult.failure(
+                "logs",
+                OperationError(
+                    "CAMPAIGN_LAUNCH_CONFLICT", "Conflicting launch selectors"
+                ),
+            )
+        launch_name = selected_launch
+    if launch_name is None and len(record.launches) == 1:
+        launch_name = record.launches[0].name
+    launch = next((item for item in record.launches if item.name == launch_name), None)
+    if launch is None:
+        return OperationResult.failure(
+            "logs",
+            OperationError(
+                "CAMPAIGN_LAUNCH_REQUIRED",
+                "Select a campaign launch with --launch or launch-name/task_NNNNNN",
+            ),
+        )
+    result = logs_operation(
+        str(launch.run_id),
+        JsonRunStore(data_dir),
+        task=child_task,
+        preparation=preparation,
+    )
+    if not result.ok:
+        assert result.error is not None
+        return OperationResult.failure("logs", _launch_error(launch.name, result.error))
+    assert isinstance(result.value, (LogsValue, PreparationLogsValue))
+    return OperationResult.success(
+        "logs", CampaignLogsValue(campaign_id, launch.name, result.value)
+    )
+
+
+def campaign_purge_operation(
+    campaign_id: CampaignId,
+    data_dir: Path,
+    *,
+    workspace: bool = False,
+    confirm: str | None = None,
+    dry_run: bool = False,
+) -> OperationResult[CampaignPurgeValue]:
+    if not dry_run and confirm != str(campaign_id):
+        return OperationResult.failure(
+            "purge",
+            OperationError(
+                "PURGE_CONFIRMATION_REQUIRED",
+                f"Repeat --confirm {campaign_id} to purge this campaign",
+                {"campaign_id": str(campaign_id)},
+            ),
+        )
+    campaign_store = JsonCampaignStore(data_dir)
+    try:
+        record = campaign_store.load(campaign_id)
+    except RunStoreError as error:
+        return OperationResult.failure(
+            "purge", OperationError("CAMPAIGN_STORE_ERROR", str(error))
+        )
+    children: list[tuple[str, PurgeValue]] = []
+    for launch in record.launches:
+        if launch.submission_state not in {
+            CampaignSubmissionState.SUBMITTED,
+            CampaignSubmissionState.CANCELLED,
+        }:
+            continue
+        result = purge_operation(
+            str(launch.run_id),
+            JsonRunStore(data_dir),
+            PurgeReceiptStore(data_dir),
+            workspace=workspace,
+            confirm=str(launch.run_id),
+            dry_run=dry_run,
+        )
+        if not result.ok:
+            assert result.error is not None
+            return OperationResult.failure(
+                "purge", _launch_error(launch.name, result.error)
+            )
+        assert isinstance(result.value, PurgeValue)
+        children.append((launch.name, result.value))
+    if not dry_run:
+        try:
+            campaign_store.delete(campaign_id)
+        except RunStoreError as error:
+            return OperationResult.failure(
+                "purge", OperationError("CAMPAIGN_STORE_ERROR", str(error))
+            )
+    return OperationResult.success(
+        "purge", CampaignPurgeValue(record, tuple(children), dry_run, not dry_run)
+    )
+
+
+def campaign_list_operation(
+    data_dir: Path, *, offset: int = 0, limit: int = 100
+) -> OperationResult[CampaignListValue]:
+    if offset < 0 or not 1 <= limit <= 1000:
+        return OperationResult.failure(
+            "list", OperationError("INVALID_CAMPAIGN_PAGE", "Invalid campaign page")
+        )
+    try:
+        records = JsonCampaignStore(data_dir).list()
+    except RunStoreError as error:
+        return OperationResult.failure(
+            "list", OperationError("CAMPAIGN_STORE_ERROR", str(error))
+        )
+    return OperationResult.success(
+        "list",
+        CampaignListValue(
+            records[offset : offset + limit], offset, limit, len(records)
+        ),
+    )
+
+
+def campaign_run_operation(
+    plan: CampaignPlanValue,
+    *,
+    confirm_tasks: int | None = None,
+) -> OperationResult[CampaignRunValue]:
+    submitted = campaign_submit_operation(plan, confirm_tasks=confirm_tasks)
+    if not submitted.ok:
+        assert submitted.error is not None
+        return OperationResult.failure("run", submitted.error)
+    assert submitted.value is not None
+    data_dir = plan.launches[0].inputs.data_dir
+    waited = campaign_wait_operation(submitted.value.campaign_id, data_dir)
+    if not waited.ok:
+        assert waited.error is not None
+        return OperationResult.failure("run", waited.error)
+    assert waited.value is not None
+    fetched = campaign_fetch_operation(submitted.value.campaign_id, data_dir)
+    if not fetched.ok:
+        assert fetched.error is not None
+        return OperationResult.failure("run", fetched.error)
+    assert fetched.value is not None
+    return OperationResult.success(
+        "run", CampaignRunValue(submitted.value, waited.value, fetched.value)
     )
 
 

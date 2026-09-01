@@ -17,6 +17,7 @@ from rundra.config._schema import (
     require_version_one,
 )
 from rundra.config._yaml import read_yaml_document
+from rundra.config.errors import ConfigError
 from rundra.domain.campaigns import CampaignFailurePolicy, valid_campaign_launch_name
 from rundra.security import is_credential_field
 
@@ -156,6 +157,15 @@ def load_campaign(source: Path) -> CampaignDefinition:
         else None
     )
     return _definition(document, normalized, name, experiment, project_file, ())
+
+
+def is_campaign_source(source: Path) -> bool:
+    """Return whether a readable YAML document explicitly declares a campaign."""
+    try:
+        document = read_yaml_document(source.expanduser().resolve())
+    except ConfigError:
+        return False
+    return isinstance(document, Mapping) and document.get("kind") == "campaign"
 
 
 def parse_project_campaigns(
