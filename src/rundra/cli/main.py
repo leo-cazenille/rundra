@@ -34,6 +34,11 @@ from rundra.cli.campaign_operations import (
 )
 from rundra.cli.capability_doctor import DoctorValue, doctor_operation
 from rundra.cli.notification import write_await_notification, write_wait_notification
+from rundra.cli.placement_operations import (
+    placement_doctor_operation,
+    placement_plan_operation,
+    placement_requested,
+)
 from rundra.cli.operations import (
     LAST_RUN_SELECTOR,
     AwaitRunsValue,
@@ -151,6 +156,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--project-file", type=Path)
     plan.add_argument("--profile")
     plan.add_argument("--campaign")
+    _add_placement_arguments(plan)
     plan.add_argument("--source-root", type=Path)
     plan.add_argument("--fetch-mode", choices=("auto", "copy", "reference", "archive"))
     _add_worker_scale_arguments(plan)
@@ -184,6 +190,11 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--project-file", type=Path)
     doctor.add_argument("--profile")
     doctor.add_argument("--campaign")
+    seed_group = doctor.add_mutually_exclusive_group()
+    seed_group.add_argument("--seed", type=int)
+    seed_group.add_argument("--seeds")
+    seed_group.add_argument("--random-seed", action="store_true")
+    _add_placement_arguments(doctor)
     doctor.add_argument("--connect", action="store_true")
     doctor.add_argument("--scheduler-probe", action="store_true")
     doctor.add_argument("--scheduler-inventory", action="store_true")
@@ -217,6 +228,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--project-file", type=Path)
     run.add_argument("--profile")
     run.add_argument("--campaign")
+    _add_placement_arguments(run)
     run.add_argument("--fetch-mode", choices=("auto", "copy", "reference", "archive"))
     run.add_argument("--confirm-tasks", type=int)
     _add_worker_scale_arguments(run)
@@ -234,6 +246,7 @@ def build_parser() -> argparse.ArgumentParser:
     submit.add_argument("--project-file", type=Path)
     submit.add_argument("--profile")
     submit.add_argument("--campaign")
+    _add_placement_arguments(submit)
     submit.add_argument(
         "--fetch-mode", choices=("auto", "copy", "reference", "archive")
     )
@@ -505,6 +518,74 @@ def _campaign_requested(source: Path, campaign_name: str | None) -> bool:
     return campaign_name is not None or is_campaign_source(source)
 
 
+def _placement_requested(arguments: argparse.Namespace) -> bool:
+    experiment = getattr(arguments, "experiment", None)
+    if experiment is None:
+        return False
+    return placement_requested(
+        experiment,
+        placement=getattr(arguments, "placement", None),
+        project_file=getattr(arguments, "project_file", None),
+        profile=getattr(arguments, "profile", None),
+    )
+
+
+def _placement_plan(arguments: argparse.Namespace) -> OperationResult[CampaignPlanValue]:
+    return placement_plan_operation(
+        arguments.experiment,
+        placement=arguments.placement,
+        candidate_targets=arguments.candidate_targets,
+        config=getattr(arguments, "config", None),
+        seed=getattr(arguments, "seed", None),
+        seeds=getattr(arguments, "seeds", None),
+        target=getattr(arguments, "target", None),
+        targets_file=getattr(arguments, "targets_file", None),
+        source_root=getattr(arguments, "source_root", None),
+        destination=getattr(arguments, "destination", None),
+        data_dir=getattr(arguments, "data_dir", None),
+        project_file=getattr(arguments, "project_file", None),
+        profile=getattr(arguments, "profile", None),
+        random_seed=getattr(arguments, "random_seed", False),
+        prepare_location=getattr(arguments, "prepare_location", "auto"),
+        rebuild=getattr(arguments, "rebuild", False),
+        rebuild_image=getattr(arguments, "rebuild_image", False),
+        offline=getattr(arguments, "offline", False),
+        workers=getattr(arguments, "workers", None),
+        task_slots_per_worker=getattr(arguments, "task_slots_per_worker", None),
+        fetch_mode=getattr(arguments, "fetch_mode", None),
+        execution_strategy=getattr(arguments, "execution_strategy", "auto"),
+        retrieval_policy=getattr(arguments, "retrieval", "manifest"),
+    )
+
+
+def _placement_doctor(arguments: argparse.Namespace) -> OperationResult[Any]:
+    return placement_doctor_operation(
+        arguments.experiment,
+        connect=arguments.connect,
+        scheduler_probe=arguments.scheduler_probe,
+        scheduler_inventory=arguments.scheduler_inventory,
+        probe_timeout=arguments.probe_timeout,
+        write_probe=not arguments.no_write_probe,
+        local_target_access=arguments.local_target_access,
+        agent=arguments.agent,
+        placement=arguments.placement,
+        candidate_targets=arguments.candidate_targets,
+        config=arguments.config,
+        seed=arguments.seed,
+        seeds=arguments.seeds,
+        target=arguments.target,
+        targets_file=arguments.targets_file,
+        source_root=arguments.source_root,
+        destination=arguments.destination,
+        data_dir=arguments.data_dir,
+        project_file=arguments.project_file,
+        profile=arguments.profile,
+        random_seed=arguments.random_seed,
+        prepare_location=arguments.prepare_location,
+        offline=arguments.offline,
+    )
+
+
 def _is_campaign_id(value: str) -> bool:
     try:
         CampaignId(value)
@@ -526,6 +607,8 @@ def _campaign_override_error(
         "workers": getattr(arguments, "workers", None),
         "task_slots_per_worker": getattr(arguments, "task_slots_per_worker", None),
         "fetch_mode": getattr(arguments, "fetch_mode", None),
+        "placement": getattr(arguments, "placement", None),
+        "candidate_targets": getattr(arguments, "candidate_targets", ()),
     }
     selected = tuple(
         name for name, value in fields.items() if value not in (None, False)
@@ -684,6 +767,22 @@ def _add_worker_scale_arguments(parser: argparse.ArgumentParser) -> None:
         type=int,
         help="request worker allocations within the target policy",
     )
+
+
+def _add_placement_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--placement",
+        metavar="POLICY",
+        help="select targets automatically using POLICY; use auto for built-in policy",
+    )
+    parser.add_argument(
+        "--candidate-target",
+        dest="candidate_targets",
+        action="append",
+        default=[],
+        metavar="TARGET",
+        help="restrict automatic placement to TARGET; repeat as needed",
+    )
     parser.add_argument(
         "--task-slots-per-worker",
         type=int,
@@ -834,6 +933,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 execution_strategy=arguments.execution_strategy,
                 retrieval_policy=arguments.retrieval,
             )
+        elif _placement_requested(arguments):
+            result = _placement_plan(arguments)
         else:
             resolved_plan = resolve_plan_inputs_operation(
                 arguments.experiment,
@@ -900,6 +1001,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 local_target_access=arguments.local_target_access,
                 agent=arguments.agent,
             )
+        elif arguments.experiment is not None and _placement_requested(arguments):
+            result = _placement_doctor(arguments)
         elif arguments.experiment is None:
             result = doctor_operation(
                 arguments.targets_file or _default_targets_file(),
@@ -986,6 +1089,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 result = campaign_run_operation(
                     planned.value, confirm_tasks=arguments.confirm_tasks
                 )
+        elif _placement_requested(arguments):
+            planned = _placement_plan(arguments)
+            if not planned.ok:
+                result = planned
+            else:
+                assert planned.value is not None
+                result = campaign_run_operation(
+                    planned.value, confirm_tasks=arguments.confirm_tasks
+                )
         else:
             resolved = resolve_run_inputs_operation(
                 arguments.experiment,
@@ -1049,6 +1161,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 rebuild_image=arguments.rebuild_image,
                 offline=arguments.offline,
             )
+            if not planned.ok:
+                result = planned
+            else:
+                assert planned.value is not None
+                result = campaign_submit_operation(
+                    planned.value, confirm_tasks=arguments.confirm_tasks
+                )
+        elif _placement_requested(arguments):
+            planned = _placement_plan(arguments)
             if not planned.ok:
                 result = planned
             else:

@@ -8,10 +8,15 @@ from pathlib import Path
 from typing import Any
 
 from rundra.cli.campaign_operations import (
+    CampaignDoctorValue,
+    CampaignLaunchDoctorValue,
     CampaignLaunchPlanValue,
     CampaignPlanValue,
 )
-from rundra.cli.capability_doctor import _scheduler_inventory
+from rundra.cli.capability_doctor import (
+    _scheduler_inventory,
+    doctor_operation as capability_doctor_operation,
+)
 from rundra.cli.doctor import doctor_operation as target_doctor_operation
 from rundra.cli.operations import (
     PlanValue,
@@ -48,6 +53,71 @@ from rundra.scheduler_registry import scheduler_capabilities
 type PlacementObserver = Callable[
     [Path, str], OperationResult[tuple[SchedulerPartition, ...]]
 ]
+
+
+def placement_doctor_operation(
+    experiment_source: Path,
+    *,
+    connect: bool = False,
+    scheduler_probe: bool = False,
+    scheduler_inventory: bool = False,
+    probe_timeout: int = 120,
+    write_probe: bool = True,
+    local_target_access: bool = False,
+    agent: str = "generic",
+    **plan_options: Any,
+) -> OperationResult[CampaignDoctorValue]:
+    if not connect:
+        return OperationResult.failure(
+            "doctor",
+            OperationError(
+                "PLACEMENT_CONNECT_REQUIRED",
+                "Automatic placement doctor requires --connect",
+            ),
+        )
+    planned = placement_plan_operation(experiment_source, **plan_options)
+    if not planned.ok:
+        assert planned.error is not None
+        return OperationResult.failure("doctor", planned.error)
+    assert planned.value is not None
+    values: list[CampaignLaunchDoctorValue] = []
+    probed: set[str] = set()
+    for launch in planned.value.launches:
+        inputs = launch.inputs
+        storage = inputs.preparation_storage
+        result = capability_doctor_operation(
+            inputs.targets_file,
+            inputs.target,
+            connect=True,
+            scheduler_probe=scheduler_probe and inputs.target not in probed,
+            scheduler_inventory=scheduler_inventory and inputs.target not in probed,
+            probe_timeout=probe_timeout,
+            write_probe=write_probe,
+            data_dir=inputs.data_dir,
+            destination=inputs.destination,
+            source_root=inputs.source_root,
+            experiment_source=planned.value.experiment_source,
+            config_source=inputs.config,
+            cache_root=(
+                None
+                if storage.cache_root is None
+                else Path(str(storage.cache_root))
+            ),
+            preparation=inputs.preparation_plan,
+            preparation_storage=storage,
+            offline=inputs.offline,
+            local_target_access=local_target_access,
+            agent=agent,
+        )
+        if not result.ok:
+            assert result.error is not None
+            return OperationResult.failure("doctor", result.error)
+        assert result.value is not None
+        values.append(CampaignLaunchDoctorValue(launch.name, result.value))
+        probed.add(inputs.target)
+    return OperationResult.success(
+        "doctor", CampaignDoctorValue(planned.value, tuple(values))
+    )
 
 
 def placement_requested(

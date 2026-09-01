@@ -525,6 +525,20 @@ def render_human(result: OperationResult[Any]) -> str:
             f"capacity={item.concurrent_task_capacity} destination={item.destination}"
             for item in value.launches
         )
+        if value.placement is not None:
+            lines.insert(
+                1,
+                "Automatic placement: "
+                f"policy={value.placement.policy} "
+                f"observed={value.placement.observed_at.isoformat()}",
+            )
+            lines.extend(
+                f"  candidate {item.target}: "
+                f"{'selected' if item.assigned_seed_start is not None else 'rejected'} "
+                f"reason={item.reason} utilization={item.utilization_percent} "
+                f"idle_cpus={item.idle_cpus}"
+                for item in value.placement.targets
+            )
         lines.extend(f"WARNING: {warning}" for warning in value.warnings)
         return "\n".join(lines)
     if isinstance(value, CampaignDoctorValue):
@@ -1311,6 +1325,11 @@ def _campaign_plan_document(value: CampaignPlanValue) -> dict[str, Any]:
         "total_tasks": value.total_tasks,
         "total_concurrent_task_capacity": value.total_concurrent_task_capacity,
         "warnings": list(value.warnings),
+        "safety": {
+            "contacts_targets": value.placement is not None,
+            "creates_runs": False,
+            "submits": False,
+        },
         "launches": [
             {
                 "name": item.name,
