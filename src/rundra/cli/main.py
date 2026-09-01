@@ -34,11 +34,6 @@ from rundra.cli.campaign_operations import (
 )
 from rundra.cli.capability_doctor import DoctorValue, doctor_operation
 from rundra.cli.notification import write_await_notification, write_wait_notification
-from rundra.cli.placement_operations import (
-    placement_doctor_operation,
-    placement_plan_operation,
-    placement_requested,
-)
 from rundra.cli.operations import (
     LAST_RUN_SELECTOR,
     AwaitRunsValue,
@@ -64,6 +59,11 @@ from rundra.cli.operations import (
     tasks_operation,
     validate_operation,
     wait_operation,
+)
+from rundra.cli.placement_operations import (
+    placement_doctor_operation,
+    placement_plan_operation,
+    placement_requested,
 )
 from rundra.cli.progress import (
     ProgressUnavailableError,

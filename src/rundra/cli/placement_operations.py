@@ -15,6 +15,8 @@ from rundra.cli.campaign_operations import (
 )
 from rundra.cli.capability_doctor import (
     _scheduler_inventory,
+)
+from rundra.cli.capability_doctor import (
     doctor_operation as capability_doctor_operation,
 )
 from rundra.cli.doctor import doctor_operation as target_doctor_operation
