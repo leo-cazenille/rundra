@@ -4,7 +4,10 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from importlib.metadata import version
+import json
+import os
 from pathlib import Path
+import tempfile
 from time import monotonic, sleep
 
 from rundra.cli.capability_doctor import (
@@ -700,12 +703,17 @@ def campaign_submit_operation(
         raise TypeError("Campaign clock must return a timezone-aware datetime")
     data_dir = plan.launches[0].inputs.data_dir
     store = JsonCampaignStore(data_dir)
+    resolved_source = (
+        _persist_resolved_campaign(plan, campaign_id, data_dir)
+        if plan.placement is not None
+        else plan.definition.source
+    )
     record = CampaignRecord(
-        1,
+        2 if plan.placement is not None else 1,
         framework_version or version("rundra"),
         campaign_id,
         plan.name,
-        plan.definition.source,
+        resolved_source,
         plan.experiment_source,
         created_at,
         plan.on_submit_failure,
@@ -720,6 +728,7 @@ def campaign_submit_operation(
             )
             for launch in plan.launches
         ),
+        placement=plan.placement,
     )
     active_submitter = submitter or (
         lambda launch, run_id, confirmed: _submit_campaign_child(
@@ -1583,6 +1592,68 @@ def _launch_error(name: str, error: OperationError) -> OperationError:
 
 def _cache_root(storage: PreparationStorageConfig) -> Path | None:
     return None if storage.cache_root is None else Path(str(storage.cache_root))
+
+
+def _persist_resolved_campaign(
+    plan: CampaignPlanValue, campaign_id: CampaignId, data_dir: Path
+) -> Path:
+    root = data_dir / "campaign-plans"
+    root.mkdir(parents=True, exist_ok=True)
+    destination = root / f"{campaign_id}.yaml"
+    launches: list[dict[str, object]] = []
+    for launch in plan.launches:
+        inputs = launch.inputs
+        start, stop = _seed_bounds(inputs)
+        item: dict[str, object] = {
+            "name": launch.name,
+            "target": launch.target,
+            "config": str(inputs.config),
+            "source_root": str(inputs.source_root),
+            "destination": str(inputs.destination),
+            "seeds": f"{start}:{stop}",
+        }
+        if inputs.workers is not None:
+            item["workers"] = inputs.workers
+        if inputs.task_slots_per_worker is not None:
+            item["task_slots_per_worker"] = inputs.task_slots_per_worker
+        fetch_mode = inputs.resolution.values.fetch_mode
+        if fetch_mode is not None:
+            item["fetch_mode"] = fetch_mode
+        launches.append(item)
+    document: dict[str, object] = {
+        "kind": "campaign",
+        "version": 1,
+        "name": plan.name,
+        "experiment": str(plan.experiment_source),
+        "on_submit_failure": plan.on_submit_failure.value,
+        "allow_duplicate_tasks": plan.definition.allow_duplicate_tasks,
+        "launches": launches,
+    }
+    if plan.project_file is not None:
+        document["project_file"] = str(plan.project_file)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        prefix=f".{campaign_id}.",
+        suffix=".tmp",
+        dir=root,
+        delete=False,
+    ) as stream:
+        temporary = Path(stream.name)
+        json.dump(document, stream, allow_nan=False, indent=2, sort_keys=True)
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    try:
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+    descriptor = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    return destination.resolve()
 
 
 def _submit_campaign_child(

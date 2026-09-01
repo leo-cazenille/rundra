@@ -19,6 +19,7 @@ from rundra.domain.campaigns import (
     CampaignSubmissionState,
 )
 from rundra.domain.models import RunId
+from rundra.domain.placement import PlacementDecision, PlacementTargetDecision
 from rundra.persistence.errors import (
     CampaignAlreadyExistsError,
     CampaignNotFoundError,
@@ -156,7 +157,7 @@ class JsonCampaignStore:
 def campaign_record_to_dict(record: CampaignRecord) -> dict[str, object]:
     if type(record) is not CampaignRecord:
         raise TypeError("campaign_record_to_dict requires CampaignRecord")
-    return {
+    document: dict[str, object] = {
         "format_version": record.format_version,
         "framework_version": record.framework_version,
         "id": str(record.id),
@@ -184,6 +185,9 @@ def campaign_record_to_dict(record: CampaignRecord) -> dict[str, object]:
             for item in record.launches
         ],
     }
+    if record.format_version >= 2:
+        document["placement"] = _placement_to_dict(record.placement)
+    return document
 
 
 def campaign_record_from_dict(value: object) -> CampaignRecord:
@@ -204,6 +208,9 @@ def campaign_record_from_dict(value: object) -> CampaignRecord:
         "allow_duplicate_tasks",
         "launches",
     }
+    format_version = document.get("format_version")
+    if format_version == 2:
+        expected.add("placement")
     if set(document) != expected or _contains_credentials(document):
         raise CampaignRecordFormatError("Campaign record fields are invalid")
     try:
@@ -238,6 +245,11 @@ def campaign_record_from_dict(value: object) -> CampaignRecord:
             ),
             allow_duplicate_tasks=_boolean(document, "allow_duplicate_tasks"),
             launches=launches,
+            placement=(
+                _placement_from_dict(document["placement"])
+                if format_version == 2
+                else None
+            ),
         )
     except (KeyError, TypeError, ValueError) as error:
         raise CampaignRecordFormatError(f"Invalid CampaignRecord: {error}") from error
@@ -285,6 +297,98 @@ def _optional_datetime(value: object) -> datetime | None:
     if type(value) is not str:
         raise TypeError("timestamp must be a string or null")
     return datetime.fromisoformat(value)
+
+
+def _placement_to_dict(value: PlacementDecision | None) -> object:
+    if value is None:
+        return None
+    return {
+        "policy": value.policy,
+        "strategy": value.strategy,
+        "observed_at": value.observed_at.isoformat(),
+        "targets": [
+            {
+                "target": item.target,
+                "accepted": item.accepted,
+                "reason": item.reason,
+                "partition": item.partition,
+                "utilization_percent": item.utilization_percent,
+                "idle_cpus": item.idle_cpus,
+                "planned_capacity": item.planned_capacity,
+                "usable_capacity": item.usable_capacity,
+                "assigned_seed_start": item.assigned_seed_start,
+                "assigned_seed_stop": item.assigned_seed_stop,
+            }
+            for item in value.targets
+        ],
+    }
+
+
+def _placement_from_dict(value: object) -> PlacementDecision | None:
+    if value is None:
+        return None
+    if type(value) is not dict or set(value) != {
+        "policy",
+        "strategy",
+        "observed_at",
+        "targets",
+    }:
+        raise TypeError("placement must be a placement object or null")
+    targets = value["targets"]
+    if type(targets) is not list:
+        raise TypeError("placement targets must be a list")
+    expected = {
+        "target",
+        "accepted",
+        "reason",
+        "partition",
+        "utilization_percent",
+        "idle_cpus",
+        "planned_capacity",
+        "usable_capacity",
+        "assigned_seed_start",
+        "assigned_seed_stop",
+    }
+    parsed: list[PlacementTargetDecision] = []
+    for item in targets:
+        if type(item) is not dict or set(item) != expected:
+            raise TypeError("placement target fields are invalid")
+        parsed.append(
+            PlacementTargetDecision(
+                target=_string(item, "target"),
+                accepted=_boolean(item, "accepted"),
+                reason=_string(item, "reason"),
+                partition=_optional_string(item["partition"]),
+                utilization_percent=_optional_integer(item["utilization_percent"]),
+                idle_cpus=_optional_integer(item["idle_cpus"]),
+                planned_capacity=_optional_integer(item["planned_capacity"]),
+                usable_capacity=_optional_integer(item["usable_capacity"]),
+                assigned_seed_start=_optional_integer(item["assigned_seed_start"]),
+                assigned_seed_stop=_optional_integer(item["assigned_seed_stop"]),
+            )
+        )
+    return PlacementDecision(
+        _string(value, "policy"),
+        _string(value, "strategy"),
+        datetime.fromisoformat(_string(value, "observed_at")),
+        tuple(parsed),
+    )
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    if type(value) is not str:
+        raise TypeError("optional value must be a string or null")
+    return value
+
+
+def _optional_integer(value: object) -> int | None:
+    if value is None:
+        return None
+    if type(value) is not int:
+        raise TypeError("optional value must be an integer or null")
+    return value
 
 
 def _contains_credentials(value: object) -> bool:

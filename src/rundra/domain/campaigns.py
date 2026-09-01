@@ -9,6 +9,7 @@ from pathlib import PurePath
 from uuid import uuid4
 
 from rundra.domain.models import RunId
+from rundra.domain.placement import PlacementDecision
 
 _CAMPAIGN_ID_PATTERN = re.compile(r"campaign_[0-9a-f]{32}\Z")
 _LAUNCH_NAME_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}\Z")
@@ -94,10 +95,11 @@ class CampaignRecord:
     launches: tuple[CampaignLaunchRecord, ...]
     submitted_at: datetime | None = None
     completed_at: datetime | None = None
+    placement: PlacementDecision | None = None
 
     def __post_init__(self) -> None:
-        if self.format_version != 1:
-            raise ValueError("CampaignRecord format_version must be 1")
+        if self.format_version not in {1, 2}:
+            raise ValueError("CampaignRecord format_version must be 1 or 2")
         if (
             type(self.framework_version) is not str
             or not self.framework_version.strip()
@@ -148,6 +150,10 @@ class CampaignRecord:
         if len({str(item.destination) for item in launches}) != len(launches):
             raise ValueError("CampaignRecord destinations must be unique")
         object.__setattr__(self, "launches", launches)
+        if self.placement is not None and type(self.placement) is not PlacementDecision:
+            raise TypeError("CampaignRecord placement is invalid")
+        if self.format_version == 1 and self.placement is not None:
+            raise ValueError("CampaignRecord v1 cannot preserve placement")
 
 
 def valid_campaign_launch_name(value: str) -> bool:
