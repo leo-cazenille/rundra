@@ -616,10 +616,7 @@ def test_launch_failed_held_preparation_cancels_dependent_work(tmp_path) -> None
     assert failed.run.state is ExecutionState.FAILED
     assert failed.native_state == "PREPARATION_FAILED"
     assert failed.preparation is not None
-    assert (
-        failed.preparation.builder_state
-        == "PENDING (launch_failed_requeued_held)"
-    )
+    assert failed.preparation.builder_state == "PENDING (launch_failed_requeued_held)"
     assert scheduler.cancelled == [(_REFERENCE,)]
 
 

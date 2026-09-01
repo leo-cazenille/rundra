@@ -448,10 +448,7 @@ def test_preparation_job_is_submitted_before_dependent_scientific_work(
 
     assert scheduler.dependencies == [SchedulerReference("900")]
     assert len(scheduler.preparation_groups) == 1
-    assert (
-        scheduler.preparation_groups[0].role
-        is SchedulerSubmissionRole.PREPARATION
-    )
+    assert scheduler.preparation_groups[0].role is SchedulerSubmissionRole.PREPARATION
     assert scheduler.preparation_groups[0].units[0].resources == build.resources
     assert result.record.scheduler_job_ids == ("local-science-reference",)
     assert result.record.preparation is not None
