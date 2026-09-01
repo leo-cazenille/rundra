@@ -33,10 +33,15 @@ class PlacementTargetDecision:
             value = getattr(self, name)
             if value is not None and (type(value) is not int or value < 0):
                 raise ValueError(f"Placement decision {name} must be nonnegative")
-        assigned = (self.assigned_seed_start, self.assigned_seed_stop)
-        if (assigned[0] is None) != (assigned[1] is None):
+        assigned_start = self.assigned_seed_start
+        assigned_stop = self.assigned_seed_stop
+        if (assigned_start is None) != (assigned_stop is None):
             raise ValueError("Placement seed assignment must be complete or absent")
-        if assigned[0] is not None and assigned[1] < assigned[0]:
+        if (
+            assigned_start is not None
+            and assigned_stop is not None
+            and assigned_stop < assigned_start
+        ):
             raise ValueError("Placement seed assignment is invalid")
 
 

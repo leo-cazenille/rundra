@@ -1316,7 +1316,7 @@ def _result_format_version(value: object) -> int:
 
 
 def _campaign_plan_document(value: CampaignPlanValue) -> dict[str, Any]:
-    document = {
+    document: dict[str, Any] = {
         "name": value.name,
         "source": str(value.definition.source),
         "experiment": str(value.experiment_source),

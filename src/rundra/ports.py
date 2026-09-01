@@ -76,10 +76,14 @@ class SchedulerPartition:
             value is None for value in cpu_values
         ):
             raise ValueError("Scheduler partition CPU observations must be complete")
-        if self.cpu_total is not None and (
-            self.cpu_allocated + self.cpu_idle + self.cpu_other != self.cpu_total
-        ):
-            raise ValueError("Scheduler partition CPU observations are inconsistent")
+        if self.cpu_total is not None:
+            assert self.cpu_allocated is not None
+            assert self.cpu_idle is not None
+            assert self.cpu_other is not None
+            if self.cpu_allocated + self.cpu_idle + self.cpu_other != self.cpu_total:
+                raise ValueError(
+                    "Scheduler partition CPU observations are inconsistent"
+                )
 
     @property
     def utilization_percent(self) -> int | None:
