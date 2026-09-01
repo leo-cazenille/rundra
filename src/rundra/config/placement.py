@@ -118,17 +118,24 @@ def _parse_policy(
             code="DUPLICATE_VALUE",
             message="Placement candidate targets must be unique",
         )
+    max_utilization_percent = expect_integer(
+        document.get("max_utilization_percent", 90),
+        source=source,
+        path=(*path, "max_utilization_percent"),
+        minimum=1,
+    )
+    if max_utilization_percent > 100:
+        fail(
+            source=source,
+            path=(*path, "max_utilization_percent"),
+            code="INVALID_VALUE",
+            message="Value must be at most 100",
+        )
     return PlacementPolicy(
         name=name,
         candidates=candidates,
         strategy=strategy,
-        max_utilization_percent=expect_integer(
-            document.get("max_utilization_percent", 90),
-            source=source,
-            path=(*path, "max_utilization_percent"),
-            minimum=1,
-            maximum=100,
-        ),
+        max_utilization_percent=max_utilization_percent,
         minimum_idle_cpus=expect_integer(
             document.get("minimum_idle_cpus", 1),
             source=source,
