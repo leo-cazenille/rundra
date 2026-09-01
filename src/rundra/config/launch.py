@@ -15,6 +15,7 @@ from rundra.config._schema import (
     fail,
 )
 from rundra.config._yaml import read_yaml_document
+from rundra.config.campaigns import CampaignDefinition, parse_project_campaigns
 from rundra.config.preparation import parse_preparation
 from rundra.domain.preparation import PreparationConfig, PreparationStorageConfig
 from rundra.schema_versions import PROJECT_CONFIG_SCHEMA, USER_CONFIG_SCHEMA
@@ -26,6 +27,7 @@ _PROJECT_V3_FIELDS = _PROJECT_V2_FIELDS
 _PROJECT_V4_FIELDS = _PROJECT_V3_FIELDS
 _PROJECT_V5_FIELDS = _PROJECT_V4_FIELDS
 _PROJECT_V6_FIELDS = _PROJECT_V5_FIELDS
+_PROJECT_V7_FIELDS = _PROJECT_V6_FIELDS | {"campaigns"}
 _LAUNCH_VALUE_FIELDS = frozenset(
     {
         "config",
@@ -120,12 +122,13 @@ class ProjectLaunchConfig:
     profiles: Mapping[str, LaunchValues]
     default_profile: str | None = None
     preparation: PreparationConfig | None = None
+    campaigns: Mapping[str, CampaignDefinition] = MappingProxyType({})
 
     def __post_init__(self) -> None:
         if type(self.version) is not int:
             raise ValueError("ProjectLaunchConfig version must be an int")
         if self.version not in PROJECT_CONFIG_SCHEMA.supported:
-            raise ValueError("ProjectLaunchConfig version must be 1, 2, 3, 4, 5, or 6")
+            raise ValueError("ProjectLaunchConfig version must be between 1 and 7")
         if not isinstance(self.source, Path) or not self.source.is_absolute():
             raise ValueError("ProjectLaunchConfig source must be an absolute Path")
         if type(self.defaults) is not LaunchValues:
@@ -154,6 +157,13 @@ class ProjectLaunchConfig:
         ):
             raise ValueError("ProjectLaunchConfig v2+ requires preparation")
         object.__setattr__(self, "profiles", MappingProxyType(profiles))
+        campaigns = dict(self.campaigns)
+        if any(
+            type(name) is not str or type(value) is not CampaignDefinition
+            for name, value in campaigns.items()
+        ):
+            raise ValueError("ProjectLaunchConfig campaigns are invalid")
+        object.__setattr__(self, "campaigns", MappingProxyType(campaigns))
 
     @property
     def project_root(self) -> Path:
@@ -244,7 +254,7 @@ def load_project_launch(source: Path) -> ProjectLaunchConfig:
             path=("version",),
             code="UNSUPPORTED_VERSION",
             message=(
-                "Unsupported project config version; supported versions are 1 through 6"
+                "Unsupported project config version; supported versions are 1 through 7"
             ),
         )
     check_fields(
@@ -261,11 +271,15 @@ def load_project_launch(source: Path) -> ProjectLaunchConfig:
             else _PROJECT_V5_FIELDS
             if version == 5
             else _PROJECT_V6_FIELDS
+            if version == 6
+            else _PROJECT_V7_FIELDS
         ),
         required=(
             frozenset({"version"})
             if version == 1
             else frozenset({"version", "preparation"})
+            if version <= 6
+            else frozenset({"version"})
         ),
         source=normalized_source,
         path=(),
@@ -307,7 +321,17 @@ def load_project_launch(source: Path) -> ProjectLaunchConfig:
                     code="UNKNOWN_FIELD",
                     message="fetch_mode requires project configuration version 5",
                 )
-    if version_number == 1 and defaults == LaunchValues() and not profiles:
+    campaigns = (
+        parse_project_campaigns(document["campaigns"], source=normalized_source)
+        if "campaigns" in document
+        else MappingProxyType({})
+    )
+    if (
+        version_number in {1, 7}
+        and defaults == LaunchValues()
+        and not profiles
+        and not campaigns
+    ):
         fail(
             source=normalized_source,
             path=(),
@@ -335,7 +359,7 @@ def load_project_launch(source: Path) -> ProjectLaunchConfig:
             source=normalized_source,
             version=version,
         )
-        if version_number in {2, 3, 4, 5, 6}
+        if version_number in {2, 3, 4, 5, 6, 7} and "preparation" in document
         else None
     )
     return ProjectLaunchConfig(
@@ -345,6 +369,7 @@ def load_project_launch(source: Path) -> ProjectLaunchConfig:
         profiles=profiles,
         default_profile=default_profile,
         preparation=preparation,
+        campaigns=campaigns,
     )
 
 

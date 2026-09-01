@@ -1,7 +1,16 @@
 """Durable local RunRecord persistence."""
 
 from rundra.persistence.base import RunStore
+from rundra.persistence.campaign_store import (
+    JsonCampaignStore,
+    campaign_record_from_dict,
+    campaign_record_to_dict,
+)
 from rundra.persistence.errors import (
+    CampaignAlreadyExistsError,
+    CampaignNotFoundError,
+    CampaignRecordFormatError,
+    CampaignStoreConflictError,
     RunAlreadyExistsError,
     RunNotFoundError,
     RunRecordFormatError,
@@ -24,6 +33,11 @@ from rundra.persistence.task_store import (
 )
 
 __all__ = [
+    "CampaignAlreadyExistsError",
+    "CampaignNotFoundError",
+    "CampaignRecordFormatError",
+    "CampaignStoreConflictError",
+    "JsonCampaignStore",
     "JsonRunStore",
     "PurgeReceiptStore",
     "RunAlreadyExistsError",
@@ -41,5 +55,7 @@ __all__ = [
     "TaskStatePage",
     "record_from_dict",
     "record_to_dict",
+    "campaign_record_from_dict",
+    "campaign_record_to_dict",
     "receipt_document",
 ]

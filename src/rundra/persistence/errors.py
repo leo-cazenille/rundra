@@ -16,3 +16,19 @@ class RunStoreConflictError(RunStoreError):
 
 class RunRecordFormatError(RunStoreError):
     """Raised when persisted RunRecord JSON is malformed or unsupported."""
+
+
+class CampaignAlreadyExistsError(RunStoreError):
+    """Raised when creating an existing Campaign."""
+
+
+class CampaignNotFoundError(RunStoreError):
+    """Raised when a Campaign has no persisted record."""
+
+
+class CampaignStoreConflictError(RunStoreError):
+    """Raised when a Campaign update was computed from stale state."""
+
+
+class CampaignRecordFormatError(RunStoreError):
+    """Raised when persisted CampaignRecord JSON is invalid."""
