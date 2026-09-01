@@ -1,5 +1,5 @@
 [build-system]
-requires = ["uv_build==0.12.5"]
+requires = ["uv_build==0.12.7"]
 build-backend = "uv_build"
 
 [project]
@@ -68,5 +68,5 @@ dev = [
     "ruff>=0.9",
     "twine>=6.2,<8",
     "types-pyyaml>=6.0.12",
-    "uv-build==0.12.5",
+    "uv-build==0.12.7",
 ]
