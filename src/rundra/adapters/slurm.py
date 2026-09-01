@@ -1010,7 +1010,7 @@ class SlurmScheduler:
                         "--jobs",
                         joined,
                         "--format",
-                        "%i|%T|%S|%N",
+                        "%i|%T|%S|%N|%R",
                     )
                 ),
                 source="squeue",
@@ -1036,7 +1036,7 @@ class SlurmScheduler:
                             "--format",
                             # JobID preserves the root_index array alias. JobIDRaw
                             # may be an unrelated allocation ID on older Slurm.
-                            "JobID,State%32,ExitCode,Start,End,NodeList",
+                            "JobID,State%32,ExitCode,Start,End,NodeList,Reason",
                         )
                     ),
                     source="sacct",
@@ -2121,16 +2121,22 @@ def _parse_squeue(
         if not line.strip():
             continue
         fields = line.split("|")
-        if len(fields) != 4:
+        if len(fields) not in {4, 5}:
             raise SlurmQueryError("squeue returned a malformed row")
-        job_id, native_state, raw_start, nodes = fields
+        job_id, native_state, raw_start, nodes = fields[:4]
+        raw_reason = fields[4] if len(fields) == 5 else None
         reference = expected.get(job_id)
         if reference is None:
             continue
         if reference in observations:
             raise SlurmQueryError(f"squeue returned duplicate job {job_id}")
-        state = _portable_state(native_state, None)
-        metadata: dict[str, NativeValue] = {"source": "squeue"}
+        state, observed_native_state, reason_metadata = _state_with_pending_reason(
+            native_state, None, raw_reason
+        )
+        metadata: dict[str, NativeValue] = {
+            "source": "squeue",
+            **reason_metadata,
+        }
         if raw_start not in {"", "N/A", "Unknown", "None"}:
             metadata["native_start"] = raw_start
         if nodes not in {"", "(null)", "N/A"}:
@@ -2138,7 +2144,7 @@ def _parse_squeue(
         observations[reference] = SchedulerObservation(
             reference,
             state,
-            native_state,
+            observed_native_state,
             metadata=metadata,
             started_at=(
                 _parse_timestamp(raw_start, timezone)
@@ -2162,22 +2168,28 @@ def _parse_sacct(
         fields = line.split("|")
         if fields and fields[-1] == "":
             fields.pop()
-        if len(fields) != 6:
+        if len(fields) not in {6, 7}:
             raise SlurmQueryError("sacct returned a malformed row")
-        job_id, native_state, raw_exit, raw_start, raw_end, nodes = fields
+        job_id, native_state, raw_exit, raw_start, raw_end, nodes = fields[:6]
+        raw_reason = fields[6] if len(fields) == 7 else None
         reference = expected.get(job_id)
         if reference is None:
             continue
         if reference in observations:
             raise SlurmQueryError(f"sacct returned duplicate job {job_id}")
         exit_code = _parse_exit_code(raw_exit)
-        state = _portable_state(native_state, exit_code)
+        state, observed_native_state, reason_metadata = _state_with_pending_reason(
+            native_state, exit_code, raw_reason
+        )
         terminal = state in {
             ExecutionState.SUCCEEDED,
             ExecutionState.FAILED,
             ExecutionState.CANCELLED,
         }
-        metadata: dict[str, NativeValue] = {"source": "sacct"}
+        metadata: dict[str, NativeValue] = {
+            "source": "sacct",
+            **reason_metadata,
+        }
         if raw_start not in {"", "N/A", "Unknown", "None"}:
             metadata["native_start"] = raw_start
         if raw_end not in {"", "N/A", "Unknown", "None"}:
@@ -2187,7 +2199,7 @@ def _parse_sacct(
         observations[reference] = SchedulerObservation(
             reference,
             state,
-            native_state,
+            observed_native_state,
             exit_code=exit_code if terminal else None,
             metadata=metadata,
             started_at=_parse_timestamp(raw_start, timezone),
@@ -2240,6 +2252,7 @@ def _parse_scontrol_row(
             "StartTime",
             "EndTime",
             "NodeList",
+            "Reason",
         )
     }
     native_state = fields["JobState"]
@@ -2247,7 +2260,9 @@ def _parse_scontrol_row(
         raise SlurmQueryError("scontrol did not return JobState")
     raw_exit = fields["ExitCode"] or "Unknown"
     exit_code = _parse_exit_code(raw_exit)
-    state = _portable_state(native_state, exit_code)
+    state, observed_native_state, reason_metadata = _state_with_pending_reason(
+        native_state, exit_code, fields["Reason"]
+    )
     terminal = state in {
         ExecutionState.SUCCEEDED,
         ExecutionState.FAILED,
@@ -2256,7 +2271,10 @@ def _parse_scontrol_row(
     raw_start = fields["StartTime"] or "Unknown"
     raw_end = fields["EndTime"] or "Unknown"
     nodes = fields["NodeList"] or "Unknown"
-    metadata: dict[str, NativeValue] = {"source": "scontrol"}
+    metadata: dict[str, NativeValue] = {
+        "source": "scontrol",
+        **reason_metadata,
+    }
     if raw_start not in {"N/A", "Unknown", "None"}:
         metadata["native_start"] = raw_start
     if raw_end not in {"N/A", "Unknown", "None"}:
@@ -2266,7 +2284,7 @@ def _parse_scontrol_row(
     return SchedulerObservation(
         reference,
         state,
-        native_state,
+        observed_native_state,
         exit_code=exit_code if terminal else None,
         metadata=metadata,
         started_at=_parse_timestamp(raw_start, timezone),
@@ -2376,6 +2394,36 @@ def _portable_state(native_state: str, exit_code: int | None) -> ExecutionState:
     }:
         return ExecutionState.FAILED
     return ExecutionState.UNKNOWN
+
+
+def _state_with_pending_reason(
+    native_state: str,
+    exit_code: int | None,
+    raw_reason: str | None,
+) -> tuple[ExecutionState, str, dict[str, NativeValue]]:
+    state = _portable_state(native_state, exit_code)
+    if state is not ExecutionState.QUEUED:
+        return state, native_state, {}
+    reason = _pending_reason(raw_reason)
+    if reason is None:
+        return state, native_state, {}
+    normalized = re.sub(r"[^a-z0-9]", "", reason.lower())
+    held = "held" in normalized
+    if normalized == "launchfailedrequeuedheld":
+        state = ExecutionState.FAILED
+    metadata: dict[str, NativeValue] = {"pending_reason": reason}
+    if held:
+        metadata["scheduler_held"] = True
+    return state, f"{native_state} ({reason})", metadata
+
+
+def _pending_reason(raw_reason: str | None) -> str | None:
+    if raw_reason is None:
+        return None
+    reason = raw_reason.strip()
+    if reason in {"", "(null)", "N/A", "None", "Unknown"}:
+        return None
+    return re.sub(r"\s+", "_", reason)
 
 
 def _parse_exit_code(value: str) -> int | None:

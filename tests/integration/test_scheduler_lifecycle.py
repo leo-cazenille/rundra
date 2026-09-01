@@ -590,6 +590,39 @@ def test_failed_preparation_prevents_scientific_status_progression(tmp_path) -> 
     assert scheduler.cancelled == [(_REFERENCE,)]
 
 
+def test_launch_failed_held_preparation_cancels_dependent_work(tmp_path) -> None:
+    record = _prepared_record()
+    store = JsonRunStore(tmp_path / "records")
+    store.create(record)
+    scheduler = PreparedLifecycleScheduler(
+        SchedulerObservation(
+            SchedulerReference("900"),
+            ExecutionState.FAILED,
+            "PENDING (launch_failed_requeued_held)",
+            metadata={
+                "pending_reason": "launch_failed_requeued_held",
+                "scheduler_held": True,
+            },
+        ),
+        _observation(ExecutionState.QUEUED, "PENDING (Dependency)"),
+    )
+
+    failed = SchedulerLifecycleService(
+        store=store,
+        scheduler=scheduler,
+        clock=lambda: _CREATED + timedelta(seconds=4),
+    ).refresh(record)
+
+    assert failed.run.state is ExecutionState.FAILED
+    assert failed.native_state == "PREPARATION_FAILED"
+    assert failed.preparation is not None
+    assert (
+        failed.preparation.builder_state
+        == "PENDING (launch_failed_requeued_held)"
+    )
+    assert scheduler.cancelled == [(_REFERENCE,)]
+
+
 def test_failed_preparation_remains_refreshable_when_dependency_cancel_fails(
     tmp_path,
 ) -> None:

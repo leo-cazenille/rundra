@@ -1729,6 +1729,41 @@ def test_slurm_query_marks_accounting_lag_explicitly() -> None:
     assert observation.metadata == {"accounting_pending": True}
 
 
+@pytest.mark.parametrize(
+    ("reason", "expected_state", "held"),
+    [
+        ("Resources", ExecutionState.QUEUED, False),
+        ("JobHeldUser", ExecutionState.QUEUED, True),
+        ("launch failed requeued held", ExecutionState.FAILED, True),
+    ],
+)
+def test_slurm_query_preserves_pending_reasons_and_fails_launch_holds(
+    reason: str,
+    expected_state: ExecutionState,
+    held: bool,
+) -> None:
+    reference = SchedulerReference("789")
+    transport = ScriptedTransport(
+        deque(
+            [
+                _command_result(
+                    Command(("unused",)),
+                    0,
+                    f"789|PENDING|Unknown|(null)|{reason}\n",
+                )
+            ]
+        )
+    )
+
+    observation = SlurmScheduler(transport).query((reference,))[0]
+
+    normalized_reason = reason.replace(" ", "_")
+    assert observation.state is expected_state
+    assert observation.native_state == f"PENDING ({normalized_reason})"
+    assert observation.metadata["pending_reason"] == normalized_reason
+    assert observation.metadata.get("scheduler_held", False) is held
+
+
 def test_slurm_query_falls_back_to_scontrol_when_accounting_is_disabled() -> None:
     reference = SchedulerReference("18")
     transport = ScriptedTransport(
