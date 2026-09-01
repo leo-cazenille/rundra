@@ -631,7 +631,13 @@ def _plan_child(
         inputs.targets_file,
         inputs.target,
         seed=inputs.seed,
-        seeds=inputs.seeds if inputs.seed is None else None,
+        seeds=(
+            None
+            if inputs.seed is not None
+            else f"{inputs.seeds.start}:{inputs.seeds.stop}"
+            if isinstance(inputs.seeds, SeedRange)
+            else f"{inputs.seeds[0]}:{inputs.seeds[-1]}"
+        ),
         launch=inputs.launch,
         preparation=inputs.preparation_plan,
         sweep=inputs.sweep,
