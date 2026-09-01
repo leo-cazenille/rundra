@@ -610,7 +610,7 @@ def _campaign_override_error(
         "task_slots_per_worker": getattr(arguments, "task_slots_per_worker", None),
         "fetch_mode": getattr(arguments, "fetch_mode", None),
         "placement": getattr(arguments, "placement", None),
-        "candidate_targets": getattr(arguments, "candidate_targets", ()),
+        "candidate_targets": tuple(getattr(arguments, "candidate_targets", ())),
     }
     selected = tuple(
         name for name, value in fields.items() if value not in (None, False)
