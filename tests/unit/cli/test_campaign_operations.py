@@ -2,7 +2,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rundra.cli.campaign_operations import campaign_plan_operation
+from rundra.cli.campaign_operations import (
+    CampaignLaunchPlanValue,
+    campaign_plan_operation,
+    campaign_submit_operation,
+)
+from rundra.domain.campaigns import (
+    CampaignFailurePolicy,
+    CampaignId,
+    CampaignSubmissionState,
+)
+from rundra.domain.models import RunId
+from rundra.persistence.campaign_store import JsonCampaignStore
+from rundra.results import OperationError, OperationResult
 
 
 def _write_inputs(
@@ -190,3 +202,114 @@ launches:
         result.value.launches[0].destination
         == (tmp_path / "collected/cluster").resolve()
     )
+
+
+def test_campaign_submit_reserves_ids_and_cancels_prior_children(
+    tmp_path: Path,
+) -> None:
+    experiment = _write_inputs(
+        tmp_path,
+        campaigns="""\
+  cancel-on-failure:
+    launches:
+      - {name: first, seed: 1}
+      - {name: second, seed: 2}
+      - {name: third, seed: 3}
+""",
+    )
+    planned = campaign_plan_operation(
+        experiment,
+        campaign_name="cancel-on-failure",
+        targets_file=tmp_path / "targets.yaml",
+        data_dir=tmp_path / "records",
+    )
+    assert planned.ok and planned.value is not None
+    submitted: list[RunId] = []
+    cancelled: list[RunId] = []
+
+    def submitter(
+        launch: CampaignLaunchPlanValue,
+        run_id: RunId,
+        confirmed: int | None,
+    ) -> OperationResult[RunId]:
+        submitted.append(run_id)
+        if len(submitted) == 2:
+            return OperationResult.failure(
+                "submit", OperationError("SCHEDULER_SUBMISSION_FAILED", "rejected")
+            )
+        return OperationResult.success("submit", run_id)
+
+    def canceller(run_id: RunId, data_dir: Path) -> OperationResult[object]:
+        cancelled.append(run_id)
+        return OperationResult.success("cancel", object())
+
+    result = campaign_submit_operation(
+        planned.value,
+        submitter=submitter,
+        canceller=canceller,
+        campaign_id_factory=lambda: CampaignId(
+            "campaign_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ),
+        framework_version="test",
+    )
+
+    assert not result.ok and result.error is not None
+    record = JsonCampaignStore(tmp_path / "records").load(
+        CampaignId("campaign_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    )
+    assert len(set(submitted)) == 2
+    assert cancelled == [submitted[0]]
+    assert [item.submission_state for item in record.launches] == [
+        CampaignSubmissionState.CANCELLED,
+        CampaignSubmissionState.FAILED,
+        CampaignSubmissionState.NOT_ATTEMPTED,
+    ]
+
+
+def test_campaign_submit_unknown_outcome_halts_without_policy_action(
+    tmp_path: Path,
+) -> None:
+    experiment = _write_inputs(
+        tmp_path,
+        campaigns="""\
+  uncertain:
+    on_submit_failure: continue
+    launches:
+      - {name: first, seed: 1}
+      - {name: second, seed: 2}
+""",
+    )
+    planned = campaign_plan_operation(
+        experiment,
+        campaign_name="uncertain",
+        targets_file=tmp_path / "targets.yaml",
+        data_dir=tmp_path / "records",
+    )
+    assert planned.ok and planned.value is not None
+
+    def submitter(
+        launch: CampaignLaunchPlanValue,
+        run_id: RunId,
+        confirmed: int | None,
+    ) -> OperationResult[RunId]:
+        return OperationResult.failure(
+            "submit", OperationError("SUBMISSION_OUTCOME_UNKNOWN", "uncertain")
+        )
+
+    campaign_id = CampaignId("campaign_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+    result = campaign_submit_operation(
+        planned.value,
+        submitter=submitter,
+        campaign_id_factory=lambda: campaign_id,
+        framework_version="test",
+    )
+
+    assert not result.ok and result.error is not None
+    assert result.error.code == "CAMPAIGN_SUBMISSION_OUTCOME_UNKNOWN"
+    assert result.error.details["run_id"]
+    record = JsonCampaignStore(tmp_path / "records").load(campaign_id)
+    assert record.on_submit_failure is CampaignFailurePolicy.CONTINUE
+    assert [item.submission_state for item in record.launches] == [
+        CampaignSubmissionState.UNKNOWN,
+        CampaignSubmissionState.PENDING,
+    ]

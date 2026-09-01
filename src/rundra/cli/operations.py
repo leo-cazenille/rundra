@@ -2151,7 +2151,10 @@ def submit_operation(
     task_slots_per_worker: int | None = None,
     submission_receipts: SubmissionReceiptStore | None = None,
     task_store: SqliteTaskStore | None = None,
+    run_id: RunId | None = None,
 ) -> OperationResult[RunValue]:
+    if run_id is not None and type(run_id) is not RunId:
+        raise TypeError("submit_operation run_id must be a RunId or None")
     try:
         _report_progress(
             progress,
@@ -2358,6 +2361,7 @@ def submit_operation(
             progress=progress,
             submission_receipts=submission_receipts,
             task_store=task_store,
+            run_id_factory=RunId.new if run_id is None else lambda: run_id,
         )
         result = service.submit_one(
             RunExecutionRequest(

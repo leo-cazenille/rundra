@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
+from importlib.metadata import version
 from pathlib import Path
 
 from rundra.cli.capability_doctor import (
@@ -10,9 +13,12 @@ from rundra.cli.capability_doctor import (
 from rundra.cli.operations import (
     PlanValue,
     ResolvedRunInputs,
+    RunValue,
     _config_error,
+    cancel_operation,
     plan_operation,
     resolve_run_inputs_operation,
+    submit_operation,
 )
 from rundra.config.campaigns import (
     CampaignDefinition,
@@ -22,9 +28,21 @@ from rundra.config.campaigns import (
 from rundra.config.errors import ConfigError
 from rundra.config.launch import discover_project_launch
 from rundra.config.sweeps import load_sweep_config
-from rundra.domain.campaigns import CampaignFailurePolicy
+from rundra.domain.campaigns import (
+    CampaignFailurePolicy,
+    CampaignId,
+    CampaignLaunchRecord,
+    CampaignRecord,
+    CampaignSubmissionState,
+)
+from rundra.domain.models import RunId
 from rundra.domain.preparation import PreparationStorageConfig
 from rundra.domain.scaling import SeedRange
+from rundra.persistence.campaign_store import JsonCampaignStore
+from rundra.persistence.errors import RunStoreError
+from rundra.persistence.json_store import JsonRunStore
+from rundra.persistence.submission_store import SubmissionReceiptStore
+from rundra.persistence.task_store import SqliteTaskStore
 from rundra.results import OperationError, OperationResult
 from rundra.scheduler_registry import scheduler_capabilities
 
@@ -134,6 +152,21 @@ class CampaignDoctorValue:
     @property
     def complete(self) -> bool:
         return all(item.doctor.complete for item in self.launches)
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignSubmitValue:
+    record: CampaignRecord
+
+    @property
+    def campaign_id(self) -> CampaignId:
+        return self.record.id
+
+
+type CampaignChildSubmitter = Callable[
+    [CampaignLaunchPlanValue, RunId, int | None], OperationResult[RunId]
+]
+type CampaignChildCanceller = Callable[[RunId, Path], OperationResult[object]]
 
 
 def campaign_plan_operation(
@@ -249,6 +282,25 @@ def campaign_plan_operation(
         launches.append(CampaignLaunchPlanValue(launch.name, inputs, planned.value))
 
     duplicate_overlaps = _duplicate_overlaps(tuple(launches))
+    data_directories = {item.inputs.data_dir for item in launches}
+    if len(data_directories) != 1:
+        return OperationResult.failure(
+            "plan",
+            OperationError(
+                "CAMPAIGN_DATA_DIR_MISMATCH",
+                "All campaign launches must use one Run store",
+                {"data_dirs": tuple(sorted(str(path) for path in data_directories))},
+            ),
+        )
+    destinations = {item.destination for item in launches}
+    if len(destinations) != len(launches):
+        return OperationResult.failure(
+            "plan",
+            OperationError(
+                "DUPLICATE_CAMPAIGN_DESTINATION",
+                "Resolved campaign destinations must be unique",
+            ),
+        )
     if duplicate_overlaps and not definition.allow_duplicate_tasks:
         left, right, count = duplicate_overlaps[0]
         return OperationResult.failure(
@@ -360,6 +412,155 @@ def campaign_doctor_operation(
     )
 
 
+def campaign_submit_operation(
+    plan: CampaignPlanValue,
+    *,
+    confirm_tasks: int | None = None,
+    submitter: CampaignChildSubmitter | None = None,
+    canceller: CampaignChildCanceller | None = None,
+    campaign_id_factory: Callable[[], CampaignId] = CampaignId.new,
+    clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    framework_version: str | None = None,
+) -> OperationResult[CampaignSubmitValue]:
+    """Durably submit every child Run according to the campaign failure policy."""
+    if type(plan) is not CampaignPlanValue:
+        raise TypeError("campaign_submit_operation plan must be a CampaignPlanValue")
+    if confirm_tasks is not None and confirm_tasks != plan.total_tasks:
+        return OperationResult.failure(
+            "submit",
+            OperationError(
+                "CAMPAIGN_TASK_CONFIRMATION_MISMATCH",
+                f"Campaign requires --confirm-tasks {plan.total_tasks}",
+                {"expected": plan.total_tasks, "actual": confirm_tasks},
+            ),
+        )
+    campaign_id = campaign_id_factory()
+    if type(campaign_id) is not CampaignId:
+        raise TypeError("Campaign ID factory must return a CampaignId")
+    created_at = clock()
+    if not isinstance(created_at, datetime) or created_at.utcoffset() is None:
+        raise TypeError("Campaign clock must return a timezone-aware datetime")
+    data_dir = plan.launches[0].inputs.data_dir
+    store = JsonCampaignStore(data_dir)
+    record = CampaignRecord(
+        1,
+        framework_version or version("rundra"),
+        campaign_id,
+        plan.name,
+        plan.definition.source,
+        plan.experiment_source,
+        created_at,
+        plan.on_submit_failure,
+        plan.definition.allow_duplicate_tasks,
+        tuple(
+            CampaignLaunchRecord(
+                launch.name,
+                RunId.new(),
+                launch.target,
+                launch.task_count,
+                launch.destination,
+            )
+            for launch in plan.launches
+        ),
+    )
+    active_submitter = submitter or (
+        lambda launch, run_id, confirmed: _submit_campaign_child(
+            plan.experiment_source, launch, run_id, confirmed
+        )
+    )
+    active_canceller = canceller or _cancel_campaign_child
+    try:
+        store.create(record)
+        failures: list[tuple[str, OperationError]] = []
+        cancellation_failures: list[str] = []
+        for index, launch in enumerate(plan.launches):
+            child = record.launches[index]
+            record = _update_campaign_launch(
+                store, record, index, CampaignSubmissionState.SUBMITTING
+            )
+            result = active_submitter(
+                launch,
+                child.run_id,
+                launch.task_count if confirm_tasks is not None else None,
+            )
+            if result.ok:
+                assert result.value is not None
+                if result.value != child.run_id:
+                    raise RunStoreError(
+                        f"Campaign child {launch.name} returned Run {result.value}, "
+                        f"expected {child.run_id}"
+                    )
+                record = _update_campaign_launch(
+                    store, record, index, CampaignSubmissionState.SUBMITTED
+                )
+                continue
+            assert result.error is not None
+            unknown = result.error.code == "SUBMISSION_OUTCOME_UNKNOWN"
+            state = (
+                CampaignSubmissionState.UNKNOWN
+                if unknown
+                else CampaignSubmissionState.FAILED
+            )
+            record = _update_campaign_launch(store, record, index, state)
+            failures.append((launch.name, result.error))
+            if unknown:
+                return OperationResult.failure(
+                    "submit",
+                    _campaign_submission_error(
+                        "CAMPAIGN_SUBMISSION_OUTCOME_UNKNOWN",
+                        record,
+                        launch.name,
+                        child.run_id,
+                        result.error,
+                    ),
+                )
+            if plan.on_submit_failure is CampaignFailurePolicy.CONTINUE:
+                continue
+            if plan.on_submit_failure is CampaignFailurePolicy.CANCEL:
+                for prior_index in range(index):
+                    prior = record.launches[prior_index]
+                    if prior.submission_state is not CampaignSubmissionState.SUBMITTED:
+                        continue
+                    cancelled = active_canceller(prior.run_id, data_dir)
+                    if cancelled.ok:
+                        record = _update_campaign_launch(
+                            store,
+                            record,
+                            prior_index,
+                            CampaignSubmissionState.CANCELLED,
+                        )
+                    else:
+                        cancellation_failures.append(str(prior.run_id))
+            record = _mark_unattempted(store, record, index + 1)
+            break
+        finished_at = clock()
+        updated = replace(record, submitted_at=finished_at)
+        store.update(updated, expected=record)
+        record = updated
+        if failures:
+            launch_name, error = failures[0]
+            details: dict[str, str | int | bool | tuple[str | int, ...]] = {
+                "campaign_id": str(record.id),
+                "launch": launch_name,
+                "failed_launches": tuple(name for name, _ in failures),
+            }
+            if cancellation_failures:
+                details["cancellation_failures"] = tuple(cancellation_failures)
+            return OperationResult.failure(
+                "submit",
+                OperationError(
+                    "CAMPAIGN_SUBMISSION_FAILED",
+                    f"Campaign {record.id} submission failed at launch '{launch_name}': {error.message}",
+                    details,
+                ),
+            )
+        return OperationResult.success("submit", CampaignSubmitValue(record))
+    except RunStoreError as error:
+        return OperationResult.failure(
+            "submit", OperationError("CAMPAIGN_STORE_ERROR", str(error))
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class CampaignResolutionError(Exception):
     operation_error: OperationError
@@ -461,3 +662,94 @@ def _launch_error(name: str, error: OperationError) -> OperationError:
 
 def _cache_root(storage: PreparationStorageConfig) -> Path | None:
     return None if storage.cache_root is None else Path(str(storage.cache_root))
+
+
+def _submit_campaign_child(
+    experiment_source: Path,
+    launch: CampaignLaunchPlanValue,
+    run_id: RunId,
+    confirm_tasks: int | None,
+) -> OperationResult[RunId]:
+    inputs = launch.inputs
+    result = submit_operation(
+        experiment_source,
+        inputs.config,
+        inputs.targets_file,
+        inputs.target,
+        inputs.source_root,
+        inputs.destination,
+        JsonRunStore(inputs.data_dir),
+        seed=inputs.seed,
+        seeds=inputs.seeds if inputs.seed is None else None,
+        launch=inputs.launch,
+        preparation=inputs.preparation_plan,
+        preparation_storage=inputs.preparation_storage,
+        sweep=inputs.sweep,
+        confirm_tasks=confirm_tasks,
+        workers=inputs.workers,
+        task_slots_per_worker=inputs.task_slots_per_worker,
+        submission_receipts=SubmissionReceiptStore(inputs.data_dir),
+        task_store=SqliteTaskStore(inputs.data_dir),
+        run_id=run_id,
+    )
+    if not result.ok:
+        assert result.error is not None
+        return OperationResult.failure("submit", result.error)
+    assert isinstance(result.value, RunValue)
+    return OperationResult.success("submit", result.value.run_id)
+
+
+def _cancel_campaign_child(run_id: RunId, data_dir: Path) -> OperationResult[object]:
+    result = cancel_operation(
+        str(run_id),
+        JsonRunStore(data_dir),
+        task_store=SqliteTaskStore(data_dir),
+    )
+    if not result.ok:
+        assert result.error is not None
+        return OperationResult.failure("cancel", result.error)
+    return OperationResult.success("cancel", object())
+
+
+def _update_campaign_launch(
+    store: JsonCampaignStore,
+    record: CampaignRecord,
+    index: int,
+    state: CampaignSubmissionState,
+) -> CampaignRecord:
+    launches = list(record.launches)
+    launches[index] = replace(launches[index], submission_state=state)
+    updated = replace(record, launches=tuple(launches))
+    store.update(updated, expected=record)
+    return updated
+
+
+def _mark_unattempted(
+    store: JsonCampaignStore, record: CampaignRecord, start: int
+) -> CampaignRecord:
+    current = record
+    for index in range(start, len(current.launches)):
+        if current.launches[index].submission_state is CampaignSubmissionState.PENDING:
+            current = _update_campaign_launch(
+                store, current, index, CampaignSubmissionState.NOT_ATTEMPTED
+            )
+    return current
+
+
+def _campaign_submission_error(
+    code: str,
+    record: CampaignRecord,
+    launch: str,
+    run_id: RunId,
+    child_error: OperationError,
+) -> OperationError:
+    return OperationError(
+        code,
+        f"Campaign {record.id} launch '{launch}' has an unknown scheduler outcome; resume child Run {run_id}",
+        {
+            "campaign_id": str(record.id),
+            "launch": launch,
+            "run_id": str(run_id),
+            "child_error": child_error.code,
+        },
+    )
