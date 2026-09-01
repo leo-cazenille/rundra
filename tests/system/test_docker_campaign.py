@@ -157,3 +157,63 @@ launches:
         "cluster-a",
         "cluster-b",
     }
+
+
+def test_docker_campaign_places_tasks_across_available_targets(
+    tmp_path: Path,
+    docker_slurm_targets_source: Path,
+) -> None:
+    data_dir = tmp_path / "records"
+    config = tmp_path / "config.yaml"
+    config.write_text("failure_seed: -1\nsleep_seconds: 3\n", encoding="utf-8")
+    destination = tmp_path / "retrieved"
+    common = (
+        str(_SOURCE / "experiment.yaml"),
+        "--config",
+        str(config),
+        "--seeds",
+        "8:15",
+        "--placement",
+        "auto",
+        "--candidate-target",
+        _TARGETS[0],
+        "--candidate-target",
+        _TARGETS[1],
+        "--targets-file",
+        str(docker_slurm_targets_source),
+        "--source-root",
+        str(_SOURCE),
+        "--destination",
+        str(destination),
+        "--data-dir",
+        str(data_dir),
+    )
+
+    planned = _rundr("plan", *common)
+    placement = planned["campaign"]["placement"]
+    assert placement["policy"] == "auto"
+    assert set(placement["selected_targets"]) == set(_TARGETS)
+    assert planned["campaign"]["safety"]["contacts_targets"] is True
+    assert sum(
+        int(item["task_count"]) for item in planned["campaign"]["launches"]
+    ) == 8
+
+    submitted = _rundr("submit", *common)
+    campaign_id = next(iter(_matching_strings(submitted, "campaign_")))
+    waited = _rundr("wait", campaign_id, "--timeout", "300", "--data-dir", str(data_dir))
+    assert "SUCCEEDED" in _matching_strings(waited, "SUCCEEDED")
+
+    _rundr(
+        "fetch",
+        campaign_id,
+        "--mode",
+        "copy",
+        "--extract",
+        "--data-dir",
+        str(data_dir),
+    )
+    paths = sorted(destination.glob("*/output/task_*/results/result.json"))
+    assert len(paths) == 8
+    documents = [json.loads(path.read_text(encoding="utf-8")) for path in paths]
+    assert {item["seed"] for item in documents} == set(range(8, 16))
+    assert {path.parts[-5] for path in paths} == set(_TARGETS)
