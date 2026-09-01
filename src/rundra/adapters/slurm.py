@@ -23,10 +23,10 @@ from rundra.ports import (
     SchedulerObservation,
     SchedulerPartition,
     SchedulerReference,
-    SchedulerSubmissionRole,
     SchedulerSubmission,
     SchedulerSubmissionFailure,
     SchedulerSubmissionOutcome,
+    SchedulerSubmissionRole,
     Transport,
 )
 

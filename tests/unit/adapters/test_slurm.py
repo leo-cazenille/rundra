@@ -38,8 +38,8 @@ from rundra.ports import (
     SchedulerArrayRequest,
     SchedulerGroup,
     SchedulerReference,
-    SchedulerSubmissionRole,
     SchedulerSubmissionOutcome,
+    SchedulerSubmissionRole,
     SchedulerUnit,
 )
 
