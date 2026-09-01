@@ -19,6 +19,24 @@ from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import AnyHttpUrl
 
 from rundra.cli.agent_guide import GUIDE, GUIDE_TOPICS
+from rundra.cli.campaign_operations import (
+    CampaignAndRunListValue,
+    CampaignPlanValue,
+    campaign_cancel_operation,
+    campaign_fetch_operation,
+    campaign_inspect_operation,
+    campaign_list_operation,
+    campaign_logs_operation,
+    campaign_plan_operation,
+    campaign_purge_operation,
+    campaign_resume_operation,
+    campaign_run_operation,
+    campaign_status_operation,
+    campaign_submit_operation,
+    campaign_tasks_operation,
+    campaign_validate_operation,
+    campaign_wait_operation,
+)
 from rundra.cli.doctor import doctor_operation
 from rundra.cli.operations import (
     await_runs_operation,
@@ -42,7 +60,14 @@ from rundra.cli.operations import (
     wait_operation,
 )
 from rundra.cli.render import result_document
+from rundra.config.campaigns import is_campaign_source
+from rundra.domain.campaigns import (
+    CampaignId,
+    CampaignRecord,
+    CampaignSubmissionState,
+)
 from rundra.persistence import (
+    JsonCampaignStore,
     JsonRunStore,
     PurgeReceiptStore,
     SqliteTaskStore,
@@ -160,15 +185,27 @@ def build_server(
     def submission_receipts() -> SubmissionReceiptStore:
         return SubmissionReceiptStore(settings.data_dir)
 
+    def campaign_requested(source: Path, campaign: str | None) -> bool:
+        return campaign is not None or is_campaign_source(source)
+
+    def campaign_id(value: str) -> CampaignId | None:
+        try:
+            return CampaignId(value)
+        except (TypeError, ValueError):
+            return None
+
     def document(result: OperationResult[Any]) -> dict[str, Any]:
         return result_document(result)
 
     def plan_result(
         experiment: str,
         config: str | None,
-        seeds: str,
+        seeds: str | None,
         target: str | None,
         profile: str | None,
+        campaign: str | None,
+        source_root: str | None,
+        destination: str | None,
         execution_strategy: str,
         retrieval: str,
         prepare_location: str,
@@ -177,6 +214,70 @@ def build_server(
         offline: bool,
     ) -> tuple[OperationResult[Any], str | None]:
         experiment_path = settings.path(experiment)
+        if campaign_requested(experiment_path, campaign):
+            overrides = tuple(
+                name
+                for name, value in (
+                    ("config", config),
+                    ("seeds", seeds),
+                    ("target", target),
+                    ("profile", profile),
+                )
+                if value is not None
+            )
+            if overrides:
+                return (
+                    OperationResult.failure(
+                        "plan",
+                        OperationError(
+                            "CAMPAIGN_OVERRIDE_UNSUPPORTED",
+                            "Campaign Tasks must be assigned in the campaign definition",
+                            {"fields": overrides},
+                        ),
+                    ),
+                    None,
+                )
+            campaign_planned = campaign_plan_operation(
+                experiment_path,
+                campaign_name=campaign,
+                targets_file=settings.targets_file,
+                data_dir=settings.data_dir,
+                source_root=(
+                    None if source_root is None else settings.path(source_root)
+                ),
+                destination=(
+                    None if destination is None else settings.path(destination)
+                ),
+                prepare_location=prepare_location,
+                rebuild=rebuild,
+                rebuild_image=rebuild_image,
+                offline=offline,
+                execution_strategy=execution_strategy,
+                retrieval_policy=retrieval,
+            )
+            if not campaign_planned.ok:
+                return campaign_planned, None
+            canonical = json.dumps(
+                document(campaign_planned),
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+            return (
+                campaign_planned,
+                hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+            )
+        if seeds is None:
+            return (
+                OperationResult.failure(
+                    "plan",
+                    OperationError(
+                        "SEEDS_REQUIRED",
+                        "MCP experiment plans require explicit seeds",
+                    ),
+                ),
+                None,
+            )
         resolved = resolve_plan_inputs_operation(
             experiment_path,
             config=None if config is None else settings.path(config),
@@ -234,9 +335,14 @@ def build_server(
         return {"ok": True, "topic": topic, "guidance": guidance}
 
     @server.tool()
-    def validate_experiment(experiment: str) -> dict[str, Any]:
-        """Validate an experiment and adjacent project configuration."""
-        return document(validate_operation(settings.path(experiment)))
+    def validate_experiment(
+        experiment: str, campaign: str | None = None
+    ) -> dict[str, Any]:
+        """Validate an experiment or campaign and adjacent project configuration."""
+        source = settings.path(experiment)
+        if campaign_requested(source, campaign):
+            return document(campaign_validate_operation(source, campaign_name=campaign))
+        return document(validate_operation(source))
 
     @server.tool()
     def list_targets() -> dict[str, Any]:
@@ -253,10 +359,13 @@ def build_server(
     @server.tool()
     def plan_experiment(
         experiment: str,
-        seeds: str,
+        seeds: str | None = None,
         config: str | None = None,
         target: str | None = None,
         profile: str | None = None,
+        campaign: str | None = None,
+        source_root: str | None = None,
+        destination: str | None = None,
         execution_strategy: str = "auto",
         retrieval: str = "manifest",
         prepare_location: str = "auto",
@@ -271,6 +380,9 @@ def build_server(
             seeds,
             target,
             profile,
+            campaign,
+            source_root,
+            destination,
             execution_strategy,
             retrieval,
             prepare_location,
@@ -286,11 +398,12 @@ def build_server(
     def execute(
         operation: str,
         experiment: str,
-        seeds: str,
         plan_digest: str,
+        seeds: str | None,
         config: str | None,
         target: str | None,
         profile: str | None,
+        campaign: str | None,
         source_root: str | None,
         destination: str | None,
         confirm_tasks: int | None,
@@ -305,6 +418,9 @@ def build_server(
             seeds,
             target,
             profile,
+            campaign,
+            source_root,
+            destination,
             "auto",
             "manifest",
             prepare_location,
@@ -324,6 +440,15 @@ def build_server(
                     ),
                 )
             )
+        if isinstance(planned.value, CampaignPlanValue):
+            campaign_result = (
+                campaign_run_operation(planned.value, confirm_tasks=confirm_tasks)
+                if operation == "run"
+                else campaign_submit_operation(
+                    planned.value, confirm_tasks=confirm_tasks
+                )
+            )
+            return document(campaign_result)
         experiment_path = settings.path(experiment)
         resolved = resolve_run_inputs_operation(
             experiment_path,
@@ -385,11 +510,12 @@ def build_server(
     @server.tool()
     def submit_experiment(
         experiment: str,
-        seeds: str,
         plan_digest: str,
+        seeds: str | None = None,
         config: str | None = None,
         target: str | None = None,
         profile: str | None = None,
+        campaign: str | None = None,
         source_root: str | None = None,
         destination: str | None = None,
         confirm_tasks: int | None = None,
@@ -402,11 +528,12 @@ def build_server(
         return execute(
             "submit",
             experiment,
-            seeds,
             plan_digest,
+            seeds,
             config,
             target,
             profile,
+            campaign,
             source_root,
             destination,
             confirm_tasks,
@@ -419,11 +546,12 @@ def build_server(
     @server.tool()
     def run_experiment(
         experiment: str,
-        seeds: str,
         plan_digest: str,
+        seeds: str | None = None,
         config: str | None = None,
         target: str | None = None,
         profile: str | None = None,
+        campaign: str | None = None,
         source_root: str | None = None,
         destination: str | None = None,
         confirm_tasks: int | None = None,
@@ -436,11 +564,12 @@ def build_server(
         return execute(
             "run",
             experiment,
-            seeds,
             plan_digest,
+            seeds,
             config,
             target,
             profile,
+            campaign,
             source_root,
             destination,
             confirm_tasks,
@@ -464,7 +593,17 @@ def build_server(
                     ),
                 )
             )
-        result = await asyncio.to_thread(
+        selected_campaign = campaign_id(run_id)
+        if selected_campaign is not None:
+            result = await asyncio.to_thread(
+                campaign_wait_operation,
+                selected_campaign,
+                settings.data_dir,
+                timeout=timeout_seconds,
+                poll_interval=poll_interval,
+            )
+            return document(result)
+        run_result = await asyncio.to_thread(
             wait_operation,
             run_id,
             store(),
@@ -472,7 +611,7 @@ def build_server(
             poll_interval=poll_interval,
             task_store=task_store(),
         )
-        return document(result)
+        return document(run_result)
 
     @server.tool()
     async def await_runs(
@@ -483,9 +622,32 @@ def build_server(
         fail_on_run_failure: bool = False,
     ) -> dict[str, Any]:
         """Wait silently until all or any of several Runs terminate."""
+        expanded: list[str] = []
+        for identifier in run_ids:
+            selected_campaign = campaign_id(identifier)
+            if selected_campaign is None:
+                expanded.append(identifier)
+                continue
+            try:
+                record = JsonCampaignStore(settings.data_dir).load(selected_campaign)
+            except Exception as error:
+                return document(
+                    OperationResult.failure(
+                        "await", OperationError("CAMPAIGN_STORE_ERROR", str(error))
+                    )
+                )
+            expanded.extend(
+                str(launch.run_id)
+                for launch in record.launches
+                if launch.submission_state
+                not in {
+                    CampaignSubmissionState.PENDING,
+                    CampaignSubmissionState.NOT_ATTEMPTED,
+                }
+            )
         result = await asyncio.to_thread(
             await_runs_operation,
-            run_ids,
+            expanded,
             store(),
             until=until,
             timeout=timeout_seconds,
@@ -498,11 +660,28 @@ def build_server(
     @server.tool()
     def get_status(run_id: str) -> dict[str, Any]:
         """Refresh and return aggregate Run status."""
+        selected_campaign = campaign_id(run_id)
+        if selected_campaign is not None:
+            return document(
+                campaign_status_operation(selected_campaign, settings.data_dir)
+            )
         return document(status_operation(run_id, store(), task_store=task_store()))
 
     @server.tool()
     def resume_submission(run_id: str) -> dict[str, Any]:
         """Recover an interrupted submission or find its durable scheduler IDs."""
+        selected_campaign = campaign_id(run_id)
+        if selected_campaign is not None:
+            inspected = campaign_inspect_operation(selected_campaign, settings.data_dir)
+            if not inspected.ok:
+                return document(inspected)
+            assert inspected.value is not None
+            record = inspected.value.record
+            planned = campaign_plan_for_record(record)
+            if not planned.ok:
+                return document(planned)
+            assert planned.value is not None
+            return document(campaign_resume_operation(planned.value, selected_campaign))
         return document(resume_operation(run_id, store(), submission_receipts()))
 
     @server.tool()
@@ -512,6 +691,17 @@ def build_server(
         not_submitted: bool,
     ) -> dict[str, Any]:
         """Close an uncertain submission after external scheduler verification."""
+        if campaign_id(run_id) is not None:
+            return document(
+                OperationResult.failure(
+                    "resolve-submission",
+                    OperationError(
+                        "CHILD_RUN_REQUIRED",
+                        "resolve_submission requires the uncertain child Run ID",
+                        {"campaign_id": run_id},
+                    ),
+                )
+            )
         return document(
             resolve_submission_operation(
                 run_id,
@@ -527,30 +717,68 @@ def build_server(
         offset: int = 0,
         limit: int = 100,
         include_tasks: bool = False,
+        kind: Literal["run", "campaign", "all"] = "run",
     ) -> dict[str, Any]:
-        """Return one bounded page of compact Run summaries."""
+        """Return one bounded page of Run, campaign, or combined summaries."""
+        campaigns = campaign_list_operation(
+            settings.data_dir, offset=offset, limit=limit
+        )
+        if kind == "campaign":
+            return document(campaigns)
+        runs = list_runs_operation(
+            store(),
+            task_store=task_store(),
+            offset=offset,
+            limit=limit,
+            include_tasks=include_tasks,
+        )
+        if kind == "run" or not runs.ok:
+            return document(runs)
+        if not campaigns.ok:
+            return document(campaigns)
+        assert runs.value is not None and campaigns.value is not None
         return document(
-            list_runs_operation(
-                store(),
-                task_store=task_store(),
-                offset=offset,
-                limit=limit,
-                include_tasks=include_tasks,
+            OperationResult.success(
+                "list", CampaignAndRunListValue(runs.value, campaigns.value)
             )
         )
 
     @server.tool()
     def list_tasks(run_id: str, offset: int = 0, limit: int = 100) -> dict[str, Any]:
         """Return one bounded page of compact Task state."""
+        selected_campaign = campaign_id(run_id)
+        if selected_campaign is not None:
+            return document(
+                campaign_tasks_operation(
+                    selected_campaign,
+                    settings.data_dir,
+                    offset=offset,
+                    limit=limit,
+                )
+            )
         return document(
             tasks_operation(run_id, store(), task_store(), offset=offset, limit=limit)
         )
 
     @server.tool()
     def get_logs(
-        run_id: str, task: str | None = None, preparation: bool = False
+        run_id: str,
+        task: str | None = None,
+        preparation: bool = False,
+        launch: str | None = None,
     ) -> dict[str, Any]:
         """Read framework-managed Task or preparation logs."""
+        selected_campaign = campaign_id(run_id)
+        if selected_campaign is not None:
+            return document(
+                campaign_logs_operation(
+                    selected_campaign,
+                    settings.data_dir,
+                    task=task,
+                    preparation=preparation,
+                    launch_name=launch,
+                )
+            )
         return document(
             logs_operation(run_id, store(), task=task, preparation=preparation)
         )
@@ -563,6 +791,17 @@ def build_server(
         extract: bool = False,
     ) -> dict[str, Any]:
         """Retrieve terminal or partial Run outputs into an allowed path."""
+        selected_campaign = campaign_id(run_id)
+        if selected_campaign is not None:
+            return document(
+                campaign_fetch_operation(
+                    selected_campaign,
+                    settings.data_dir,
+                    settings.path(destination) if destination is not None else None,
+                    mode=mode,
+                    extract=extract,
+                )
+            )
         return document(
             fetch_operation(
                 run_id,
@@ -576,6 +815,11 @@ def build_server(
     @server.tool()
     def inspect_run(run_id: str) -> dict[str, Any]:
         """Return the complete persisted RunRecord and retention receipt."""
+        selected_campaign = campaign_id(run_id)
+        if selected_campaign is not None:
+            return document(
+                campaign_inspect_operation(selected_campaign, settings.data_dir)
+            )
         return document(
             inspect_operation(
                 run_id, store(), receipts=PurgeReceiptStore(settings.data_dir)
@@ -585,6 +829,11 @@ def build_server(
     @server.tool()
     def cancel_run(run_id: str) -> dict[str, Any]:
         """Cancel active scheduler work after reconciling current state."""
+        selected_campaign = campaign_id(run_id)
+        if selected_campaign is not None:
+            return document(
+                campaign_cancel_operation(selected_campaign, settings.data_dir)
+            )
         return document(cancel_operation(run_id, store()))
 
     @server.tool()
@@ -595,6 +844,17 @@ def build_server(
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """Preview or perform guarded Run output/workspace deletion."""
+        selected_campaign = campaign_id(run_id)
+        if selected_campaign is not None:
+            return document(
+                campaign_purge_operation(
+                    selected_campaign,
+                    settings.data_dir,
+                    workspace=workspace,
+                    confirm=confirm_run_id,
+                    dry_run=dry_run,
+                )
+            )
         return document(
             purge_operation(
                 run_id,
@@ -604,6 +864,24 @@ def build_server(
                 confirm=confirm_run_id,
                 dry_run=dry_run,
             )
+        )
+
+    def campaign_plan_for_record(
+        record: CampaignRecord,
+    ) -> OperationResult[CampaignPlanValue]:
+        source = settings.path(str(record.source))
+        if is_campaign_source(source):
+            return campaign_plan_operation(
+                source,
+                targets_file=settings.targets_file,
+                data_dir=settings.data_dir,
+            )
+        return campaign_plan_operation(
+            settings.path(str(record.experiment_source)),
+            campaign_name=record.name,
+            project_file=source,
+            targets_file=settings.targets_file,
+            data_dir=settings.data_dir,
         )
 
     return server

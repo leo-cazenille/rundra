@@ -1306,6 +1306,11 @@ def campaign_artifacts_operation(
             offset=child_start,
             limit=child_stop - child_start,
         )
+        if not result.ok:
+            assert result.error is not None
+            return OperationResult.failure(
+                "artifacts", _launch_error(launch.name, result.error)
+            )
         assert isinstance(result.value, ArtifactsValue)
         items.extend(
             CampaignArtifactValue(launch.name, launch.run_id, artifact)

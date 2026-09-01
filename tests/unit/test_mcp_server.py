@@ -46,7 +46,13 @@ def test_mcp_server_exposes_guarded_lifecycle_tools(tmp_path: Path) -> None:
     assert "get_guidance" in tools
     assert "await_runs" in tools
     list_schema = tools["list_runs"].input_schema
-    assert {"offset", "limit", "include_tasks"} <= set(list_schema["properties"])
+    assert {"offset", "limit", "include_tasks", "kind"} <= set(
+        list_schema["properties"]
+    )
+    assert "campaign" in tools["plan_experiment"].input_schema["properties"]
+    assert "seeds" not in tools["plan_experiment"].input_schema["required"]
+    assert "campaign" in tools["submit_experiment"].input_schema["properties"]
+    assert "launch" in tools["get_logs"].input_schema["properties"]
 
 
 def test_static_bearer_verifier_accepts_only_the_configured_token() -> None:
