@@ -613,7 +613,9 @@ def _campaign_override_error(
         "candidate_targets": tuple(getattr(arguments, "candidate_targets", ())),
     }
     selected = tuple(
-        name for name, value in fields.items() if value not in (None, False)
+        name
+        for name, value in fields.items()
+        if value is not None and value is not False and value != ()
     )
     if not selected:
         return None
