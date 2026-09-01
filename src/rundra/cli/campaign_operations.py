@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
+from time import monotonic, sleep
 
 from rundra.cli.capability_doctor import (
     DoctorValue,
@@ -14,11 +15,14 @@ from rundra.cli.operations import (
     PlanValue,
     ResolvedRunInputs,
     RunValue,
+    StatusValue,
     _config_error,
     cancel_operation,
+    fetch_operation,
     plan_operation,
     resolve_run_inputs_operation,
     resume_operation,
+    status_operation,
     submit_operation,
 )
 from rundra.config.campaigns import (
@@ -178,6 +182,112 @@ class CampaignChildRecovery:
             raise TypeError("Campaign recovery submitted must be a boolean")
         if type(self.action) is not str or not self.action:
             raise ValueError("Campaign recovery action must be nonblank")
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignLaunchStatusValue:
+    name: str
+    run_id: RunId
+    submission_state: CampaignSubmissionState
+    status: StatusValue | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignStatusValue:
+    record: CampaignRecord
+    launches: tuple[CampaignLaunchStatusValue, ...]
+    format_version: int = 1
+
+    @property
+    def state(self) -> str:
+        submission_states = {item.submission_state for item in self.launches}
+        runtime_states = {
+            item.status.state for item in self.launches if item.status is not None
+        }
+        if submission_states & {
+            CampaignSubmissionState.UNKNOWN,
+            CampaignSubmissionState.SUBMITTING,
+        }:
+            return "UNKNOWN"
+        if runtime_states - {
+            ExecutionState.SUCCEEDED,
+            ExecutionState.FAILED,
+            ExecutionState.CANCELLED,
+        }:
+            return "RUNNING"
+        if submission_states & {
+            CampaignSubmissionState.PENDING,
+            CampaignSubmissionState.NOT_ATTEMPTED,
+        }:
+            return "PENDING"
+        if CampaignSubmissionState.FAILED in submission_states or (
+            ExecutionState.FAILED in runtime_states
+        ):
+            return "FAILED"
+        if runtime_states and runtime_states == {ExecutionState.SUCCEEDED}:
+            return "SUCCEEDED"
+        if (
+            submission_states <= {CampaignSubmissionState.CANCELLED}
+            or runtime_states
+            and runtime_states <= {ExecutionState.CANCELLED}
+        ):
+            return "CANCELLED"
+        return "PARTIAL"
+
+    @property
+    def terminal(self) -> bool:
+        return self.state in {"SUCCEEDED", "FAILED", "CANCELLED", "PARTIAL"}
+
+    @property
+    def task_counts(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for launch in self.launches:
+            if launch.status is None:
+                key = launch.submission_state.value.lower()
+                counts[key] = counts.get(key, 0) + next(
+                    item.task_count
+                    for item in self.record.launches
+                    if item.name == launch.name
+                )
+                continue
+            for state, count in launch.status.task_counts.items():
+                counts[state.lower()] = counts.get(state.lower(), 0) + count
+        return counts
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignWaitValue:
+    status: CampaignStatusValue
+    timed_out: bool
+    elapsed_seconds: float
+    format_version: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignLaunchFetchValue:
+    name: str
+    value: object
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignFetchValue:
+    record: CampaignRecord
+    launches: tuple[CampaignLaunchFetchValue, ...]
+    destination: Path | None
+    format_version: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignCancelValue:
+    record: CampaignRecord
+    cancelled_run_ids: tuple[RunId, ...]
+    format_version: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignInspectValue:
+    record: CampaignRecord
+    format_version: int = 1
 
 
 type CampaignChildSubmitter = Callable[
@@ -761,6 +871,190 @@ def campaign_resume_operation(
         return OperationResult.failure(
             "resume", OperationError("CAMPAIGN_STORE_ERROR", str(error))
         )
+
+
+def campaign_inspect_operation(
+    campaign_id: CampaignId, data_dir: Path
+) -> OperationResult[CampaignInspectValue]:
+    try:
+        return OperationResult.success(
+            "inspect",
+            CampaignInspectValue(JsonCampaignStore(data_dir).load(campaign_id)),
+        )
+    except RunStoreError as error:
+        return OperationResult.failure(
+            "inspect", OperationError("CAMPAIGN_STORE_ERROR", str(error))
+        )
+
+
+def campaign_status_operation(
+    campaign_id: CampaignId,
+    data_dir: Path,
+    *,
+    summary: bool = False,
+) -> OperationResult[CampaignStatusValue]:
+    campaign_store = JsonCampaignStore(data_dir)
+    run_store = JsonRunStore(data_dir)
+    task_store = SqliteTaskStore(data_dir)
+    try:
+        record = campaign_store.load(campaign_id)
+    except RunStoreError as error:
+        return OperationResult.failure(
+            "status", OperationError("CAMPAIGN_STORE_ERROR", str(error))
+        )
+    launches: list[CampaignLaunchStatusValue] = []
+    observable = {
+        CampaignSubmissionState.SUBMITTED,
+        CampaignSubmissionState.CANCELLED,
+    }
+    for launch in record.launches:
+        status = None
+        if launch.submission_state in observable:
+            result = status_operation(
+                str(launch.run_id),
+                run_store,
+                task_store=task_store,
+                summary=summary,
+            )
+            if not result.ok:
+                assert result.error is not None
+                return OperationResult.failure(
+                    "status", _launch_error(launch.name, result.error)
+                )
+            status = result.value
+        launches.append(
+            CampaignLaunchStatusValue(
+                launch.name, launch.run_id, launch.submission_state, status
+            )
+        )
+    value = CampaignStatusValue(record, tuple(launches))
+    if value.terminal and record.completed_at is None:
+        updated = replace(record, completed_at=datetime.now(UTC))
+        try:
+            campaign_store.update(updated, expected=record)
+            value = replace(value, record=updated)
+        except RunStoreError as error:
+            return OperationResult.failure(
+                "status", OperationError("CAMPAIGN_STORE_ERROR", str(error))
+            )
+    return OperationResult.success("status", value)
+
+
+def campaign_wait_operation(
+    campaign_id: CampaignId,
+    data_dir: Path,
+    *,
+    timeout: float | None = None,
+    poll_interval: float = 2.0,
+    sleeper: Callable[[float], None] = sleep,
+    monotonic_clock: Callable[[], float] = monotonic,
+) -> OperationResult[CampaignWaitValue]:
+    if timeout is not None and timeout < 0:
+        return OperationResult.failure(
+            "wait", OperationError("INVALID_TIMEOUT", "Timeout must be non-negative")
+        )
+    started = monotonic_clock()
+    while True:
+        result = campaign_status_operation(campaign_id, data_dir, summary=True)
+        if not result.ok:
+            assert result.error is not None
+            return OperationResult.failure("wait", result.error)
+        assert result.value is not None
+        elapsed = float(monotonic_clock() - started)
+        if result.value.terminal:
+            return OperationResult.success(
+                "wait", CampaignWaitValue(result.value, False, elapsed)
+            )
+        if timeout is not None and elapsed >= timeout:
+            return OperationResult.success(
+                "wait", CampaignWaitValue(result.value, True, elapsed)
+            )
+        delay = poll_interval
+        if timeout is not None:
+            delay = min(delay, max(0.0, timeout - elapsed))
+        sleeper(delay)
+
+
+def campaign_fetch_operation(
+    campaign_id: CampaignId,
+    data_dir: Path,
+    destination: Path | None = None,
+    *,
+    mode: str | None = None,
+    extract: bool = False,
+    summary: bool = False,
+) -> OperationResult[CampaignFetchValue]:
+    try:
+        record = JsonCampaignStore(data_dir).load(campaign_id)
+    except RunStoreError as error:
+        return OperationResult.failure(
+            "fetch", OperationError("CAMPAIGN_STORE_ERROR", str(error))
+        )
+    values: list[CampaignLaunchFetchValue] = []
+    run_store = JsonRunStore(data_dir)
+    task_store = SqliteTaskStore(data_dir)
+    for launch in record.launches:
+        if launch.submission_state not in {
+            CampaignSubmissionState.SUBMITTED,
+            CampaignSubmissionState.CANCELLED,
+        }:
+            continue
+        child_destination = (
+            None if destination is None else (destination / launch.name).resolve()
+        )
+        result = fetch_operation(
+            str(launch.run_id),
+            run_store,
+            child_destination,
+            mode=mode,
+            extract=extract,
+            task_store=task_store,
+            summary=summary,
+        )
+        if not result.ok:
+            assert result.error is not None
+            return OperationResult.failure(
+                "fetch", _launch_error(launch.name, result.error)
+            )
+        values.append(CampaignLaunchFetchValue(launch.name, result.value))
+    return OperationResult.success(
+        "fetch",
+        CampaignFetchValue(
+            record,
+            tuple(values),
+            None if destination is None else destination.resolve(),
+        ),
+    )
+
+
+def campaign_cancel_operation(
+    campaign_id: CampaignId, data_dir: Path
+) -> OperationResult[CampaignCancelValue]:
+    campaign_store = JsonCampaignStore(data_dir)
+    try:
+        record = campaign_store.load(campaign_id)
+    except RunStoreError as error:
+        return OperationResult.failure(
+            "cancel", OperationError("CAMPAIGN_STORE_ERROR", str(error))
+        )
+    cancelled: list[RunId] = []
+    current = record
+    for index, launch in enumerate(record.launches):
+        if launch.submission_state is not CampaignSubmissionState.SUBMITTED:
+            continue
+        result = _cancel_campaign_child(launch.run_id, data_dir)
+        if not result.ok:
+            assert result.error is not None
+            return OperationResult.failure(
+                "cancel", _launch_error(launch.name, result.error)
+            )
+        current = _update_campaign_launch(
+            campaign_store, current, index, CampaignSubmissionState.CANCELLED
+        )
+        cancelled.append(launch.run_id)
+    return OperationResult.success(
+        "cancel", CampaignCancelValue(current, tuple(cancelled))
+    )
 
 
 @dataclass(frozen=True, slots=True)

@@ -5,8 +5,10 @@ from pathlib import Path
 from rundra.cli.campaign_operations import (
     CampaignChildRecovery,
     CampaignLaunchPlanValue,
+    campaign_inspect_operation,
     campaign_plan_operation,
     campaign_resume_operation,
+    campaign_status_operation,
     campaign_submit_operation,
 )
 from rundra.domain.campaigns import (
@@ -346,3 +348,48 @@ def test_campaign_submit_unknown_outcome_halts_without_policy_action(
         CampaignSubmissionState.SUBMITTED,
         CampaignSubmissionState.SUBMITTED,
     ]
+
+
+def test_campaign_status_reports_unknown_without_querying_missing_child_run(
+    tmp_path: Path,
+) -> None:
+    experiment = _write_inputs(
+        tmp_path,
+        campaigns="""\
+  uncertain:
+    launches: [{name: first, seed: 1}]
+""",
+    )
+    planned = campaign_plan_operation(
+        experiment,
+        campaign_name="uncertain",
+        targets_file=tmp_path / "targets.yaml",
+        data_dir=tmp_path / "records",
+    )
+    assert planned.ok and planned.value is not None
+
+    def submitter(
+        launch: CampaignLaunchPlanValue,
+        run_id: RunId,
+        confirmed: int | None,
+    ) -> OperationResult[RunId]:
+        return OperationResult.failure(
+            "submit", OperationError("SUBMISSION_OUTCOME_UNKNOWN", "uncertain")
+        )
+
+    campaign_id = CampaignId("campaign_cccccccccccccccccccccccccccccccc")
+    campaign_submit_operation(
+        planned.value,
+        submitter=submitter,
+        campaign_id_factory=lambda: campaign_id,
+        framework_version="test",
+    )
+
+    status = campaign_status_operation(campaign_id, tmp_path / "records")
+    inspected = campaign_inspect_operation(campaign_id, tmp_path / "records")
+
+    assert status.ok and status.value is not None
+    assert status.value.state == "UNKNOWN"
+    assert status.value.task_counts == {"unknown": 1}
+    assert inspected.ok and inspected.value is not None
+    assert inspected.value.record.id == campaign_id
