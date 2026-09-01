@@ -321,6 +321,11 @@ Do not use SSH port forwarding or agent forwarding.
 - Preserve the Run ID and the exact `--data-dir` used at submission. Lifecycle
   commands must use the same Run store. `--last` is convenient interactively,
   but agents should retain explicit Run IDs to avoid selecting concurrent work.
+- Sandboxed agents should prefer a persistent project-local data directory such
+  as `--data-dir "$PWD/.rundra-data"`. If doctor returns a
+  `run_store_durability.verification_argv`, execute that exact command in a new
+  process, rerun doctor, and reuse the directory for submit, await, fetch,
+  status, inspect, tasks, and artifacts.
 - Continue an interrupted submit with `rundr resume RUN_ID`. Do not repeat the
   submission as a new Run until Rundra has resolved the recorded scheduler
   outcome; an unknown outcome intentionally blocks automatic resubmission.
@@ -332,9 +337,15 @@ Do not use SSH port forwarding or agent forwarding.
   MCP clients use the equivalent `resolve_submission` tool with the same exact
   Run-ID confirmation.
 - Use `--json` or Rundra MCP tools. Never parse scheduler-native output.
-- Use paginated `rundr list --json` Run summaries for discovery and `rundr
-  tasks RUN_ID --json` for Task pages. Request `list --include-tasks` only when
-  an expanded cross-Run response is specifically needed.
+- Static campaigns coordinate ordinary child Runs across configured detached
+  targets. Keep assignment in project-v7 `campaigns` or a standalone campaign
+  file, retain the `campaign_*` ID and child Run IDs, and use
+  `launch-name/task_NNNNNN` selectors. Resume an interrupted campaign; resolve
+  an unknown submission only through the reported child Run ID.
+- Use paginated `rundr list --json` Run summaries for discovery. Use `status
+  --summary --json` and `inspect --summary --json` for bounded diagnostics,
+  then page detail with `tasks RUN_ID --json` and `artifacts RUN_ID --json`.
+  Request `list --include-tasks` only when expanded cross-Run detail is needed.
 - Run scientific and analysis workloads on the configured execution target or
   an approved workstation, never on a login/controller host.
 - Keep raw retrieved results separate from derived analysis outputs.
@@ -347,6 +358,10 @@ Do not use SSH port forwarding or agent forwarding.
   materialized local result tree is required. Projects whose analysis always
   needs ordinary files can set `fetch_mode: copy` in version-5 defaults or a
   profile.
+- Worker-pool plans may report `retrieval_policy: manifest`. When downstream
+  analysis needs ordinary files, use `rundr fetch RUN_ID --mode copy --extract
+  --summary --json`; extraction occurs only after exact shard coverage is
+  verified.
 - Use `rundr cancel` for active work. Preview deletion with `rundr purge
   RUN_ID --dry-run`; purge only with exact Run-ID confirmation.
 - Never place SSH keys, tokens, passwords, or other credentials in experiment,

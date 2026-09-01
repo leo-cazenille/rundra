@@ -1,0 +1,15 @@
+kind: campaign
+version: 1
+name: two-clusters-standalone
+experiment: experiment.yaml
+project_file: rundra.yaml
+on_submit_failure: cancel
+launches:
+  - name: cluster-a-seeds
+    target: cluster-a
+    seeds: "0:3"
+    destination: retrieved/standalone/cluster-a
+  - name: cluster-b-seeds
+    target: cluster-b
+    seeds: "4:7"
+    destination: retrieved/standalone/cluster-b

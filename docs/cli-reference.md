@@ -7,8 +7,8 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 
 | Command | Positional | Options | Semantics |
 |---|---|---|---|
-| `validate` | `EXPERIMENT` | `--json` | Validate experiment YAML without executing. |
-| `plan` | `EXPERIMENT` | launch options, `--source-root`, preparation options, `--execution-strategy`, `--retrieval`, `--workers`, `--task-slots-per-worker`, `--json` | Resolve and inspect execution without target contact or state changes. |
+| `validate` | `EXPERIMENT` or `CAMPAIGN_FILE` | `--campaign`, `--project-file`, `--json` | Validate experiment or campaign YAML without executing. |
+| `plan` | `EXPERIMENT` or `CAMPAIGN_FILE` | launch options, `--campaign`, `--source-root`, preparation options, `--execution-strategy`, `--retrieval`, `--workers`, `--task-slots-per-worker`, `--json` | Resolve and inspect execution without target contact or state changes. |
 | `targets` | none | `--targets-file`, `--json` | Validate and list configured targets. |
 | `doctor` | optional `EXPERIMENT` | launch path overrides, `--connect`, `--offline`, `--local-target-access`, `--prepare-location`, `--scheduler-inventory`, `--scheduler-probe`, `--probe-timeout`, `--no-write-probe`, `--agent`, `--verify-run-store TOKEN`, `--json` | Audit installation, durable sandbox storage, target access, reversible staging, preparation caches, read-only scheduler inventory, and an optional bounded scheduler submission. |
 | `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--workers`, `--task-slots-per-worker`, `--verbose`, `--progress`, `--progress-interval`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
@@ -17,13 +17,13 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 | `agent-guide` | none | `--write PATH`, `--check PATH`, `--topic TOPIC`, `--list-topics`, `--json` | Print, install, check, or select bounded portable agent instructions. |
 | `help` | optional `COMMAND` | none | List commands and the common workflow, or show one command's detailed arguments and options. |
 | `submit` | `EXPERIMENT` | same as `run` | Submit asynchronously when the selected scheduler supports it. |
-| `resume` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Recover an interrupted submission without duplication. |
+| `resume` | `RUN_ID`, `CAMPAIGN_ID`, or `--last` | launch paths, `--confirm-tasks`, `--data-dir`, `--json` | Recover an interrupted submission without duplication. |
 | `resolve-submission` | `RUN_ID` or `--last` | `--not-submitted`, `--confirm RUN_ID`, `--data-dir`, `--json` | Close an unknown submission only after proving no scheduler job exists. |
 | `status` | `RUN_ID` or `--last` | `--summary`, `--data-dir`, `--json` | Reconcile scheduler state; `--summary` omits per-Task detail. |
 | `tasks` | `RUN_ID` or `--last` | `--offset`, `--limit`, `--data-dir`, `--json` | Return one bounded Task-state page. |
 | `artifacts` | `RUN_ID` or `--last` | `--offset`, `--limit`, `--data-dir`, `--json` | Return one bounded persisted-artifact page. |
-| `list` | none | `--offset`, `--limit`, `--include-tasks`, `--data-dir`, `--json` | Page through compact Run summaries. |
-| `logs` | `RUN_ID` or `--last` | `--task`, `--preparation`, `--data-dir`, `--json` | Read framework-managed Task or preparation logs. |
+| `list` | none | `--kind run|campaign|all`, `--offset`, `--limit`, `--include-tasks`, `--data-dir`, `--json` | Page through compact Run and/or campaign summaries. |
+| `logs` | `RUN_ID`, `CAMPAIGN_ID`, or `--last` | `--task`, `--launch`, `--preparation`, `--data-dir`, `--json` | Read framework-managed Task or preparation logs. |
 | `fetch` | `RUN_ID` or `--last` | `--destination`, repeatable `--task`, `--mode`, `--extract`, `--summary`, progress options, `--data-dir`, `--json` | Retrieve all or selected artifacts idempotently; `--summary` omits the artifact list. |
 | `inspect` | `RUN_ID` or `--last` | `--summary`, `--data-dir`, `--json` | Return the complete RunRecord or a bounded lifecycle summary. |
 | `cancel` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Reconcile and cancel active scheduler work. |
@@ -39,6 +39,26 @@ which own scientific Tasks. Do not infer that a preparation job ID executed a
 scientific Task. For large Runs, use `status --summary --json` and
 `inspect --summary --json`, then page individual records with `tasks` and
 `artifacts`.
+
+## Campaigns
+
+Project-v7 named campaigns use `--campaign NAME`; standalone version-1 files
+with `kind: campaign` are detected automatically. Campaign assignments are
+static and explicit in YAML. Per-Task CLI launch overrides are rejected.
+
+`submit` returns a `campaign_*` ID plus one reserved child Run ID per launch.
+The existing `wait`, `await`, `status`, `tasks`, `artifacts`, `logs`, `fetch`,
+`inspect`, `resume`, `cancel`, and `purge` commands accept that campaign ID.
+Campaign Task selectors use `launch-name/task_NNNNNN`. `logs --launch NAME`
+selects preparation or default Task logs for one child. An explicit fetch
+destination creates one child destination below it per launch.
+
+Campaign targets must support detached submission. Duplicate logical Tasks are
+rejected unless the definition explicitly opts in. Submission policy is
+`cancel`, `stop`, or `continue`; unknown scheduler outcomes always stop and
+must be recovered with `resume CAMPAIGN_ID`. Manual outcome resolution still
+requires the uncertain child Run ID. Purging a campaign cascades to eligible
+child Runs and requires `--confirm CAMPAIGN_ID`.
 Progress redraws are deduplicated and throttled to `--progress-interval`
 seconds (10 by default), except for phase and terminal updates. Captured
 `--json --progress` emits a warning because terminal redraws may inflate agent

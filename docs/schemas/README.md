@@ -16,7 +16,9 @@ RunRecord v7, status/tasks/logs/inspect v6, doctor v4, target-list and Run-list
 v2, and await v1. A successful document contains an operation-specific value;
 a failed document contains `error.code`, `error.message`, and
 `error.details`. Use fields, not object-key order or human output, as the
-interface.
+interface. Campaign definitions, CampaignRecords, and campaign operation
+payloads currently use format version 1; child Runs retain their existing
+operation-specific versions.
 
 ## Contract inventory
 
@@ -45,6 +47,7 @@ interface.
 | operation failure | [`error-v1.json`](error-v1.json) | structured `error` |
 | CLI usage failure | [`cli-usage-error-v1.json`](cli-usage-error-v1.json) | `CLI_USAGE_ERROR` |
 | persisted state | [`run-record-v1.json`](run-record-v1.json) | one complete unprepared RunRecord |
+| campaign persisted state | composed and contract-tested | CampaignRecord v1 with child Run IDs and submission states |
 | previous persisted state | [`run-record-v5.json`](run-record-v5.json) | canonical Run kind and retrieval destination |
 | previous persisted state | [`run-record-v6.json`](run-record-v6.json) | typed fetch mode and verified preparation identity |
 | current routed persisted state | composed and contract-tested | RunRecord v7 with target-owned Slurm routing identity |

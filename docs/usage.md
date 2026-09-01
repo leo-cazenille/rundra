@@ -39,6 +39,27 @@ uv run rundr plan examples/minimal/experiment.yaml \
 Seed ranges are inclusive. A missing seed is generated before planning and
 reported; pass the reported integer with `--seed` to replay it.
 
+## Multi-target campaigns
+
+Use project-v7 `campaigns` or a standalone `kind: campaign` document when one
+experiment has explicit seed assignments for several detached targets. The
+normal command sequence is unchanged:
+
+```bash
+uv run rundr doctor experiment.yaml --campaign two-clusters --connect
+uv run rundr plan experiment.yaml --campaign two-clusters
+uv run rundr submit experiment.yaml --campaign two-clusters
+uv run rundr await CAMPAIGN_ID
+uv run rundr fetch CAMPAIGN_ID --mode copy --extract
+```
+
+The campaign ID aggregates ordinary child Runs. Page Tasks with `rundr tasks
+CAMPAIGN_ID`; selectors are `launch-name/task_NNNNNN`. Select preparation logs
+with `rundr logs CAMPAIGN_ID --launch NAME --preparation`. Supplying a new fetch
+destination places each launch below that root. Use `rundr list --kind campaign`
+for discovery and preview cascading deletion with `rundr purge CAMPAIGN_ID
+--dry-run`.
+
 ## Complete local lifecycle
 
 Use a dedicated temporary record and retrieval root so the example does not

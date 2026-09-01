@@ -27,3 +27,10 @@ bounded document. `--mode copy --extract` verifies worker-pool result shards and
 materializes ordinary files for downstream tools. Use `status --summary --json`
 and `inspect --summary --json` for compact diagnostics; page detail with `tasks`
 and `artifacts`.
+
+For a static multi-target campaign, substitute `experiment.yaml --campaign
+NAME` or a standalone `campaign.yaml` in the first three commands. Submit
+returns a `campaign_*` ID and child Run IDs. Pass the campaign ID to `await`,
+`fetch`, `status`, `tasks`, and `inspect`; Task selectors use
+`launch-name/task_NNNNNN`. Preserve all IDs. If submission becomes uncertain,
+resume the campaign and resolve only the explicitly reported child Run.

@@ -6,6 +6,12 @@ All notable user-visible changes are recorded here.
 
 ### Added
 
+- Static multi-target campaigns coordinate explicit seed assignments across
+  detached targets while preserving one ordinary RunRecord per launch. Project
+  schema version 7 adds named campaigns; standalone version-1 campaign files,
+  durable CampaignRecords, aggregate lifecycle commands, paginated selectors,
+  cascading fetch/cancel/purge, recovery, JSON, and MCP parity are included.
+
 - Project configuration version 6 permits `prebuilt.sha256` to be omitted.
   Rundra then trusts only an existing project or configured image-search-path
   SIF, emits warnings, measures it before deriving build/cache identities, and

@@ -171,7 +171,8 @@ Potential future high-level capabilities include:
 - integration with workflow engines;
 - automated experimental loops.
 
-These are **design goals**, not version 0.1 requirements.
+Static multi-target campaigns are implemented as a coordination layer over
+ordinary Runs. Adaptive campaigns remain a future design goal.
 
 ---
 
@@ -816,7 +817,7 @@ and cleanup probe. New RunRecords preserve the policy and selected variable in
 flat `execution_storage.*` scheduler metadata. Scheduler-provided concrete
 scratch paths are intentionally not persisted.
 
-M31 does not implement target budgets, automatic target choice, campaign
+M31 does not implement target budgets, automatic target choice, automatic campaign
 placement, or post-retrieval retention cleanup. Those remain separate policy
 milestones.
 
@@ -1466,8 +1467,8 @@ The installed agent-guide section remains self-contained and links to the
 canonical PyPI project overview for additional installation and workflow
 documentation. Because that page describes the latest release, installed help
 and version output remain authoritative for local behavior.
-Agents can request only the relevant `setup`, `upgrade`, `launch`, `large-runs`,
-`htcondor`, `lifecycle`, `results`, `scratch`, `partitions`, `preparation`,
+Agents can request only the relevant `setup`, `upgrade`, `launch`, `campaigns`,
+`large-runs`, `htcondor`, `lifecycle`, `results`, `scratch`, `partitions`, `preparation`,
 `provenance`, or `recovery` guidance through
 `agent-guide --topic` or MCP `get_guidance`, avoiding repeated full-guide
 transmission.
@@ -2186,6 +2187,50 @@ stable source forms are `cli`, `project_profile:NAME`, `project`, `user`,
 `built_in`, and `generated`. This is additive to the existing version-1
 operation payload.
 
+### 22.5 Static multi-target campaigns
+
+A campaign is a durable coordination parent for several ordinary single-target
+Runs of one experiment. It is not a scheduler backend, composite target, DAG,
+or automatic placement policy. Target definitions remain site-owned backend
+stacks in `targets.yaml`; scientific assignment remains project-owned.
+
+Project configuration version 7 may declare named `campaigns`. A standalone
+version-1 document uses `kind: campaign`, a campaign `name`, an `experiment`
+path, an optional `project_file`, and the same campaign body. Campaign v1 has:
+
+- one experiment shared by every launch;
+- one or more ordered, uniquely named launches;
+- exactly one explicit integer `seed` or inclusive `seeds` range per launch;
+- an explicit target or profile resolved through normal launch precedence;
+- optional launch-local config, source root, destination, worker scale, and
+  fetch mode;
+- `on_submit_failure: cancel|stop|continue`, defaulting to `cancel`;
+- `allow_duplicate_tasks`, defaulting to false.
+
+Planning resolves every child through the ordinary Run planner, rejects
+synchronous targets, requires one client Run store, rejects colliding
+destinations, and detects overlapping logical Tasks before submission. An
+intentional overlap requires `allow_duplicate_tasks: true` and remains visible
+as a plan warning. Campaign planning remains offline.
+
+Submission creates a version-1 CampaignRecord before attempting child Runs.
+Every launch receives a reserved stable Run ID and submission state. Child
+RunRecords remain authoritative for scientific lifecycle and provenance. The
+campaign record preserves definition identity, experiment path, failure policy,
+launch names, targets, Task counts, destinations, Run IDs, submission states,
+and timestamps. An unknown child submission outcome always stops further
+submission and requires campaign `resume`; `resolve-submission` operates only
+on the uncertain child Run ID.
+
+Existing lifecycle operations accept `campaign_*` IDs. Status and wait
+aggregate child state; tasks and artifacts are paginated across launches;
+logs select a launch; fetch maps an explicit root to `ROOT/LAUNCH_NAME`; cancel
+reconciles and cancels active children; purge cascades with exact parent-ID
+confirmation. Stable campaign Task selectors use
+`launch-name/task_NNNNNN`. `list --kind run|campaign|all` controls discovery.
+MCP tools branch on the same IDs and operation objects rather than exposing a
+second campaign namespace.
+
 ---
 
 ## 23. Agent-facing design requirements
@@ -2348,9 +2393,8 @@ Task, seed, choices, config digest, and output mapping. Unswept v1/v2 documents
 remain unchanged and readers support all three versions.
 
 Rundra does not interpret application parameters beyond materializing YAML and
-does not merge scientific results. Pogosim-specific conventions and richer
-campaign behavior may live in a separate `pogorundr` layer built on these
-portable Run semantics.
+does not merge scientific results. Static campaign coordination distributes
+already defined Tasks but does not interpret results or adapt later launches.
 
 ---
 

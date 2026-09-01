@@ -1,0 +1,24 @@
+version: 7
+
+defaults:
+  config: config.yaml
+  source_root: .
+
+profiles:
+  cluster-a:
+    target: cluster-a
+  cluster-b:
+    target: cluster-b
+
+campaigns:
+  two-clusters:
+    on_submit_failure: cancel
+    launches:
+      - name: cluster-a-seeds
+        profile: cluster-a
+        seeds: "0:3"
+        destination: retrieved/two-clusters/cluster-a
+      - name: cluster-b-seeds
+        profile: cluster-b
+        seeds: "4:7"
+        destination: retrieved/two-clusters/cluster-b

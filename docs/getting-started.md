@@ -51,7 +51,7 @@ Rundra keeps three concerns separate:
 |---|---|---|
 | target file | named backend stacks and workspaces | `~/.config/rundra/targets.yaml` |
 | user launch file | optional per-user launch defaults | `~/.config/rundra/config.yaml` |
-| project launch file | project defaults and named profiles | `rundra.yaml` beside the experiment |
+| project launch file | project defaults, profiles, and static campaigns | `rundra.yaml` beside the experiment |
 
 Persisted RunRecords default to `~/.local/share/rundra/runs`. This is a client
 path, not a directory that must exist on every remote login or controller node.
@@ -66,6 +66,11 @@ fields, and must not contain credentials. Experiment and user-launch documents
 remain version 1; project preparation and target policy use newer versions when
 their features require them. Relative paths in project and user launch files
 are resolved against the file that declares them.
+
+Project version 7 may assign one experiment to several configured detached
+targets through named campaigns. Backend definitions remain in the target file;
+campaign seed sets, profiles, destinations, and worker requests remain in the
+project file. See the [README campaign guide](../README.md#campaigns-across-several-clusters).
 
 ## Local target
 

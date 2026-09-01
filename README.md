@@ -594,6 +594,102 @@ retrieved artifacts. To build and cache the SIF from a definition instead of
 using a prebuilt shared image, continue with the checked
 [`python-multiprocessing` preparation example](examples/python-multiprocessing/README.md).
 
+## Campaigns across several clusters
+
+A campaign coordinates several ordinary Runs of one experiment. Each launch
+selects a configured detached target or project profile and an explicit seed
+set. Rundra submits the child Runs independently, so their scheduler work can
+execute concurrently on different clusters, while a durable `campaign_*` ID
+provides one lifecycle handle.
+
+Keep machine-specific backend definitions in `~/.config/rundra/targets.yaml`.
+Keep scientific assignment in the project file. Project schema version 7 adds
+named campaigns without turning the target file into a workflow document:
+
+```yaml
+version: 7
+
+defaults:
+  config: config.yaml
+  source_root: .
+
+profiles:
+  cluster-a:
+    target: cluster-a
+  cluster-b:
+    target: cluster-b
+
+campaigns:
+  two-clusters:
+    on_submit_failure: cancel
+    launches:
+      - name: cluster-a-seeds
+        profile: cluster-a
+        seeds: "0:31"
+        destination: retrieved/two-clusters/cluster-a
+      - name: cluster-b-seeds
+        profile: cluster-b
+        seeds: "32:63"
+        destination: retrieved/two-clusters/cluster-b
+```
+
+Launch names are stable filesystem-safe identifiers. Each launch requires
+exactly one `seed` or inclusive `seeds` range and may override `profile`,
+`target`, `config`, `source_root`, `destination`, `workers`,
+`task_slots_per_worker`, or `fetch_mode`. Campaign-level CLI overrides for
+these scientific assignments are rejected: review and change the tracked
+definition instead.
+
+Use the existing Rundra commands with `--campaign`:
+
+```bash
+rundr validate experiment.yaml --campaign two-clusters
+rundr doctor experiment.yaml --campaign two-clusters --connect
+rundr plan experiment.yaml --campaign two-clusters
+rundr submit experiment.yaml --campaign two-clusters
+rundr wait CAMPAIGN_ID --progress
+rundr fetch CAMPAIGN_ID --mode copy --extract
+```
+
+`plan` reports per-launch and aggregate Task counts and concurrency. Campaigns
+require detached scheduler targets; synchronous local targets are rejected.
+By default, overlapping logical Tasks across launches are rejected. Set
+`allow_duplicate_tasks: true` only when intentional duplicate execution has
+been reviewed; the plan then emits a warning.
+
+The default `on_submit_failure: cancel` policy cancels already submitted child
+Runs and does not attempt later launches. `stop` keeps earlier Runs active but
+does not attempt later launches. `continue` attempts every launch. An unknown
+scheduler submission outcome always stops coordination regardless of policy;
+use `rundr resume CAMPAIGN_ID` after following the child Run recovery guidance.
+`resolve-submission` remains child-Run-specific because only the uncertain
+scheduler submission can be resolved safely.
+
+Lifecycle commands accept the campaign ID directly. `tasks` identifies Tasks
+as `launch-name/task_NNNNNN`; use the same selector with `fetch --task` or
+`logs --task`. For preparation logs, select a child with `logs --launch NAME`.
+An explicit campaign fetch destination becomes a root with one subdirectory
+per launch. `purge CAMPAIGN_ID` previews or cascades across child Runs and
+requires exact campaign-ID confirmation.
+
+A standalone `campaign.yaml` is useful outside a project launch file:
+
+```yaml
+kind: campaign
+version: 1
+name: two-clusters
+experiment: experiment.yaml
+project_file: rundra.yaml
+on_submit_failure: cancel
+launches:
+  - {name: cluster-a-seeds, target: cluster-a, seeds: "0:31"}
+  - {name: cluster-b-seeds, target: cluster-b, seeds: "32:63"}
+```
+
+Standalone files are auto-detected, so use `rundr plan campaign.yaml` and
+`rundr submit campaign.yaml`. See the checked
+[`examples/campaign`](examples/campaign) files for both forms.
+
 ## Everyday workflow
 
 Use `run` for short synchronous work. For long or remote experiments, submit
@@ -617,9 +713,9 @@ continues on the scheduler if the waiting client is interrupted.
 | `plan` | Resolve Tasks, resources, preparation, storage, and target behavior without execution. |
 | `run` | Submit, wait, and retrieve while the client remains attached. |
 | `submit` | Register and durably submit a Run, then return. |
-| `wait` | Follow one Run, optionally with an interactive progress display. |
-| `await` | Block silently on one or several Runs for harness automation. |
-| `status` | Reconcile and display Run state. |
+| `wait` | Follow one Run or campaign, optionally with an interactive progress display. |
+| `await` | Block silently on one or several Run or campaign IDs for harness automation. |
+| `status` | Reconcile and display Run or campaign state. |
 | `tasks` | Page through individual Task state. |
 | `logs` | Read framework-managed preparation or Task logs. |
 | `fetch` | Retrieve or reference declared outputs. |
@@ -636,7 +732,7 @@ configuration.
 | File | Contains | Default location |
 |---|---|---|
 | Experiment | Command, resources, outputs, optional container request | Any `experiment.yaml` |
-| Project launch file | Project defaults and named profiles | `rundra.yaml` beside the experiment |
+| Project launch file | Project defaults, named profiles, and named campaigns | `rundra.yaml` beside the experiment |
 | User launch file | User-specific defaults and Run store | `~/.config/rundra/config.yaml` |
 | Target file | Named backend stacks, workspaces, and site policy | `~/.config/rundra/targets.yaml` |
 
@@ -784,6 +880,8 @@ Agent rules:
 - use `agent-guide --topic TOPIC` for bounded instructions;
 - refresh instructions after upgrades with `agent-guide --topic upgrade` and
   `agent-guide --write AGENTS.md`.
+- for a multi-target campaign, retain the `campaign_*` ID and its child Run
+  IDs; use the same lifecycle tools and `launch-name/task_NNNNNN` selectors.
 
 The optional MCP server exposes the same lifecycle to compatible clients.
 Install it with `uv tool install --python 3.12 'rundra[mcp]'`. See the
