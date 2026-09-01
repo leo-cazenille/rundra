@@ -167,7 +167,7 @@ def test_docker_campaign_places_tasks_across_available_targets(
     config = tmp_path / "config.yaml"
     config.write_text("failure_seed: -1\nsleep_seconds: 3\n", encoding="utf-8")
     destination = tmp_path / "retrieved"
-    common = (
+    placement_arguments = (
         str(_SOURCE / "experiment.yaml"),
         "--config",
         str(config),
@@ -183,20 +183,23 @@ def test_docker_campaign_places_tasks_across_available_targets(
         str(docker_slurm_targets_source),
         "--source-root",
         str(_SOURCE),
-        "--destination",
-        str(destination),
-        "--data-dir",
-        str(data_dir),
     )
 
-    planned = _rundr("plan", *common)
+    planned = _rundr("plan", *placement_arguments)
     placement = planned["campaign"]["placement"]
     assert placement["policy"] == "auto"
     assert set(placement["selected_targets"]) == set(_TARGETS)
     assert planned["campaign"]["safety"]["contacts_targets"] is True
     assert sum(int(item["task_count"]) for item in planned["campaign"]["launches"]) == 8
 
-    submitted = _rundr("submit", *common)
+    submitted = _rundr(
+        "submit",
+        *placement_arguments,
+        "--destination",
+        str(destination),
+        "--data-dir",
+        str(data_dir),
+    )
     campaign_id = next(iter(_matching_strings(submitted, "campaign_")))
     waited = _rundr(
         "wait", campaign_id, "--timeout", "300", "--data-dir", str(data_dir)
