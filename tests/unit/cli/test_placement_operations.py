@@ -147,7 +147,7 @@ def test_placement_fails_when_every_candidate_is_unavailable(tmp_path: Path) -> 
     assert not result.ok and result.error is not None
     assert result.error.code == "PLACEMENT_NO_ELIGIBLE_TARGETS"
     assert result.error.details["rejections"] == (
-        ("alpha", "placement_target_unreachable"),
-        ("beta", "placement_target_unreachable"),
-        ("gamma", "placement_target_unreachable"),
+        "alpha:placement_target_unreachable",
+        "beta:placement_target_unreachable",
+        "gamma:placement_target_unreachable",
     )

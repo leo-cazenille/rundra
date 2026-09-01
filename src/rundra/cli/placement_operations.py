@@ -470,7 +470,11 @@ def placement_plan_operation(
             OperationError(
                 "PLACEMENT_NO_ELIGIBLE_TARGETS",
                 "No candidate target passed automatic placement checks",
-                {"rejections": tuple((item.target, item.reason) for item in decisions)},
+                {
+                    "rejections": tuple(
+                        f"{item.target}:{item.reason}" for item in decisions
+                    )
+                },
             ),
         )
     assert task_multiplier is not None
