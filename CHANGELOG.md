@@ -36,9 +36,10 @@ All notable user-visible changes are recorded here.
 ### Fixed
 
 - `wait` and `await` now tolerate ten consecutive transient target-query
-  failures by default. Exhausted compact-journal reads identify the target
-  transport and explicitly state that waiting stopped without cancelling the
-  active Run.
+  failures by default. The bound covers compact-journal transport reads and
+  adapter-classified scheduler transport outages, including Slurm query exit
+  code 255. Exhaustion reports the query kind and bound and explicitly states
+  that waiting stopped without cancelling the active Run.
 - Slurm preparation jobs now use a distinct `rundra-prepare` name and
   `--no-requeue`, preventing node-launch failures from becoming indefinitely
   held jobs. Scheduler queries preserve pending reasons; the specific

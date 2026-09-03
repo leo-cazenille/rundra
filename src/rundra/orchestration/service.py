@@ -76,6 +76,7 @@ from rundra.ports import (
     SchedulerArrayRequest,
     SchedulerGroup,
     SchedulerObservation,
+    SchedulerQueryFailure,
     SchedulerReference,
     SchedulerSubmissionFailure,
     SchedulerSubmissionOutcome,
@@ -448,8 +449,15 @@ class SchedulerLifecycleService:
                 current = self.refresh(current)
             except RunStoreError:
                 raise
-            except OrchestrationError as error:
-                if error.code != _BUNDLE_JOURNAL_READ_UNAVAILABLE:
+            except (OrchestrationError, SchedulerQueryFailure) as error:
+                journal_transport_failure = (
+                    isinstance(error, OrchestrationError)
+                    and error.code == _BUNDLE_JOURNAL_READ_UNAVAILABLE
+                )
+                scheduler_transport_failure = (
+                    isinstance(error, SchedulerQueryFailure) and error.transient
+                )
+                if not journal_transport_failure and not scheduler_transport_failure:
                     raise OrchestrationError(
                         code="SCHEDULER_QUERY_FAILED",
                         message=f"Run {record.run.id} scheduler query failed: {error}",
@@ -457,14 +465,19 @@ class SchedulerLifecycleService:
                     ) from error
                 consecutive_query_failures += 1
                 if consecutive_query_failures >= query_failure_limit:
+                    query_kind = (
+                        "scheduler queries through the target transport"
+                        if scheduler_transport_failure
+                        else "compact bundled Task journal reads through the target "
+                        "transport"
+                    )
                     raise OrchestrationError(
                         code="SCHEDULER_QUERY_FAILED",
                         message=(
                             f"Run {record.run.id} status refresh failed after "
                             f"{consecutive_query_failures} consecutive transient "
-                            "target-transport failures while reading compact bundled "
-                            "Task journals; waiting stopped, but the Run was not "
-                            "cancelled and may still be active"
+                            f"failures of {query_kind}; waiting stopped, but the Run "
+                            "was not cancelled and may still be active"
                         ),
                         run_id=record.run.id,
                     ) from error

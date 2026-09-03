@@ -81,10 +81,13 @@ Worker-pool Tasks remain `QUEUED` while an `afterok` preparation dependency is
 pending, even though no bundle journals exist yet. Journal reconciliation is
 idempotent across identical canonical and temporary fragments and fails only
 for malformed or contradictory Task events. `status` retries one transient
-journal transport/read failure. `wait` and `await` tolerate ten consecutive
-failed status snapshots by default; `--query-failure-limit N` changes that
-positive bound. A successful snapshot resets the counter. Structural journal
-errors are never retried. Status omits throughput and ETA
+journal transport/read failure. Scheduler queries explicitly classified as
+transport-unavailable are retryable too; Slurm remote-command exit code 255 is
+classified this way. `wait` and `await` tolerate ten consecutive failed status
+snapshots by default; `--query-failure-limit N` changes that positive bound. A
+successful snapshot resets the counter. Structural journal errors, malformed
+scheduler output, and non-transport scheduler failures are never retried. Status
+omits throughput and ETA
 until at least 20 Tasks and 10 percent of the Run have completed over a
 60-second observation window; heterogeneous Task durations can still make the
 resulting estimate noisy.

@@ -1880,6 +1880,23 @@ def test_slurm_query_reports_failed_scontrol_fallback() -> None:
         SlurmScheduler(transport).query((SchedulerReference("18"),))
 
 
+def test_slurm_query_classifies_ssh_exit_255_as_transient() -> None:
+    transport = ScriptedTransport(
+        deque(
+            _command_result(Command(("unused",)), 255, "", "transport unavailable")
+            for _ in range(3)
+        )
+    )
+
+    with pytest.raises(SlurmQueryError) as failure:
+        SlurmScheduler(transport).query((SchedulerReference("18"),))
+
+    assert failure.value.transient
+    assert "squeue failed with exit code 255" in str(failure.value)
+    assert "sacct failed with exit code 255" in str(failure.value)
+    assert "scontrol fallback failed" in str(failure.value)
+
+
 @pytest.mark.parametrize(
     ("native", "exit_code", "expected"),
     [
@@ -1918,8 +1935,10 @@ def test_slurm_query_rejects_command_and_parse_failures(
         deque([_command_result(Command(("unused",)), exit_code, stdout, stderr)])
     )
 
-    with pytest.raises(SlurmQueryError, match=message):
+    with pytest.raises(SlurmQueryError, match=message) as failure:
         SlurmScheduler(transport).query((SchedulerReference("123"),))
+
+    assert not failure.value.transient
 
 
 def test_slurm_query_validates_reference_collection() -> None:

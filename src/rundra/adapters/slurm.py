@@ -22,6 +22,7 @@ from rundra.ports import (
     SchedulerGroup,
     SchedulerObservation,
     SchedulerPartition,
+    SchedulerQueryFailure,
     SchedulerReference,
     SchedulerSubmission,
     SchedulerSubmissionFailure,
@@ -173,8 +174,22 @@ class SlurmSubmissionError(SchedulerSubmissionFailure):
         )
 
 
-class SlurmQueryError(RuntimeError):
+class SlurmQueryError(SchedulerQueryFailure):
     """Raised when Slurm state output cannot be queried or represented safely."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        transient: bool = False,
+        exit_code: int | None = None,
+    ) -> None:
+        super().__init__(
+            message,
+            backend="slurm",
+            transient=transient,
+            exit_code=exit_code,
+        )
 
 
 class SlurmCancellationError(RuntimeError):
@@ -1050,7 +1065,12 @@ class SlurmScheduler:
                     )
                     raise SlurmQueryError(
                         f"{queue_context}{accounting_error}; "
-                        f"scontrol fallback failed: {fallback_error}"
+                        f"scontrol fallback failed: {fallback_error}",
+                        transient=(
+                            (queue_error is None or queue_error.transient)
+                            and accounting_error.transient
+                            and fallback_error.transient
+                        ),
                     ) from fallback_error
             else:
                 observations.update(
@@ -1065,7 +1085,10 @@ class SlurmScheduler:
                     except SlurmQueryError as fallback_error:
                         raise SlurmQueryError(
                             f"{queue_error}; sacct did not resolve all requested jobs; "
-                            f"scontrol fallback failed: {fallback_error}"
+                            f"scontrol fallback failed: {fallback_error}",
+                            transient=(
+                                queue_error.transient and fallback_error.transient
+                            ),
                         ) from fallback_error
         return {
             reference: self._with_log_metadata(
@@ -1128,11 +1151,16 @@ class SlurmScheduler:
         try:
             result = self._transport.run(command)
         except Exception as error:
-            raise SlurmQueryError(f"Could not start {source} query") from error
+            raise SlurmQueryError(
+                f"Could not start {source} query through target transport",
+                transient=True,
+            ) from error
         if result.exit_code != 0:
             raise SlurmQueryError(
                 f"{source} failed with exit code {result.exit_code}; "
-                "scheduler diagnostic redacted"
+                "scheduler diagnostic redacted",
+                transient=result.exit_code == 255,
+                exit_code=result.exit_code,
             )
         return result
 

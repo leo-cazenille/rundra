@@ -1748,10 +1748,14 @@ Bundle-journal transport and read failures are distinct from malformed or
 contradictory journal content. `status` retries one transient read failure.
 Long-lived `wait` and `await` operations tolerate a configurable positive
 number of consecutive failed status snapshots, defaulting to ten, and reset
-that counter after every successful snapshot. Exhaustion returns a structured
-`SCHEDULER_QUERY_FAILED` that distinguishes the failed target-transport journal
-read from Run execution and states that the Run was not cancelled. Structural
-corruption remains immediately fatal.
+that counter after every successful snapshot. Retryable snapshots include
+compact-journal transport failures and scheduler queries explicitly classified
+by an adapter as transport-unavailable; for Slurm, remote-command exit code 255
+has that classification. Exhaustion returns a structured
+`SCHEDULER_QUERY_FAILED` that distinguishes the failed target query from Run
+execution, reports the bound, and states that the Run was not cancelled.
+Structural corruption, malformed scheduler output, and non-transport scheduler
+errors remain immediately fatal.
 
 For synchronous arrays, progress contains six lifecycle units plus one unit per
 planned Task. Terminal Task observations advance the bar and its detail reports

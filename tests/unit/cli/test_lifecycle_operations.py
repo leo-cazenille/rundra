@@ -379,6 +379,46 @@ def test_status_reports_persistent_bundle_journal_read_as_retryable(
     assert "Run was not cancelled" in status.error.message
 
 
+def test_status_reports_scheduler_transport_failure_as_retryable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, run_id = _stored_array_record(tmp_path / "source")
+    original = source.load(RunId(run_id))
+    active = replace(
+        original,
+        run=replace(original.run, state=ExecutionState.RUNNING),
+        completed_at=None,
+    )
+    store = JsonRunStore(tmp_path / "active")
+    store.create(active)
+
+    def failed_refresh(
+        service: operations.SchedulerLifecycleService, record: RunRecord
+    ) -> RunRecord:
+        raise operations.SchedulerQueryFailure(
+            "squeue failed with exit code 255; scheduler diagnostic redacted",
+            backend="slurm",
+            transient=True,
+            exit_code=255,
+        )
+
+    monkeypatch.setattr(operations.SchedulerLifecycleService, "refresh", failed_refresh)
+
+    status = status_operation(
+        run_id,
+        store,
+        scheduler=operations.LocalScheduler(operations.LocalTransport()),
+        transport=operations.LocalTransport(),
+        retry_sleeper=lambda delay: None,
+    )
+
+    assert status.error is not None
+    assert status.error.details["retryable"] is True
+    assert status.error.details["query_kind"] == "scheduler_transport"
+    assert "through the scheduler transport" in status.error.message
+    assert "Run was not cancelled" in status.error.message
+
+
 def test_wait_and_await_retry_only_retryable_status_failures(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -137,6 +137,35 @@ class SchedulerSubmissionFailure(RuntimeError):
         super().__init__(message)
 
 
+class SchedulerQueryFailure(RuntimeError):
+    """Portable scheduler-query failure classification for retry policy."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        backend: str,
+        transient: bool = False,
+        exit_code: int | None = None,
+    ) -> None:
+        if type(message) is not str or not message.strip():
+            raise ValueError("Scheduler query failure message must be nonblank")
+        if type(backend) is not str or not backend.strip() or "\x00" in backend:
+            raise ValueError(
+                "Scheduler query failure backend must be nonblank and safe"
+            )
+        if type(transient) is not bool:
+            raise TypeError("Scheduler query failure transient flag must be boolean")
+        if exit_code is not None and type(exit_code) is not int:
+            raise TypeError(
+                "Scheduler query failure exit_code must be an integer or None"
+            )
+        super().__init__(message)
+        self.backend = backend
+        self.transient = transient
+        self.exit_code = exit_code
+
+
 def _freeze_metadata(
     value: Mapping[str, NativeValue],
 ) -> Mapping[str, NativeValue]:

@@ -41,6 +41,7 @@ from rundra.ports import (
     CommandResult,
     SchedulerGroup,
     SchedulerObservation,
+    SchedulerQueryFailure,
     SchedulerReference,
     SchedulerSubmission,
 )
@@ -330,8 +331,27 @@ def test_scheduler_wait_bounds_transient_bundle_journal_failures(
     with pytest.raises(OrchestrationError) as persistent:
         service.wait(record, poll_interval=0.5, query_failure_limit=2)
     assert persistent.value.code == "SCHEDULER_QUERY_FAILED"
-    assert "target-transport failures" in str(persistent.value)
+    assert "compact bundled Task journal reads" in str(persistent.value)
     assert "Run was not cancelled" in str(persistent.value)
+
+    def scheduler_transport_refresh(
+        service: SchedulerLifecycleService, current: RunRecord
+    ) -> RunRecord:
+        raise SchedulerQueryFailure(
+            "squeue failed with exit code 255",
+            backend="slurm",
+            transient=True,
+            exit_code=255,
+        )
+
+    monkeypatch.setattr(
+        SchedulerLifecycleService, "refresh", scheduler_transport_refresh
+    )
+    with pytest.raises(OrchestrationError) as transport_failure:
+        service.wait(record, poll_interval=0.5, query_failure_limit=2)
+    assert "scheduler queries through the target transport" in str(
+        transport_failure.value
+    )
 
 
 def _prepared_record() -> RunRecord:

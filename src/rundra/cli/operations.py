@@ -133,6 +133,7 @@ from rundra.ports import (
     ContainerRuntime,
     FetchRequest,
     Scheduler,
+    SchedulerQueryFailure,
     StagedWorkspace,
     Stager,
     Transport,
@@ -2584,8 +2585,16 @@ def status_operation(
                 return OperationResult.failure(
                     "status", _run_store_operation_error(store_error, record.run.id)
                 )
-            except OrchestrationError as orchestration_error:
-                retryable = orchestration_error.code == _BUNDLE_JOURNAL_READ_UNAVAILABLE
+            except (OrchestrationError, SchedulerQueryFailure) as query_error:
+                journal_transport_failure = (
+                    isinstance(query_error, OrchestrationError)
+                    and query_error.code == _BUNDLE_JOURNAL_READ_UNAVAILABLE
+                )
+                scheduler_transport_failure = (
+                    isinstance(query_error, SchedulerQueryFailure)
+                    and query_error.transient
+                )
+                retryable = journal_transport_failure or scheduler_transport_failure
                 if retryable and attempts <= journal_read_retries:
                     retry_sleeper(_STATUS_JOURNAL_RETRY_DELAY_SECONDS)
                     try:
@@ -2601,15 +2610,26 @@ def status_operation(
                     OperationError(
                         "SCHEDULER_QUERY_FAILED",
                         (
-                            f"Run {record.run.id} target status query failed while "
-                            "reading compact bundled Task journals; the Run was not "
-                            "cancelled and may still be active: "
-                            f"{orchestration_error}"
+                            f"Run {record.run.id} target status query failed"
+                            + (
+                                " through the scheduler transport"
+                                if scheduler_transport_failure
+                                else " while reading compact bundled Task journals"
+                            )
+                            + "; the Run was not cancelled and may still be active: "
+                            + str(query_error)
                         ),
                         {
                             "run_id": str(record.run.id),
                             "retryable": retryable,
                             "attempts": attempts,
+                            "query_kind": (
+                                "scheduler_transport"
+                                if scheduler_transport_failure
+                                else "compact_task_journals"
+                                if journal_transport_failure
+                                else "scheduler"
+                            ),
                         },
                     ),
                 )
@@ -2731,6 +2751,25 @@ def wait_operation(
                         delay = min(delay, max(0.0, float(timeout) - elapsed))
                     sleeper(delay)
                     continue
+            if status.error.details.get("retryable") is True:
+                return OperationResult.failure(
+                    "wait",
+                    OperationError(
+                        "SCHEDULER_QUERY_FAILED",
+                        (
+                            f"Run {resolved_run_id} status refresh failed after "
+                            f"{consecutive_query_failures} consecutive transient "
+                            "target-query failures; waiting stopped, but the Run was "
+                            "not cancelled and may still be active. Last failure: "
+                            f"{status.error.message}"
+                        ),
+                        {
+                            **status.error.details,
+                            "consecutive_failures": consecutive_query_failures,
+                            "query_failure_limit": query_failure_limit,
+                        },
+                    ),
+                )
             return OperationResult.failure("wait", status.error)
         assert status.value is not None
         value = status.value
@@ -2889,6 +2928,25 @@ def await_runs_operation(
                     if consecutive_query_failures < query_failure_limit:
                         retry_snapshot = True
                         break
+                if status.error.details.get("retryable") is True:
+                    return OperationResult.failure(
+                        "await",
+                        OperationError(
+                            "SCHEDULER_QUERY_FAILED",
+                            (
+                                f"Run {run_id} status refresh failed after "
+                                f"{consecutive_query_failures} consecutive transient "
+                                "target-query failures; awaiting stopped, but no Run "
+                                "was cancelled and active Runs may still be running. "
+                                f"Last failure: {status.error.message}"
+                            ),
+                            {
+                                **status.error.details,
+                                "consecutive_failures": consecutive_query_failures,
+                                "query_failure_limit": query_failure_limit,
+                            },
+                        ),
+                    )
                 return OperationResult.failure("await", status.error)
             assert status.value is not None
             statuses.append(replace(status.value, task_details=()))
