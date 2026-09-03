@@ -295,9 +295,9 @@ def build_parser() -> argparse.ArgumentParser:
     wait.add_argument(
         "--query-failure-limit",
         type=int,
-        default=3,
+        default=10,
         metavar="N",
-        help="stop after N consecutive transient scheduler-query failures (default: 3)",
+        help="stop after N consecutive transient scheduler-query failures (default: 10)",
     )
     wait.add_argument(
         "--notify",
@@ -324,9 +324,9 @@ def build_parser() -> argparse.ArgumentParser:
     await_runs.add_argument(
         "--query-failure-limit",
         type=int,
-        default=3,
+        default=10,
         metavar="N",
-        help="stop after N consecutive transient scheduler-query failures (default: 3)",
+        help="stop after N consecutive transient scheduler-query failures (default: 10)",
     )
     await_runs.add_argument("--fail-on-run-failure", action="store_true")
     await_runs.add_argument("--notify-file", type=Path, metavar="PATH")

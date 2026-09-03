@@ -375,6 +375,8 @@ def test_status_reports_persistent_bundle_journal_read_as_retryable(
     assert status.error.code == "SCHEDULER_QUERY_FAILED"
     assert status.error.details["retryable"] is True
     assert status.error.details["attempts"] == 2
+    assert "target status query failed" in status.error.message
+    assert "Run was not cancelled" in status.error.message
 
 
 def test_wait_and_await_retry_only_retryable_status_failures(

@@ -2601,7 +2601,9 @@ def status_operation(
                     OperationError(
                         "SCHEDULER_QUERY_FAILED",
                         (
-                            f"Run {record.run.id} scheduler query failed: "
+                            f"Run {record.run.id} target status query failed while "
+                            "reading compact bundled Task journals; the Run was not "
+                            "cancelled and may still be active: "
                             f"{orchestration_error}"
                         ),
                         {

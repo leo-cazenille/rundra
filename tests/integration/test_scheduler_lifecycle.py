@@ -330,6 +330,8 @@ def test_scheduler_wait_bounds_transient_bundle_journal_failures(
     with pytest.raises(OrchestrationError) as persistent:
         service.wait(record, poll_interval=0.5, query_failure_limit=2)
     assert persistent.value.code == "SCHEDULER_QUERY_FAILED"
+    assert "target-transport failures" in str(persistent.value)
+    assert "Run was not cancelled" in str(persistent.value)
 
 
 def _prepared_record() -> RunRecord:

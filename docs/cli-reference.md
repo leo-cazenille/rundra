@@ -81,7 +81,7 @@ Worker-pool Tasks remain `QUEUED` while an `afterok` preparation dependency is
 pending, even though no bundle journals exist yet. Journal reconciliation is
 idempotent across identical canonical and temporary fragments and fails only
 for malformed or contradictory Task events. `status` retries one transient
-journal transport/read failure. `wait` and `await` tolerate three consecutive
+journal transport/read failure. `wait` and `await` tolerate ten consecutive
 failed status snapshots by default; `--query-failure-limit N` changes that
 positive bound. A successful snapshot resets the counter. Structural journal
 errors are never retried. Status omits throughput and ETA

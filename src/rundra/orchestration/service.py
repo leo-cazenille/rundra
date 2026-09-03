@@ -107,7 +107,7 @@ _MIN_ETA_SAMPLE_COUNT = 20
 _MIN_ETA_SAMPLE_FRACTION = 0.10
 _MIN_ETA_WINDOW_SECONDS = 60
 _BUNDLE_JOURNAL_READ_UNAVAILABLE = "BUNDLE_JOURNAL_READ_UNAVAILABLE"
-_DEFAULT_QUERY_FAILURE_LIMIT = 3
+_DEFAULT_QUERY_FAILURE_LIMIT = 10
 _PREBUILT_IMAGE_PREPARATION_RESOURCES = ResourceRequest(
     cpus_per_task=1,
     memory_bytes=2 * 1024**3,
@@ -460,9 +460,11 @@ class SchedulerLifecycleService:
                     raise OrchestrationError(
                         code="SCHEDULER_QUERY_FAILED",
                         message=(
-                            f"Run {record.run.id} scheduler query failed after "
-                            f"{consecutive_query_failures} transient bundled-journal "
-                            "read failures"
+                            f"Run {record.run.id} status refresh failed after "
+                            f"{consecutive_query_failures} consecutive transient "
+                            "target-transport failures while reading compact bundled "
+                            "Task journals; waiting stopped, but the Run was not "
+                            "cancelled and may still be active"
                         ),
                         run_id=record.run.id,
                     ) from error
@@ -2379,7 +2381,11 @@ def _compact_bundle_events(
         )
     )
     if result.exit_code != 0:
-        raise ValueError("Could not read compact bundled Task journals")
+        raise ValueError(
+            "Target transport command failed with exit code "
+            f"{result.exit_code} while reading compact bundled Task journals; "
+            "the Run was not cancelled and may still be active"
+        )
     assert record.task_space is not None
     started: dict[TaskId, tuple[int, int, str]] = {}
     finished: dict[TaskId, tuple[int, int, int, str]] = {}
@@ -2712,13 +2718,21 @@ def _apply_bundle_journals(
         except Exception as error:
             raise OrchestrationError(
                 code=_BUNDLE_JOURNAL_READ_UNAVAILABLE,
-                message="Bundled Task status journals are temporarily unavailable",
+                message=(
+                    "Target transport command failed while reading compact bundled "
+                    "Task status journals; the Run was not cancelled and may still "
+                    "be active"
+                ),
                 run_id=record.run.id,
             ) from error
         if result.exit_code != 0:
             raise OrchestrationError(
                 code=_BUNDLE_JOURNAL_READ_UNAVAILABLE,
-                message="Bundled Task status journals are temporarily unavailable",
+                message=(
+                    "Target transport command failed with exit code "
+                    f"{result.exit_code} while reading compact bundled Task status "
+                    "journals; the Run was not cancelled and may still be active"
+                ),
                 run_id=record.run.id,
             )
         known = {task.id for task in record.run.tasks}
