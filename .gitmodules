@@ -1,0 +1,3 @@
+[submodule "publication/rundra-overleaf"]
+	path = publication/rundra-overleaf
+	url = https://github.com/leo-cazenille/rundra-overleaf.git
