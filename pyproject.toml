@@ -28,7 +28,12 @@ file = "README-PYPI.md"
 content-type = "text/markdown"
 
 [project.optional-dependencies]
-mcp = ["mcp>=2,<3"]
+mcp = [
+    "mcp>=2.3,<3",
+    "httpx2>=2.16.2",
+    "opentelemetry-api>=1.45.2",
+    "pyjwt[crypto]>=2.15.1",
+]
 
 [project.scripts]
 rundr = "rundra.cli.main:main"
@@ -62,7 +67,7 @@ files = ["src"]
 dev = [
     "bandit>=1.9,<2",
     "mypy>=1.14",
-    "mcp>=2,<3",
+    "mcp>=2.3,<3",
     "pip-audit>=2.9,<3",
     "pytest>=8.3",
     "ruff>=0.9",

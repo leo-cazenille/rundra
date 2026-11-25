@@ -69,6 +69,10 @@ All notable user-visible changes are recorded here.
   expected and observed digests and paths instead of a generic mismatch.
 - Container runtime and image builder probes use the portable `--version`
   option.
+- The optional MCP extra requires SDK 2.3 or newer within the 2.x series and
+  raises the minimum versions of HTTPX2, OpenTelemetry API, and PyJWT. Upgrading
+  an existing MCP installation brings those dependencies up to the audited
+  versions. The default installation keeps the same dependencies.
 
 ### Agent action required
 
