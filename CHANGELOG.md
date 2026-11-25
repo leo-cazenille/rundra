@@ -4,15 +4,24 @@ All notable user-visible changes are recorded here.
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-11-25
+
 ### Added
 
+- Static campaigns run explicit seed assignments across configured targets.
+  Plan and submit a named campaign from project schema v7 or a standalone
+  campaign file. Existing CLI and MCP lifecycle operations accept campaign
+  IDs, and each launch keeps its own RunRecord.
+- `--placement auto` and project schema v8 use live Slurm capacity to choose
+  one or more targets, report rejected targets, and assign deterministic seed
+  ranges. CampaignRecord v2 preserves the observations and the chosen plan.
+  Resuming an interrupted submission uses the saved assignments.
 - `rundr retry --failed` previews failed Task coordinates and can replay them
   as a linked Run using retained source and exact effective configs.
 - `rundr export` writes a checksummed Run or campaign evidence archive, with
   optional materialized result files.
-- Compact SSH status refreshes can reuse validated journal prefixes from the
-  Task database. The Docker Slurm workflow covers additional failure paths.
-
+- `status`, `inspect`, and `fetch` accept `--summary` for bounded output. Use
+  `tasks` and `artifacts` to page through the details.
 - Opt-in Run diagnostics for `status`, `await`, and `inspect`. Slurm
   workers record scratch startup failures with the node and original exit
   code, even before Task journals exist.
@@ -20,33 +29,23 @@ All notable user-visible changes are recorded here.
   existing target image and reports the node and stage reached in the allocation.
 - Experiment schema v2 adds optional `outputs.required` for per-Task regular
   files, with `{seed}` expansion. Existing experiment v1 behavior is preserved.
-
-- Project configuration version 8 and `--placement auto` add one-shot,
-  capacity-aware target selection above static campaigns. Read-only Slurm
-  inventory rejects unreachable, down, overloaded, or capacity-unknown targets;
-  deterministic plans select one or several targets, preserve rejection
-  reasons and seed ranges, and submit through the existing campaign lifecycle.
-- CampaignRecord version 2 preserves automatic placement observations, while an
-  atomic explicit campaign snapshot guarantees that interrupted submission and
-  `resume` never perform a different live placement decision.
-- The Docker campaign workflow now exercises automatic selection, concurrent
-  child Runs, aggregate waiting, extraction, and complete seed coverage across
-  two target names.
-
-- Static multi-target campaigns coordinate explicit seed assignments across
-  detached targets while preserving one ordinary RunRecord per launch. Project
-  schema version 7 adds named campaigns; standalone version-1 campaign files,
-  durable CampaignRecords, aggregate lifecycle commands, paginated selectors,
-  cascading fetch/cancel/purge, recovery, JSON, and MCP parity are included.
-- A scheduled/manual Docker campaign system workflow exercises two concurrent
-  child Runs through distinct target names, aggregate waiting, campaign fetch,
-  Task selectors, compute-node evidence, and child provenance.
-
 - Project configuration version 6 permits `prebuilt.sha256` to be omitted.
   Rundra then trusts only an existing project or configured image-search-path
   SIF, emits warnings, measures it before deriving build/cache identities, and
   preserves the measured digest in Run provenance. Unpinned registry pulls are
   intentionally disabled.
+
+### Changed
+
+- Submit and Run output identify the preparation scheduler job separately from
+  the scientific jobs.
+- Compact SSH status refreshes reuse validated journal prefixes from the Task
+  database. After publication, an attempt's aggregate replaces its lane
+  journals in both incremental and full reads.
+- The Docker campaign workflow exercises concurrent child Runs and verifies
+  complete seed coverage after extraction. Docker Slurm adds worker failure
+  cases, exact-input retry and export, and an incremental-versus-full SSH
+  journal comparison.
 
 ### Fixed
 
@@ -68,6 +67,21 @@ All notable user-visible changes are recorded here.
 - Image receipt parsing now uses a real tab delimiter. Offline target probes
   report each candidate's observed digest, while preparation failures report
   expected and observed digests and paths instead of a generic mismatch.
+- Container runtime and image builder probes use the portable `--version`
+  option.
+
+### Agent action required
+
+- Check `rundr version`, refresh managed instructions with `rundr agent-guide
+  --write AGENTS.md`, and rerun `rundr doctor --agent codex --json`. If doctor
+  returns `run_store_durability.verification_argv`, run it in a separate process
+  and rerun doctor. Use the same persistent `--data-dir` for every lifecycle
+  command.
+- Keep the campaign ID and its child Run IDs. If submission is interrupted,
+  resume the saved campaign so it keeps its original assignments.
+- When downstream tools need ordinary files from a worker-pool manifest, use
+  `rundr fetch RUN_ID --mode copy --extract --summary --json`. See the
+  [agent happy path](docs/agent-happy-path.md) for the full workflow.
 
 ## [0.1.7] - 2026-08-29
 
