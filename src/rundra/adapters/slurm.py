@@ -13,6 +13,7 @@ from rundra.adapters._remote_shell import serialize_remote_command
 from rundra.domain.mappings import ArrayTaskMapping
 from rundra.domain.models import Command, NativeValue, ResourceRequest
 from rundra.domain.states import ExecutionState
+from rundra.execution_diagnostics import DIAGNOSTICS_DIRECTORY, WRITE_DIAGNOSTIC
 from rundra.ports import (
     AllocationScratch,
     CommandResult,
@@ -1752,9 +1753,23 @@ def _scratch_setup_lines(
     )
     lines = [
         "umask 077",
-        f"rundra_scratch_base=${{{environment}:?{environment} is required by target policy}}",
-        "case \"$rundra_scratch_base\" in /*) ;; *) printf '%s\\n' 'scratch path is not absolute' >&2; exit 72 ;; esac",
-        '[ "$rundra_scratch_base" != / ] && [ -d "$rundra_scratch_base" ] && [ ! -L "$rundra_scratch_base" ] && [ -w "$rundra_scratch_base" ] || { printf \'%s\\n\' \'scratch path is unsafe or not writable\' >&2; exit 72; }',
+        WRITE_DIAGNOSTIC.rstrip(),
+        f"rundra_diagnostic_dir={shlex.quote(str(scratch.shared_root / 'metadata' / DIAGNOSTICS_DIRECTORY))}",
+        "rundra_worker_id=${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-unknown}}",
+        'if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then rundra_worker_id=${rundra_worker_id}_$SLURM_ARRAY_TASK_ID; fi',
+        "rundra_scratch_error() {",
+        '  rundra_write_diagnostic "$rundra_diagnostic_dir" "worker-$rundra_worker_id" "$1" "$2" || :',
+        '  printf \'Rundra: %s (%s)\\n\' "$3" "$1" >&2',
+        '  exit "$2"',
+        "}",
+        f"rundra_scratch_base=${{{environment}:-}}",
+        f'[ -n "$rundra_scratch_base" ] || rundra_scratch_error SCRATCH_UNSET 2 "{environment} is required by target policy"',
+        "case \"$rundra_scratch_base\" in /*) ;; *) rundra_scratch_error SCRATCH_NOT_ABSOLUTE 72 'scratch path is not absolute' ;; esac",
+        '[ "$rundra_scratch_base" != / ] || rundra_scratch_error SCRATCH_IS_ROOT 72 "scratch path is unsafe or not writable"',
+        '[ ! -L "$rundra_scratch_base" ] || rundra_scratch_error SCRATCH_SYMLINK 72 "scratch path is unsafe or not writable"',
+        '[ -d "$rundra_scratch_base" ] || rundra_scratch_error SCRATCH_NOT_DIRECTORY 72 "scratch path is unsafe or not writable"',
+        '[ -w "$rundra_scratch_base" ] || rundra_scratch_error SCRATCH_NOT_WRITABLE 72 "scratch path is unsafe or not writable"',
+        """trap 'status=$?; if [ "$status" -ne 0 ]; then rundra_write_diagnostic "$rundra_diagnostic_dir" "worker-$rundra_worker_id" SCRATCH_SETUP_FAILED "$status" || :; fi' EXIT""",
         'RUNDRA_SCRATCH_ROOT="$rundra_scratch_base/rundra-${SLURM_JOB_ID:?missing SLURM_JOB_ID}-${SLURM_ARRAY_TASK_ID:-single}"',
         'case "$RUNDRA_SCRATCH_ROOT" in "$rundra_scratch_base"/rundra-*) ;; *) exit 72 ;; esac',
         f"RUNDRA_SHARED_ROOT={shlex.quote(str(scratch.shared_root))}",

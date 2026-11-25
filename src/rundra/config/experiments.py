@@ -13,7 +13,6 @@ from rundra.config._schema import (
     expect_string,
     expect_string_list,
     fail,
-    require_version_one,
 )
 from rundra.config._yaml import (
     parse_yaml_document,
@@ -27,7 +26,9 @@ from rundra.domain.models import (
     ExperimentSpec,
     NativeValue,
     ResourceRequest,
+    is_required_output_path,
 )
+from rundra.schema_versions import EXPERIMENT_CONFIG_SCHEMA
 from rundra.security import is_credential_field
 
 _ROOT_FIELDS = frozenset(
@@ -45,7 +46,7 @@ _WALLTIME_PATTERN = re.compile(r"([0-9]{2,}):([0-5][0-9]):([0-5][0-9])\Z")
 
 
 def load_experiment(source: Path) -> ExperimentSpec:
-    """Load a version-1 experiment document into portable domain values."""
+    """Load a supported experiment document into portable domain values."""
     document = expect_mapping(read_yaml_document(source), source=source, path=())
     check_fields(
         document,
@@ -54,7 +55,17 @@ def load_experiment(source: Path) -> ExperimentSpec:
         source=source,
         path=(),
     )
-    version = require_version_one(document["version"], source=source)
+    version_path = ("version",)
+    version = expect_integer(
+        document["version"], source=source, path=version_path, minimum=1
+    )
+    if version not in EXPERIMENT_CONFIG_SCHEMA.supported:
+        fail(
+            source=source,
+            path=version_path,
+            code="UNSUPPORTED_VERSION",
+            message=f"Unsupported schema version {version}; expected version 1 or 2",
+        )
     experiment = _experiment_section(document["experiment"], source)
     command = _command_section(document["command"], source)
     resources = _resource_section(document["resources"], source)
@@ -63,7 +74,7 @@ def load_experiment(source: Path) -> ExperimentSpec:
         if "container" in document
         else None
     )
-    outputs = _nested_string_list(document, "outputs", "include", source)
+    outputs, required_outputs = _output_section(document, version, source)
     sync_excludes = _nested_string_list(document, "sync", "exclude", source)
     return ExperimentSpec(
         version=version,
@@ -73,6 +84,7 @@ def load_experiment(source: Path) -> ExperimentSpec:
         container=container,
         outputs=outputs,
         sync_excludes=sync_excludes,
+        required_outputs=required_outputs,
     )
 
 
@@ -349,3 +361,36 @@ def _nested_string_list(
         source=source,
         path=(*path, field_name),
     )
+
+
+def _output_section(
+    document: dict[str, object], version: int, source: Path
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    if version == 1:
+        return _nested_string_list(document, "outputs", "include", source), ()
+    if "outputs" not in document:
+        return (), ()
+    path = ("outputs",)
+    section = expect_mapping(document["outputs"], source=source, path=path)
+    check_fields(
+        section,
+        allowed=frozenset({"include", "required"}),
+        required=frozenset(),
+        source=source,
+        path=path,
+    )
+    includes = expect_string_list(
+        section.get("include", []), source=source, path=(*path, "include")
+    )
+    required = expect_string_list(
+        section.get("required", []), source=source, path=(*path, "required")
+    )
+    for index, item in enumerate(required):
+        if not is_required_output_path(item):
+            fail(
+                source=source,
+                path=(*path, "required", index),
+                code="INVALID_VALUE",
+                message="Required output must be a literal Task-relative file path, optionally with {seed}",
+            )
+    return includes, required

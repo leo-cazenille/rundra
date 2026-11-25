@@ -30,6 +30,7 @@ LOGS_SCHEMA = SchemaVersions(6, RUN_RECORD_SCHEMA.supported)
 INSPECT_SCHEMA = SchemaVersions(6, RUN_RECORD_SCHEMA.supported)
 RUN_LIST_SCHEMA = SchemaVersions(2, frozenset({2}))
 PLAN_SCHEMA = SchemaVersions(10, frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9, 10}))
+EXPERIMENT_CONFIG_SCHEMA = SchemaVersions(2, frozenset({1, 2}))
 PROJECT_CONFIG_SCHEMA = SchemaVersions(8, frozenset({1, 2, 3, 4, 5, 6, 7, 8}))
 CAMPAIGN_CONFIG_SCHEMA = SchemaVersions(1, frozenset({1}))
 CAMPAIGN_RECORD_SCHEMA = SchemaVersions(2, frozenset({1, 2}))
@@ -45,6 +46,7 @@ PUBLIC_SCHEMA_VERSIONS: Final = MappingProxyType(
         "await": AWAIT_SCHEMA,
         "campaign_config": CAMPAIGN_CONFIG_SCHEMA,
         "campaign_record": CAMPAIGN_RECORD_SCHEMA,
+        "experiment_config": EXPERIMENT_CONFIG_SCHEMA,
         "inspect": INSPECT_SCHEMA,
         "logs": LOGS_SCHEMA,
         "plan": PLAN_SCHEMA,

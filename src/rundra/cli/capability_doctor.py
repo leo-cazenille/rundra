@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import shlex
 import stat
@@ -34,6 +35,7 @@ from rundra.domain.preparation import (
     PreparationStorageConfig,
 )
 from rundra.domain.states import ExecutionState
+from rundra.orchestration.models import PlanningError
 from rundra.orchestration.preparation import (
     probe_local_offline_preparation,
     probe_remote_offline_preparation,
@@ -83,6 +85,13 @@ class DoctorDurability:
 
 
 @dataclass(frozen=True, slots=True)
+class ContainerProbeObservation:
+    partition: str | None
+    node: str | None
+    stage: str
+
+
+@dataclass(frozen=True, slots=True)
 class DoctorValue:
     source: Path
     target: Target | None
@@ -97,6 +106,7 @@ class DoctorValue:
     scheduler_inventory: tuple[SchedulerPartition, ...] = ()
     durability: DoctorDurability | None = None
     format_version: int = 4
+    container_probe: ContainerProbeObservation | None = None
 
     @property
     def ready(self) -> bool:
@@ -113,6 +123,7 @@ def doctor_operation(
     *,
     connect: bool = False,
     scheduler_probe: bool = False,
+    probe_container: Path | None = None,
     scheduler_inventory: bool = False,
     probe_timeout: int = 120,
     write_probe: bool = True,
@@ -134,6 +145,13 @@ def doctor_operation(
         return _usage("--probe-timeout must be from 1 to 600")
     if scheduler_probe and not write_probe:
         return _usage("--scheduler-probe requires local write probes")
+    if probe_container is not None and (
+        not scheduler_probe or target_name is None or not probe_container.is_absolute()
+    ):
+        return _usage(
+            "--probe-container requires --scheduler-probe, a selected target, "
+            "and an absolute target image path"
+        )
     if scheduler_inventory and not connect:
         return _usage("--scheduler-inventory requires --connect")
     if local_target_access and target_name is None:
@@ -226,6 +244,11 @@ def doctor_operation(
     target: Target | None = None
     connected = False
     inventory: tuple[SchedulerPartition, ...] = ()
+    container_probe = (
+        ContainerProbeObservation(None, None, "not_started")
+        if probe_container is not None
+        else None
+    )
     if target_name:
         legacy = target_doctor_operation(source, target_name, connect=connect)
         if legacy.ok and legacy.value is not None:
@@ -272,7 +295,35 @@ def doctor_operation(
                     )
                 )
             if scheduler_probe and connected:
-                checks.append(_scheduler_probe(target, probe_timeout))
+                try:
+                    if probe_container is not None and (
+                        target.scheduler.kind != "slurm"
+                        or target.container.kind != "apptainer"
+                    ):
+                        raise ValueError("unsupported scheduler or runtime")
+                    resources = _scheduler_probe_resources(
+                        target,
+                        experiment_source=(
+                            experiment_source if probe_container is not None else None
+                        ),
+                    )
+                except (ConfigError, PlanningError, ValueError):
+                    checks.append(
+                        DoctorCheck(
+                            "scheduler_probe",
+                            "fail",
+                            "scheduler submission probe failed"
+                            if probe_container is None
+                            else "container probe requires a supported Slurm container target and valid resources",
+                        )
+                    )
+                else:
+                    check, observation = _scheduler_probe(
+                        target, probe_timeout, resources, image=probe_container
+                    )
+                    checks.append(check)
+                    if observation is not None:
+                        container_probe = observation
             if scheduler_inventory and connected:
                 inventory, inventory_checks = _scheduler_inventory(target)
                 checks.extend(inventory_checks)
@@ -441,6 +492,7 @@ def doctor_operation(
             config,
             inventory,
             durability,
+            container_probe=container_probe,
         ),
     )
 
@@ -975,7 +1027,42 @@ def _scheduler_inventory(
     return inventory, tuple(checks)
 
 
-def _scheduler_probe(target: Target, timeout: int) -> DoctorCheck:
+def _scheduler_probe_resources(
+    target: Target, *, experiment_source: Path | None
+) -> ResourceRequest:
+    native = {}
+    gpus = 0
+    if experiment_source is not None:
+        experiment = load_experiment(experiment_source)
+        routed, _ = route_scheduler_resources(experiment.resources, target)
+        native = {
+            "slurm": {
+                key: value
+                for key, value in routed.native.get("slurm", {}).items()
+                if key in {"partition", "account", "qos", "constraint"}
+            }
+        }
+        gpus = min(1, routed.gpus_per_task)
+    resources, _ = route_scheduler_resources(
+        ResourceRequest(
+            cpus_per_task=1,
+            gpus_per_task=gpus,
+            memory_bytes=256 * 1024 * 1024,
+            walltime=timedelta(seconds=60),
+            native=native,
+        ),
+        target,
+    )
+    return resources
+
+
+def _scheduler_probe(
+    target: Target,
+    timeout: int,
+    resources: ResourceRequest,
+    *,
+    image: Path | None = None,
+) -> tuple[DoctorCheck, ContainerProbeObservation | None]:
     remote = target.transport.kind != "local"
     transport: LocalTransport | SSHTransport = (
         _transport(target) if remote else LocalTransport()
@@ -988,6 +1075,12 @@ def _scheduler_probe(target: Target, timeout: int) -> DoctorCheck:
     )
     marker = root / "marker"
     hostname = root / "hostname"
+    stage_path = root / "stage"
+    partition = resources.native.get("slurm", {}).get("partition")
+    probe = ContainerProbeObservation(
+        partition if isinstance(partition, str) else None, None, "not_started"
+    )
+    log_names: tuple[str, ...] = ()
     scheduler: Scheduler | None = None
     reference: SchedulerReference | None = None
     try:
@@ -1001,6 +1094,7 @@ def _scheduler_probe(target: Target, timeout: int) -> DoctorCheck:
         scheduler = scheduler_for_target(target, transport, log_directory=root)
         script = 'printf "%s" "$1" > "$2"; hostname > "$3"'
         command_arguments: tuple[str, ...] = (token, str(marker), str(hostname))
+        scratch_environment = ""
         if target.execution_storage is not None:
             script = """\
 set -eu
@@ -1030,26 +1124,56 @@ cp -- "$scratch_directory/marker" "$temporary_marker"
 mv -f -- "$temporary_marker" "$marker"
 hostname > "$hostname_path"
 """
+            scratch_environment = (
+                target.execution_storage.gpu_environment
+                if resources.gpus_per_task
+                else target.execution_storage.cpu_environment
+            )
+            command_arguments = (*command_arguments, scratch_environment)
+        if image is not None:
+            executable = target.container.options.get("executable", "apptainer")
+            if not isinstance(executable, str):
+                raise ValueError("invalid container executable")
+            script = (
+                "set -eu\n"
+                'hostname > "$3"\n'
+                'printf "%s\\n" scratch > "$5"\n'
+                + script
+                + """
+printf '%s\\n' account > "$5"
+getent passwd "$(id -u)" >/dev/null
+printf '%s\\n' image > "$5"
+[ -f "$7" ] && [ -r "$7" ]
+printf '%s\\n' container > "$5"
+if [ "$8" = gpu ]; then
+  "$6" exec --cleanenv --nv "$7" /bin/true >/dev/null 2>&1
+else
+  "$6" exec --cleanenv "$7" /bin/true >/dev/null 2>&1
+fi
+printf '%s\\n' complete > "$5"
+"""
+            )
             command_arguments = (
                 token,
                 str(marker),
                 str(hostname),
-                target.execution_storage.cpu_environment,
+                scratch_environment,
+                str(stage_path),
+                executable,
+                str(image),
+                "gpu" if resources.gpus_per_task else "cpu",
             )
-        probe_resources, _ = route_scheduler_resources(
-            ResourceRequest(
-                cpus_per_task=1,
-                memory_bytes=256 * 1024 * 1024,
-                walltime=timedelta(seconds=60),
-            ),
-            target,
-        )
         unit = SchedulerUnit(
             TaskId("task_000000"),
             Command(("sh", "-c", script, "rundr-doctor", *command_arguments)),
-            probe_resources,
+            resources,
         )
         reference = scheduler.submit(SchedulerGroup((unit,))).reference
+        if image is not None and re.fullmatch(r"[0-9]+", reference.native_id):
+            log_names = tuple(
+                str(root / f"{reference.native_id}.{suffix}")
+                for suffix in ("stdout", "stderr")
+            )
         deadline = time.monotonic() + timeout
         observation = scheduler.query((reference,))[0]
         while observation.state not in _TERMINAL and time.monotonic() < deadline:
@@ -1058,46 +1182,103 @@ hostname > "$hostname_path"
         if observation.state not in _TERMINAL:
             scheduler.cancel((reference,))
             reference = None
-            return DoctorCheck(
-                "scheduler_probe",
-                "warning",
-                "scheduler accepted the probe but it did not finish before timeout",
+            if image is not None:
+                probe = _read_container_probe(transport, hostname, stage_path, probe)
+            return (
+                DoctorCheck(
+                    "scheduler_probe",
+                    "warning",
+                    "scheduler accepted the probe but it did not finish before timeout",
+                ),
+                probe if image is not None else None,
             )
         reference = None
+        if image is not None:
+            probe = _read_container_probe(transport, hostname, stage_path, probe)
         result = transport.run(Command(("cat", "--", str(marker))))
-        if observation.state != ExecutionState.SUCCEEDED or result.stdout != token:
+        if (
+            observation.state != ExecutionState.SUCCEEDED
+            or result.stdout != token
+            or (image is not None and probe.stage != "complete")
+        ):
             raise RuntimeError("marker unavailable")
         message = "scheduler submission and compute-side workspace access succeeded"
         if target.execution_storage is not None:
             message += (
                 "; allocation-local scratch write, copy-back, and cleanup succeeded "
-                f"via {target.execution_storage.cpu_environment}"
+                f"via {scratch_environment}"
             )
-        return DoctorCheck("scheduler_probe", "pass", message)
-    except Exception:
+        if image is not None:
+            message += (
+                f"; existing container executed on {probe.node or 'an unreported node'}"
+            )
         return DoctorCheck(
-            "scheduler_probe", "fail", "scheduler submission probe failed"
+            "scheduler_probe", "pass", message
+        ), probe if image is not None else None
+    except Exception:
+        message = (
+            "scheduler submission probe failed"
+            if image is None
+            else f"container scheduler probe failed at {probe.stage} on {probe.node or 'an unreported node'}"
         )
+        return DoctorCheck(
+            "scheduler_probe", "fail", message
+        ), probe if image is not None else None
     finally:
         if reference is not None and scheduler is not None:
             try:
                 scheduler.cancel((reference,))
             except Exception:
                 pass
-        script = 'rm -f -- "$1" "$2"; rmdir -- "$3"'
-        transport.run(
-            Command(
-                (
-                    "sh",
-                    "-c",
-                    script,
-                    "rundr-doctor",
-                    str(marker),
-                    str(hostname),
-                    str(root),
+        try:
+            transport.run(
+                Command(
+                    (
+                        "sh",
+                        "-c",
+                        'root=$1; shift; rm -f -- "$@"; rmdir -- "$root"',
+                        "rundr-doctor",
+                        str(root),
+                        str(marker),
+                        str(hostname),
+                        str(stage_path),
+                        *log_names,
+                    )
                 )
             )
+        except Exception:
+            pass
+
+
+def _read_container_probe(
+    transport: LocalTransport | SSHTransport,
+    hostname: PurePath,
+    stage_path: PurePath,
+    probe: ContainerProbeObservation,
+) -> ContainerProbeObservation:
+    result = transport.run(
+        Command(
+            (
+                "sh",
+                "-c",
+                'for f in "$@"; do if [ -f "$f" ]; then head -c 128 -- "$f"; else printf "\\n"; fi; done',
+                "rundr-doctor-probe",
+                str(hostname),
+                str(stage_path),
+            )
         )
+    )
+    rows = result.stdout.splitlines()
+    if result.exit_code != 0 or len(rows) != 2:
+        return probe
+    node, stage = rows
+    return ContainerProbeObservation(
+        probe.partition,
+        node if re.fullmatch(r"[A-Za-z0-9_.-]{1,96}", node) else None,
+        stage
+        if stage in {"scratch", "account", "image", "container", "complete"}
+        else probe.stage,
+    )
 
 
 def _path_requirement(

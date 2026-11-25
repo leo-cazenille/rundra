@@ -83,6 +83,11 @@ from rundra.domain.states import (
     aggregate_retrieval_state,
 )
 from rundra.domain.sweeps import ExpandedConfig, SweepExpansion
+from rundra.execution_diagnostics import (
+    DIAGNOSTICS_DIRECTORY,
+    ExecutionDiagnostic,
+    read_execution_diagnostics,
+)
 from rundra.orchestration.models import ExecutionPlan, PlanningError
 from rundra.orchestration.planner import (
     compact_seed_range,
@@ -304,6 +309,22 @@ class SubmissionRecoveryValue:
 
 
 @dataclass(frozen=True, slots=True)
+class RunDiagnosticsValue:
+    run_id: RunId
+    state: ExecutionState
+    retrieval_state: RetrievalState
+    task_counts: Mapping[str, int]
+    scheduler_job_ids: tuple[str, ...]
+    allocated_nodes: tuple[str, ...]
+    runtime: str | None
+    runtime_version: str | None
+    native_state: str | None
+    availability: str
+    events: tuple[ExecutionDiagnostic, ...]
+    truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
 class StatusValue:
     run_id: RunId
     experiment: str
@@ -322,6 +343,7 @@ class StatusValue:
     throughput_tasks_per_second: float | None = None
     eta_seconds: float | None = None
     task_details_included: bool = True
+    diagnostics: RunDiagnosticsValue | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -480,6 +502,7 @@ class InspectValue:
     record: RunRecord
     retention: PurgeReceipt | None = None
     summary: bool = False
+    diagnostics: RunDiagnosticsValue | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -621,6 +644,7 @@ class PlanValue:
     launch: LaunchResolutionValue | None = None
     source_snapshot: SourceSnapshotPreview | None = None
     format_version: int = PLAN_SCHEMA.current
+    required_outputs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if type(self.plan) is not ExecutionPlan:
@@ -1086,7 +1110,12 @@ def plan_operation(
             )
         return OperationResult.success(
             "plan",
-            PlanValue(plan, launch, source_snapshot),
+            PlanValue(
+                plan,
+                launch,
+                source_snapshot,
+                required_outputs=experiment.required_outputs,
+            ),
         )
     except ConfigError as error:
         return OperationResult.failure("plan", _config_error(error))
@@ -2557,6 +2586,7 @@ def status_operation(
     retry_sleeper: Callable[[float], None] = sleep,
     journal_read_retries: int = _STATUS_JOURNAL_READ_RETRIES,
     summary: bool = False,
+    diagnostics: bool = False,
 ) -> OperationResult[StatusValue]:
     record, error = _load_record(run_id, store)
     if error is not None:
@@ -2671,9 +2701,15 @@ def status_operation(
         return OperationResult.failure(
             "status", _run_store_operation_error(store_error, record.run.id)
         )
-    return OperationResult.success(
-        "status", _status_value(record, counts, include_tasks=not summary)
-    )
+    status = _status_value(record, counts, include_tasks=not (summary or diagnostics))
+    if diagnostics:
+        status = replace(
+            status,
+            diagnostics=_run_diagnostics(
+                record, status.task_counts, transport=transport
+            ),
+        )
+    return OperationResult.success("status", status)
 
 
 def wait_operation(
@@ -2822,6 +2858,7 @@ def await_runs_operation(
     sleeper: Callable[[float], None] = sleep,
     monotonic_clock: Callable[[], float] = monotonic,
     query_failure_limit: int = _DEFAULT_QUERY_FAILURE_LIMIT,
+    diagnostics: bool = False,
 ) -> OperationResult[AwaitRunsValue]:
     if isinstance(run_ids, (str, bytes)) or not isinstance(run_ids, Sequence):
         return OperationResult.failure(
@@ -2881,6 +2918,22 @@ def await_runs_operation(
         if error is not None:
             return OperationResult.failure("await", error)
 
+    def complete(value: AwaitRunsValue) -> OperationResult[AwaitRunsValue]:
+        if diagnostics:
+            values = []
+            for status in value.statuses:
+                record, _ = _load_record(str(status.run_id), store)
+                if record is not None:
+                    status = replace(
+                        status,
+                        diagnostics=_run_diagnostics(
+                            record, status.task_counts, transport=transport
+                        ),
+                    )
+                values.append(status)
+            value = replace(value, statuses=tuple(values))
+        return OperationResult.success("await", value)
+
     started = monotonic_clock()
     terminal_states = {
         ExecutionState.SUCCEEDED,
@@ -2914,8 +2967,7 @@ def await_runs_operation(
                         and elapsed >= float(timeout)
                         and last_statuses is not None
                     ):
-                        return OperationResult.success(
-                            "await",
+                        return complete(
                             AwaitRunsValue(
                                 last_statuses,
                                 until,
@@ -2972,9 +3024,9 @@ def await_runs_operation(
             fail_on_run_failure,
         )
         if condition_met:
-            return OperationResult.success("await", value)
+            return complete(value)
         if timeout is not None and elapsed >= float(timeout):
-            return OperationResult.success("await", replace(value, timed_out=True))
+            return complete(replace(value, timed_out=True))
         delay = float(poll_interval)
         if timeout is not None:
             delay = min(delay, max(0.0, float(timeout) - elapsed))
@@ -3081,6 +3133,8 @@ def inspect_operation(
     *,
     receipts: PurgeReceiptStore | None = None,
     summary: bool = False,
+    diagnostics: bool = False,
+    task_store: SqliteTaskStore | None = None,
 ) -> OperationResult[InspectValue]:
     record, error = _load_record(run_id, store)
     if error is not None:
@@ -3092,7 +3146,64 @@ def inspect_operation(
         return OperationResult.failure(
             "inspect", OperationError("PURGE_RECEIPT_INVALID", str(receipt_error))
         )
-    return OperationResult.success("inspect", InspectValue(record, retention, summary))
+    report = None
+    if diagnostics:
+        counts = None
+        if record.is_compact and task_store is not None:
+            try:
+                counts = task_store.counts(record.run.id).execution
+            except RunStoreError:
+                pass
+        status = _status_value(record, counts, include_tasks=False)
+        report = _run_diagnostics(record, status.task_counts)
+    return OperationResult.success(
+        "inspect", InspectValue(record, retention, summary, report)
+    )
+
+
+def _run_diagnostics(
+    record: RunRecord,
+    task_counts: Mapping[str, int],
+    *,
+    transport: Transport | None = None,
+) -> RunDiagnosticsValue:
+    target = record.run.target
+    directory = (
+        target.workspace
+        / "runs"
+        / str(record.run.id)
+        / "metadata"
+        / DIAGNOSTICS_DIRECTORY
+    )
+    try:
+        active_transport = transport or (
+            LocalTransport()
+            if target.transport.kind == "local"
+            else _record_ssh_transport(record)
+        )
+        availability, events, truncated = read_execution_diagnostics(
+            active_transport, directory
+        )
+    except (OSError, RuntimeError, ValueError):
+        availability, events, truncated = "unavailable", (), False
+    runtime = record.scheduler_metadata.get("container_runtime")
+    runtime_version = record.scheduler_metadata.get("container_runtime_version")
+    return RunDiagnosticsValue(
+        record.run.id,
+        record.run.state,
+        record.run.retrieval_state,
+        task_counts,
+        record.scheduler_job_ids[:16],
+        record.allocated_nodes[:16],
+        runtime if isinstance(runtime, str) else None,
+        runtime_version if isinstance(runtime_version, str) else None,
+        record.native_state,
+        availability,
+        events,
+        truncated
+        or len(record.scheduler_job_ids) > 16
+        or len(record.allocated_nodes) > 16,
+    )
 
 
 def artifacts_operation(

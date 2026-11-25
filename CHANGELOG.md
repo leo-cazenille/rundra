@@ -6,6 +6,14 @@ All notable user-visible changes are recorded here.
 
 ### Added
 
+- Opt-in Run diagnostics for `status`, `await`, and `inspect`. Slurm
+  workers record scratch startup failures with the node and original exit
+  code, even before Task journals exist.
+- An optional `doctor --scheduler-probe --probe-container` check exercises an
+  existing target image and reports the node and stage reached in the allocation.
+- Experiment schema v2 adds optional `outputs.required` for per-Task regular
+  files, with `{seed}` expansion. Existing experiment v1 behavior is preserved.
+
 - Project configuration version 8 and `--placement auto` add one-shot,
   capacity-aware target selection above static campaigns. Read-only Slurm
   inventory rejects unreachable, down, overloaded, or capacity-unknown targets;

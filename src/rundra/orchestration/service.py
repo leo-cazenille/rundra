@@ -37,6 +37,7 @@ from rundra.domain.states import (
     aggregate_execution_state,
 )
 from rundra.domain.sweeps import ExpandedConfig
+from rundra.execution_diagnostics import required_outputs_command
 from rundra.orchestration.models import (
     SCHEDULER_ARRAY,
     SLURM_ARRAY,
@@ -1302,20 +1303,30 @@ class OrchestrationService:
             scheduled_units = tuple(
                 replace(
                     unit,
-                    command=self._runtime.build_command(
+                    command=_build_task_command(
+                        self._runtime,
                         _container_request(
                             request.experiment,
                             unit,
                             workspace,
                             isolate_task=len(units) > 1,
-                        )
+                        ),
+                        paths=request.experiment.required_outputs,
+                        workspace=workspace,
+                        task_id=str(unit.task_id),
+                        seed=str(unit.seed),
                     ),
                 )
                 for unit in (() if compact_units else units)
             )
             compact_commands = tuple(
-                self._runtime.build_command(
-                    _compact_container_request(request.experiment, unit, workspace)
+                _build_task_command(
+                    self._runtime,
+                    _compact_container_request(request.experiment, unit, workspace),
+                    paths=request.experiment.required_outputs,
+                    workspace=workspace,
+                    task_id=_COMPACT_TASK_ID,
+                    seed=_COMPACT_SEED,
                 )
                 for unit in compact_units
             )
@@ -2865,6 +2876,31 @@ def _apply_bundle_journals(
         task_native_states=native_states,
         native_state=native_state or record.native_state,
         scheduler_metadata=scheduler_metadata,
+    )
+
+
+def _build_task_command(
+    runtime: ContainerRuntime,
+    request: ContainerRequest,
+    *,
+    paths: tuple[str, ...],
+    workspace: StagedWorkspace,
+    task_id: str,
+    seed: str,
+) -> Command:
+    command = runtime.build_command(request)
+    if not paths:
+        return command
+    output_root = next(
+        bind.source for bind in request.binds if bind.destination == _CONTAINER_OUTPUTS
+    )
+    return required_outputs_command(
+        command,
+        output_root=output_root,
+        metadata_root=workspace.metadata,
+        task_id=task_id,
+        paths=paths,
+        seed=seed,
     )
 
 

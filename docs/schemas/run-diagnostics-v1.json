@@ -1,0 +1,24 @@
+{
+  "format_version": 1,
+  "run_id": "run_0123456789abcdef0123456789abcdef",
+  "state": "FAILED",
+  "retrieval_state": "NOT_REQUESTED",
+  "native_state": "BUNDLE_JOURNAL_MISSING",
+  "task_counts": {"FAILED": 32},
+  "scheduler_job_ids": ["37"],
+  "allocated_nodes": ["cpu02"],
+  "container_runtime": "apptainer",
+  "container_runtime_version": "3.8.4",
+  "availability": "available",
+  "truncated": false,
+  "events": [
+    {
+      "scope": "worker",
+      "identifier": "37_0",
+      "code": "SCRATCH_SYMLINK",
+      "exit_code": 72,
+      "node": "cpu02",
+      "message": "The scheduler scratch path is a symbolic link."
+    }
+  ]
+}

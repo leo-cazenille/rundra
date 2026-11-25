@@ -197,6 +197,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_placement_arguments(doctor)
     doctor.add_argument("--connect", action="store_true")
     doctor.add_argument("--scheduler-probe", action="store_true")
+    doctor.add_argument("--probe-container", type=Path, metavar="TARGET_IMAGE")
     doctor.add_argument("--scheduler-inventory", action="store_true")
     doctor.add_argument("--probe-timeout", type=int, default=120)
     doctor.add_argument("--no-write-probe", action="store_true")
@@ -329,6 +330,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="stop after N consecutive transient scheduler-query failures (default: 10)",
     )
     await_runs.add_argument("--fail-on-run-failure", action="store_true")
+    await_runs.add_argument("--diagnostics", action="store_true")
     await_runs.add_argument("--notify-file", type=Path, metavar="PATH")
     _add_store_option(await_runs)
     _add_json_option(await_runs)
@@ -336,6 +338,7 @@ def build_parser() -> argparse.ArgumentParser:
     status = subparsers.add_parser("status", help="show persisted Run status")
     _add_run_selector(status)
     status.add_argument("--summary", action="store_true")
+    status.add_argument("--diagnostics", action="store_true")
     _add_store_option(status)
     _add_json_option(status)
 
@@ -411,6 +414,7 @@ def build_parser() -> argparse.ArgumentParser:
     inspect = subparsers.add_parser("inspect", help="inspect a persisted Run record")
     _add_run_selector(inspect)
     inspect.add_argument("--summary", action="store_true")
+    inspect.add_argument("--diagnostics", action="store_true")
     _add_store_option(inspect)
     _add_json_option(inspect)
 
@@ -983,7 +987,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif arguments.command == "targets":
         result = targets_operation(arguments.targets_file)
     elif arguments.command == "doctor":
-        if arguments.experiment is not None and _campaign_requested(
+        if (
+            arguments.probe_container is not None
+            and arguments.experiment is not None
+            and (
+                _campaign_requested(arguments.experiment, arguments.campaign)
+                or _placement_requested(arguments)
+            )
+        ):
+            result = OperationResult.failure(
+                "doctor",
+                OperationError(
+                    "CLI_USAGE_ERROR",
+                    "--probe-container requires a single target",
+                ),
+            )
+        elif arguments.experiment is not None and _campaign_requested(
             arguments.experiment, arguments.campaign
         ):
             override = _campaign_override_error(arguments)
@@ -1013,6 +1032,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 arguments.target,
                 connect=arguments.connect,
                 scheduler_probe=arguments.scheduler_probe,
+                probe_container=arguments.probe_container,
                 scheduler_inventory=arguments.scheduler_inventory,
                 probe_timeout=arguments.probe_timeout,
                 write_probe=not arguments.no_write_probe,
@@ -1048,6 +1068,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     resolved_doctor.value.target,
                     connect=arguments.connect,
                     scheduler_probe=arguments.scheduler_probe,
+                    probe_container=arguments.probe_container,
                     scheduler_inventory=arguments.scheduler_inventory,
                     probe_timeout=arguments.probe_timeout,
                     write_probe=not arguments.no_write_probe,
@@ -1311,9 +1332,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 query_failure_limit=arguments.query_failure_limit,
                 fail_on_run_failure=arguments.fail_on_run_failure,
                 task_store=SqliteTaskStore(arguments.data_dir),
+                diagnostics=arguments.diagnostics,
             )
     elif arguments.command == "status":
-        if _is_campaign_id(arguments.run_id):
+        if _is_campaign_id(arguments.run_id) and arguments.diagnostics:
+            result = OperationResult.failure(
+                "status",
+                OperationError(
+                    "CLI_USAGE_ERROR", "--diagnostics requires a child Run ID"
+                ),
+            )
+        elif _is_campaign_id(arguments.run_id):
             result = campaign_status_operation(
                 CampaignId(arguments.run_id),
                 arguments.data_dir,
@@ -1325,6 +1354,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 JsonRunStore(arguments.data_dir),
                 task_store=SqliteTaskStore(arguments.data_dir),
                 summary=arguments.summary,
+                diagnostics=arguments.diagnostics,
             )
     elif arguments.command == "tasks":
         if _is_campaign_id(arguments.run_id):
@@ -1422,7 +1452,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 summary=arguments.summary,
             )
     elif arguments.command == "inspect":
-        if _is_campaign_id(arguments.run_id):
+        if _is_campaign_id(arguments.run_id) and arguments.diagnostics:
+            result = OperationResult.failure(
+                "inspect",
+                OperationError(
+                    "CLI_USAGE_ERROR", "--diagnostics requires a child Run ID"
+                ),
+            )
+        elif _is_campaign_id(arguments.run_id):
             result = campaign_inspect_operation(
                 CampaignId(arguments.run_id), arguments.data_dir
             )
@@ -1432,6 +1469,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 JsonRunStore(arguments.data_dir),
                 receipts=PurgeReceiptStore(arguments.data_dir),
                 summary=arguments.summary,
+                diagnostics=arguments.diagnostics,
+                task_store=(
+                    SqliteTaskStore(arguments.data_dir)
+                    if arguments.diagnostics
+                    else None
+                ),
             )
     elif arguments.command == "cancel":
         if _is_campaign_id(arguments.run_id):

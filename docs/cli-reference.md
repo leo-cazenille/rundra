@@ -10,22 +10,22 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 | `validate` | `EXPERIMENT` or `CAMPAIGN_FILE` | `--campaign`, `--project-file`, `--json` | Validate experiment or campaign YAML without executing. |
 | `plan` | `EXPERIMENT` or `CAMPAIGN_FILE` | launch options, `--campaign`, `--placement`, repeated `--candidate-target`, `--source-root`, preparation options, `--execution-strategy`, `--retrieval`, `--workers`, `--task-slots-per-worker`, `--json` | Resolve and inspect execution. Ordinary plans are offline; automatic placement performs declared read-only target observations. |
 | `targets` | none | `--targets-file`, `--json` | Validate and list configured targets. |
-| `doctor` | optional `EXPERIMENT` | launch path overrides, seed selectors for placement, `--placement`, repeated `--candidate-target`, `--connect`, `--offline`, `--local-target-access`, `--prepare-location`, `--scheduler-inventory`, `--scheduler-probe`, `--probe-timeout`, `--no-write-probe`, `--agent`, `--verify-run-store TOKEN`, `--json` | Audit installation, durable sandbox storage, target access, reversible staging, preparation caches, read-only scheduler inventory, and an optional bounded scheduler submission. |
+| `doctor` | optional `EXPERIMENT` | launch path overrides, seed selectors for placement, `--placement`, repeated `--candidate-target`, `--connect`, `--offline`, `--local-target-access`, `--prepare-location`, `--scheduler-inventory`, `--scheduler-probe`, `--probe-container TARGET_IMAGE`, `--probe-timeout`, `--no-write-probe`, `--agent`, `--verify-run-store TOKEN`, `--json` | Audit installation, durable sandbox storage, target access, reversible staging, preparation caches, read-only scheduler inventory, and an optional bounded scheduler submission. |
 | `run` | `EXPERIMENT` | plan options plus `--source-root`, `--destination`, `--data-dir`, `--workers`, `--task-slots-per-worker`, `--verbose`, `--progress`, `--progress-interval`, `--json` | Execute synchronously, persist, reconcile, and fetch requested outputs. |
 | `wait` | `RUN_ID` or `--last` | `--timeout`, `--poll-interval`, `--query-failure-limit N`, `--notify`, `--notify-file PATH`, `--data-dir`, `--verbose`, `--progress`, `--progress-interval`, `--json` | Reconcile until terminal or a renewable timeout; optionally emit an alert or atomic terminal JSON file. |
-| `await` | one or more `RUN_ID` values | `--until all`/`any`, `--timeout`, `--poll-interval`, `--query-failure-limit N`, `--fail-on-run-failure`, `--notify-file PATH`, `--data-dir`, `--json` | Wait silently for an aggregate terminal condition and emit one compact final result. |
+| `await` | one or more `RUN_ID` values | `--until all`/`any`, `--timeout`, `--poll-interval`, `--query-failure-limit N`, `--fail-on-run-failure`, `--diagnostics`, `--notify-file PATH`, `--data-dir`, `--json` | Wait silently for an aggregate terminal condition and emit one compact final result. |
 | `agent-guide` | none | `--write PATH`, `--check PATH`, `--topic TOPIC`, `--list-topics`, `--json` | Print, install, check, or select bounded portable agent instructions. |
 | `help` | optional `COMMAND` | none | List commands and the common workflow, or show one command's detailed arguments and options. |
 | `submit` | `EXPERIMENT` | same as `run` | Submit asynchronously when the selected scheduler supports it. |
 | `resume` | `RUN_ID`, `CAMPAIGN_ID`, or `--last` | launch paths, `--confirm-tasks`, `--data-dir`, `--json` | Recover an interrupted submission without duplication. |
 | `resolve-submission` | `RUN_ID` or `--last` | `--not-submitted`, `--confirm RUN_ID`, `--data-dir`, `--json` | Close an unknown submission only after proving no scheduler job exists. |
-| `status` | `RUN_ID` or `--last` | `--summary`, `--data-dir`, `--json` | Reconcile scheduler state; `--summary` omits per-Task detail. |
+| `status` | `RUN_ID` or `--last` | `--summary`, `--diagnostics`, `--data-dir`, `--json` | Reconcile scheduler state; `--summary` omits per-Task detail. |
 | `tasks` | `RUN_ID` or `--last` | `--offset`, `--limit`, `--data-dir`, `--json` | Return one bounded Task-state page. |
 | `artifacts` | `RUN_ID` or `--last` | `--offset`, `--limit`, `--data-dir`, `--json` | Return one bounded persisted-artifact page. |
 | `list` | none | `--kind run|campaign|all`, `--offset`, `--limit`, `--include-tasks`, `--data-dir`, `--json` | Page through compact Run and/or campaign summaries. |
 | `logs` | `RUN_ID`, `CAMPAIGN_ID`, or `--last` | `--task`, `--launch`, `--preparation`, `--data-dir`, `--json` | Read framework-managed Task or preparation logs. |
 | `fetch` | `RUN_ID` or `--last` | `--destination`, repeatable `--task`, `--mode`, `--extract`, `--summary`, progress options, `--data-dir`, `--json` | Retrieve all or selected artifacts idempotently; `--summary` omits the artifact list. |
-| `inspect` | `RUN_ID` or `--last` | `--summary`, `--data-dir`, `--json` | Return the complete RunRecord or a bounded lifecycle summary. |
+| `inspect` | `RUN_ID` or `--last` | `--summary`, `--diagnostics`, `--data-dir`, `--json` | Return the complete RunRecord, a lifecycle summary, or a diagnostic report. |
 | `cancel` | `RUN_ID` or `--last` | `--data-dir`, `--json` | Reconcile and cancel active scheduler work. |
 | `purge` | `RUN_ID` or `--last` | `--workspace`, `--confirm RUN_ID`, `--dry-run`, `--data-dir`, `--json` | Preview or delete terminal Run data. |
 
@@ -39,6 +39,74 @@ which own scientific Tasks. Do not infer that a preparation job ID executed a
 scientific Task. For large Runs, use `status --summary --json` and
 `inspect --summary --json`, then page individual records with `tasks` and
 `artifacts`.
+
+## Worker and Task diagnostics
+
+Use `rundr status RUN_ID --diagnostics --json` to refresh Run status and
+include diagnostic events. Use `rundr inspect RUN_ID --diagnostics --json`
+for a compact report based on the saved Run state. The report may read the
+target workspace to retrieve events. Reuse the Run's `--data-dir` when it is
+nondefault. `rundr await RUN_ID... --diagnostics --json` retrieves diagnostics
+once for the final result. For a campaign, pass a child Run ID to `status` or
+`inspect`, or pass the campaign ID to `await` to get reports for all children.
+
+Reports include Task counts, scheduler job IDs, node names, runtime identity,
+and framework reason codes. A rejected scratch symlink produces
+`SCRATCH_SYMLINK` with the worker's original exit code 72 alongside the
+reconciled `BUNDLE_JOURNAL_MISSING` outcome. The report uses fixed framework
+messages. Use `rundr logs RUN_ID` for application stdout and stderr.
+An older Run can report `not_recorded`, and an inaccessible workspace can
+report `unavailable`. These values describe diagnostic availability.
+
+For a Slurm target with an existing Apptainer-compatible image, opt into a
+container check inside the scheduler allocation:
+
+```bash
+rundr doctor experiment.yaml --profile cluster --scheduler-probe \
+  --probe-container /shared/images/my-image.sif --json
+```
+
+The experiment selects the partition and resource class. The probe requests one
+CPU, 256 MiB, one minute, and one GPU for a GPU experiment. It checks target
+workspace access, configured allocation scratch, job UID resolution, image
+readability, and `exec --cleanenv` of `/bin/true` with the configured runtime.
+Use an image containing `/bin/true`. The result includes the node hostname
+when the probe reaches the allocation. Supply an absolute image path on the
+target. Plain `--scheduler-probe` retains its workspace and configured CPU
+scratch checks.
+
+## Required Task outputs
+
+Experiment YAML v2 adds `outputs.required`. Each entry is a literal path
+relative to that Task's output directory, with optional `{seed}` substitution.
+Quote paths containing braces in YAML flow lists. `outputs.include` selects
+retrieval patterns independently.
+
+```yaml
+version: 2
+experiment: {name: required-result}
+command:
+  argv:
+    - python3
+    - main.py
+    - --config
+    - "{config}"
+    - --seed
+    - "{seed}"
+    - --output
+    - "/workspace/output/results/result-{seed}.json"
+resources: {}
+outputs:
+  include: ["results/**"]
+  required: ["results/result-{seed}.json"]
+```
+
+After a successful command, Rundra checks that every required path exists as a
+regular file in the Task's output tree. The check rejects symlinks and paths
+with parent-directory segments. A failed check records
+`REQUIRED_OUTPUT_MISSING` and exits with code 86. Application failures keep
+their original exit code. Version-1 experiments and version-2 experiments
+without required paths retain their existing success criteria.
 
 ## Campaigns
 

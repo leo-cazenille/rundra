@@ -25,7 +25,7 @@ def _surface(parser: argparse.ArgumentParser) -> dict[str, list[str]]:
     }
 
 
-def test_cli_surface_matches_version_twenty_eight_contract() -> None:
+def test_cli_surface_matches_version_twenty_nine_contract() -> None:
     parser = build_parser()
     subparsers = next(
         action
@@ -33,7 +33,7 @@ def test_cli_surface_matches_version_twenty_eight_contract() -> None:
         if isinstance(action, argparse._SubParsersAction)
     )
     actual: dict[str, object] = {
-        "format_version": 28,
+        "format_version": 29,
         "program": parser.prog,
         "global_options": _surface(parser)["options"],
         "commands": {
@@ -42,7 +42,7 @@ def test_cli_surface_matches_version_twenty_eight_contract() -> None:
         },
     }
     expected = json.loads(
-        (_ROOT / "docs/schemas/cli-surface-v28.json").read_text(encoding="utf-8")
+        (_ROOT / "docs/schemas/cli-surface-v29.json").read_text(encoding="utf-8")
     )
 
     assert actual == expected

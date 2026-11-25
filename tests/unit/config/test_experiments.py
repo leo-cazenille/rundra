@@ -172,7 +172,7 @@ sync:
     "content, code, path",
     [
         (
-            "version: 2\nexperiment: {name: x}\ncommand: {argv: [x]}\nresources: {}\n",
+            "version: 3\nexperiment: {name: x}\ncommand: {argv: [x]}\nresources: {}\n",
             "UNSUPPORTED_VERSION",
             ("version",),
         ),

@@ -144,6 +144,17 @@ class ContainerSpec:
             raise TypeError("ContainerSpec gpu must be a boolean")
 
 
+def is_required_output_path(path: str) -> bool:
+    """Check a literal Task-relative output path with optional seed substitution."""
+    literal = path.replace("{seed}", "0")
+    return (
+        bool(re.fullmatch(r"[A-Za-z0-9_. /-]+", literal))
+        and all(part not in {"", ".", ".."} for part in literal.split("/"))
+        and "__RUNDRA_" not in literal
+        and literal == literal.strip()
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ExperimentSpec:
     """Portable scientific definition for executing one experiment task."""
@@ -155,6 +166,7 @@ class ExperimentSpec:
     container: ContainerSpec | None = None
     outputs: tuple[str, ...] = ()
     sync_excludes: tuple[str, ...] = ()
+    required_outputs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if type(self.version) is not int:
@@ -171,6 +183,17 @@ class ExperimentSpec:
             raise TypeError("ExperimentSpec resources must be a ResourceRequest")
         if self.container is not None and type(self.container) is not ContainerSpec:
             raise TypeError("ExperimentSpec container must be a ContainerSpec or None")
+        required = _freeze_string_sequence(
+            self.required_outputs, field_name="ExperimentSpec required_outputs"
+        )
+        if required and (
+            self.version < 2
+            or any(not is_required_output_path(path) for path in required)
+        ):
+            raise ValueError(
+                "Required outputs must be safe relative paths in experiment v2"
+            )
+        object.__setattr__(self, "required_outputs", required)
         object.__setattr__(
             self,
             "outputs",

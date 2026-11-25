@@ -39,6 +39,7 @@ from rundra.cli.operations import (
     PlanValue,
     PreparationLogsValue,
     PurgeValue,
+    RunDiagnosticsValue,
     RunValue,
     StatusValue,
     SubmissionRecoveryValue,
@@ -250,6 +251,8 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
             }
     elif isinstance(value, PlanValue):
         document["plan"] = _plan_document(value.plan)
+        if value.required_outputs:
+            document["plan"]["required_outputs"] = list(value.required_outputs)
         document["source_snapshot"] = (
             None
             if value.source_snapshot is None
@@ -298,6 +301,18 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
                     "verification_argv": list(value.durability.verification_argv),
                 }
             ),
+            **(
+                {
+                    "container_probe": {
+                        "format_version": 1,
+                        "partition": value.container_probe.partition,
+                        "node": value.container_probe.node,
+                        "stage": value.container_probe.stage,
+                    }
+                }
+                if value.container_probe is not None
+                else {}
+            ),
             "checks": [
                 {
                     "name": check.name,
@@ -342,6 +357,8 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
         }
     elif isinstance(value, StatusValue):
         document["status"] = _status_document(value)
+        if value.diagnostics is not None:
+            document["diagnostics"] = _diagnostics_document(value.diagnostics)
     elif isinstance(value, WaitValue):
         document["wait"] = {
             "run_id": str(value.status.run_id),
@@ -355,6 +372,8 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
         for status in value.statuses:
             item = _status_document(status)
             item.pop("task_details", None)
+            if status.diagnostics is not None:
+                item["diagnostics"] = _diagnostics_document(status.diagnostics)
             statuses.append(item)
         terminal_states = {
             ExecutionState.SUCCEEDED,
@@ -431,13 +450,16 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
             "artifacts": [_artifact_document(item) for item in value.artifacts],
         }
     elif isinstance(value, InspectValue):
-        document["record"] = (
-            _run_record_summary_document(value.record)
-            if value.summary
-            else record_to_dict(value.record)
-        )
-        if value.retention is not None:
-            document["retention"] = receipt_document(value.retention)
+        if value.diagnostics is not None:
+            document["diagnostics"] = _diagnostics_document(value.diagnostics)
+        else:
+            document["record"] = (
+                _run_record_summary_document(value.record)
+                if value.summary
+                else record_to_dict(value.record)
+            )
+            if value.retention is not None:
+                document["retention"] = receipt_document(value.retention)
     elif isinstance(value, PurgeValue):
         document["purge"] = {
             "run_id": str(value.run_id),
@@ -874,6 +896,8 @@ def render_human(result: OperationResult[Any]) -> str:
             "Scheduler jobs: " + ", ".join(record.scheduler_job_ids)
         )
     if isinstance(value, StatusValue):
+        if value.diagnostics is not None:
+            return _human_diagnostics(value.diagnostics)
         counts = ", ".join(
             f"{state.lower()}={count}"
             for state, count in sorted(value.task_counts.items())
@@ -942,6 +966,9 @@ def render_human(result: OperationResult[Any]) -> str:
             f"Waited: {value.elapsed_seconds:.1f}s",
         ]
         lines.extend(f"  {item.run_id}: {item.state.value}" for item in value.statuses)
+        for item in value.statuses:
+            if item.diagnostics is not None:
+                lines.extend(_diagnostic_event_lines(item.diagnostics))
         return "\n".join(lines)
     if isinstance(value, CancelValue):
         status = value.status
@@ -981,6 +1008,8 @@ def render_human(result: OperationResult[Any]) -> str:
             f"Retrieval: {value.retrieval_state.value}"
         )
     if isinstance(value, InspectValue):
+        if value.diagnostics is not None:
+            return _human_diagnostics(value.diagnostics)
         record = value.record
         rendered = (
             f"Run: {record.run.id}\nExperiment: {record.run.experiment_name}\n"
@@ -1871,6 +1900,66 @@ def _scheduler_job_roles_document(record: RunRecord) -> dict[str, Any]:
         ),
         "scientific_scheduler_job_ids": list(record.scheduler_job_ids),
     }
+
+
+def _diagnostics_document(value: RunDiagnosticsValue) -> dict[str, Any]:
+    return {
+        "format_version": 1,
+        "run_id": str(value.run_id),
+        "state": value.state.value,
+        "retrieval_state": value.retrieval_state.value,
+        "native_state": value.native_state,
+        "task_counts": dict(value.task_counts),
+        "scheduler_job_ids": list(value.scheduler_job_ids),
+        "allocated_nodes": list(value.allocated_nodes),
+        "container_runtime": value.runtime,
+        "container_runtime_version": value.runtime_version,
+        "availability": value.availability,
+        "truncated": value.truncated,
+        "events": [
+            {
+                "scope": event.scope,
+                "identifier": event.identifier,
+                "code": event.code,
+                "exit_code": event.exit_code,
+                "node": event.node,
+                "message": event.message,
+            }
+            for event in value.events
+        ],
+    }
+
+
+def _diagnostic_event_lines(value: RunDiagnosticsValue) -> list[str]:
+    lines = [
+        f"  {value.run_id} {event.scope} {event.identifier} node={event.node or '-'} "
+        f"exit={event.exit_code} [{event.code}] {event.message}"
+        for event in value.events
+    ]
+    if not lines:
+        lines.append(f"  {value.run_id}: diagnostic events {value.availability}")
+    if value.truncated:
+        lines.append(f"  {value.run_id}: report truncated")
+    return lines
+
+
+def _human_diagnostics(value: RunDiagnosticsValue) -> str:
+    counts = ", ".join(
+        f"{state}={count}" for state, count in sorted(value.task_counts.items())
+    )
+    return "\n".join(
+        (
+            f"Run: {value.run_id}",
+            f"State: {value.state.value}",
+            f"Retrieval: {value.retrieval_state.value}",
+            f"Native state: {value.native_state or '-'}",
+            f"Tasks: {counts or '-'}",
+            f"Scheduler jobs: {', '.join(value.scheduler_job_ids) or '-'}",
+            f"Nodes: {', '.join(value.allocated_nodes) or '-'}",
+            f"Runtime: {value.runtime or '-'} {value.runtime_version or '-'}",
+            *_diagnostic_event_lines(value),
+        )
+    )
 
 
 def _run_record_summary_document(record: RunRecord) -> dict[str, Any]:

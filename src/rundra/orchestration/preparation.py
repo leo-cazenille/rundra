@@ -1432,6 +1432,7 @@ def prepare_local(
         container=ContainerSpec(image=image.path, gpu=experiment.container.gpu),
         outputs=experiment.outputs,
         sync_excludes=experiment.sync_excludes,
+        required_outputs=experiment.required_outputs,
     )
     record = PreparationRecord(
         source_identity=(

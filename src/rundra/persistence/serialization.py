@@ -553,6 +553,11 @@ def _experiment_to_dict(experiment: ExperimentSpec) -> JsonObject:
         "container": _container_to_dict(experiment.container),
         "outputs": list(experiment.outputs),
         "sync_excludes": list(experiment.sync_excludes),
+        **(
+            {"required_outputs": list(experiment.required_outputs)}
+            if experiment.version == 2
+            else {}
+        ),
     }
 
 
@@ -737,6 +742,7 @@ def _parse_container(value: object, *, path: str) -> ContainerSpec | None:
 
 def _parse_experiment(value: object, *, path: str) -> ExperimentSpec:
     document = _object(value, path=path)
+    version_two = document.get("version") == 2
     _exact_fields(
         document,
         frozenset(
@@ -748,6 +754,7 @@ def _parse_experiment(value: object, *, path: str) -> ExperimentSpec:
                 "container",
                 "outputs",
                 "sync_excludes",
+                *({"required_outputs"} if version_two else ()),
             }
         ),
         path=path,
@@ -762,6 +769,13 @@ def _parse_experiment(value: object, *, path: str) -> ExperimentSpec:
             outputs=_string_tuple(document["outputs"], path=f"{path}.outputs"),
             sync_excludes=_string_tuple(
                 document["sync_excludes"], path=f"{path}.sync_excludes"
+            ),
+            required_outputs=(
+                _string_tuple(
+                    document["required_outputs"], path=f"{path}.required_outputs"
+                )
+                if version_two
+                else ()
             ),
         )
     except RunRecordFormatError:

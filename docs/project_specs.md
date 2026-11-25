@@ -1424,6 +1424,30 @@ portable resources/states, and stable identities are mandatory.
 
 ## 20. Artifacts and results
 
+### Required Task outputs and execution diagnostics
+
+Experiment schema v2 optionally declares `outputs.required`. Entries are
+literal Task-relative file paths with optional `{seed}` expansion. A
+successful execution command must leave each required regular file in that
+Task's output directory without crossing symlinks within the output tree.
+Check before scratch copy-back or result publication. Missing required
+outputs yield exit 86 and a Task diagnostic. An application exit takes
+precedence. `outputs.include` continues to control retrieval. Schema v1
+retains its existing execution and retrieval semantics.
+
+Allocation-local Slurm scratch setup publishes a worker diagnostic for
+failures before Task journals exist. Worker and Task diagnostics use an
+internal atomic sidecar under staged metadata. RunRecord fields and Task
+reconciliation retain their existing contracts. Opt-in `status`, `await`,
+and `inspect` diagnostics surface bounded, known reason codes and fixed
+framework messages rather than process logs or command arguments.
+
+The optional `doctor --scheduler-probe --probe-container TARGET_IMAGE`
+operation uses an existing target image in a bounded Slurm allocation. It
+reports the selected partition, observed node, and stage reached, including
+scratch, account resolution, image access, and container startup. The
+existing scheduler probe retains its previous scope.
+
 Raw execution outputs should remain conceptually distinct from later analysis.
 
 Suggested categories:
@@ -3159,7 +3183,10 @@ version: 1
 
 Do not silently reinterpret an incompatible old schema.
 
-Migration tooling is not required before there is more than one released schema version.
+Experiment v2 retains the v1 fields and adds optional `outputs.required`.
+The nested persisted experiment document includes `required_outputs` only
+when its own version is 2. Existing v1 experiment and RunRecord documents
+require no migration.
 
 ---
 

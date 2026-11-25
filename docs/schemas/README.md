@@ -59,6 +59,23 @@ estimate is exact. Acquired Git preparation sources report `null` because a
 pure plan does not fetch them. The nested `plan.version` continues to describe
 the execution-plan representation independently.
 
+The [v29 CLI surface](cli-surface-v29.json) adds
+`doctor --probe-container TARGET_IMAGE` and `--diagnostics` for `inspect`,
+`status`, and `await`. The optional [diagnostics v1 report](run-diagnostics-v1.json)
+appears under `diagnostics` at the top level of `inspect` and `status`, or in
+each `await.runs` item. An `inspect` report takes the place of `record`.
+Reports contain up to eight events, 16 nodes, and 16 scheduler job IDs.
+The independently versioned report is absent from existing invocations.
+The optional `doctor.container_probe` v1 object contains `partition` and `node`
+(nullable strings) and `stage` (`not_started`, `scratch`, `account`, `image`,
+`container`, or `complete`).
+
+Experiment YAML v2 adds optional `outputs.required`. A plan for an experiment
+that declares required outputs includes `plan.required_outputs` as a list of
+path templates. Its persisted `experiment` object has `version: 2` and a
+`required_outputs` list, which is empty when the experiment omits the option.
+The experiment v1 object and prior RunRecord envelopes retain their fields.
+
 Project-managed preparation uses format version 2. Version-2 plans and
 RunRecords add preparation source, image, build, cache, output-hash, and log
 metadata; version-1 documents do not gain optional fields. The CLI option
