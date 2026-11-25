@@ -72,8 +72,8 @@ permissions and publishes it without overwriting an existing path.
 
 Compact SSH status refreshes cache journal payloads in the Run's Task database.
 The target checks the SHA-256 of the saved prefix before sending an appended
-suffix. A replaced or truncated journal is read in full, and the aggregate
-still takes precedence over lane journals after publication. The same event
+suffix. A replaced or truncated journal is read in full. A published per-attempt
+aggregate takes precedence over that attempt's lane journals. The same event
 parser checks conflicts. Clients or targets without the delta path use a full
 read. The cache consumes local SQLite space and the target still reads the
 prefix to verify it.
@@ -98,3 +98,17 @@ RUNDRA_DOCKER_SLURM_SUITE=failures tools/run_docker_slurm_system_tests.sh
 The required-output case runs Apptainer inside a worker. The host needs
 nested user namespaces, which the Docker Slurm GitHub Actions job configures
 on its runner.
+
+The same workflow checks compact retry and export across SSH, including a
+rejected retry when a retained config has changed. It also starts a fresh CLI
+process for each poll, checks that appended events travel as suffixes, and
+compares the final state against an independent full read. To run just these
+cases:
+
+```sh
+RUNDRA_DOCKER_SLURM_SUITE=compact tools/run_docker_slurm_system_tests.sh
+```
+
+On a development host that restricts nested user namespaces, set
+`RUNDRA_DOCKER_COMPACT_NATIVE=1` for these tests. This uses a native shell
+payload while still exercising Docker Slurm, SSH, and rsync. CI uses Apptainer.

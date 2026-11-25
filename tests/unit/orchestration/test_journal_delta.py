@@ -7,6 +7,7 @@ from rundra.adapters.local import LocalTransport
 from rundra.domain.models import Command, RunId
 from rundra.domain.scaling import SeedRange, TaskSpace
 from rundra.orchestration.journal_delta import read_journal_delta
+from rundra.orchestration.service import _full_compact_journal_text
 from rundra.persistence import SqliteTaskStore
 from rundra.ports import CommandResult
 
@@ -68,3 +69,26 @@ def test_append_poll_reuses_persisted_journal_and_reconciles_replacement(
     assert read_journal_delta(transport, str(root), ("19_0",), replaced) == {
         aggregate.name: suffix,
     }
+
+
+def test_attempt_aggregate_replaces_only_its_lanes(tmp_path: Path) -> None:
+    transport = LocalTransport()
+    first_lane = tmp_path / "19_0.lane-0.attempt-0.tsv"
+    later_lane = tmp_path / "19_0.lane-0.attempt-1.tsv"
+    old = b"START\ttask_000000\t0\t1\tcompute1\n"
+    new = b"FINISH\ttask_000000\t1\t0\t2\tcompute2\n"
+    first_lane.write_bytes(old)
+    later_lane.write_bytes(new)
+    previous = read_journal_delta(transport, str(tmp_path), ("19_0",), {})
+    assert previous == {first_lane.name: old, later_lane.name: new}
+    published = tmp_path / "19_0.attempt-0.tsv"
+    published.write_bytes(old)
+    # The original lane can still exist once the aggregate is published.
+    assert read_journal_delta(transport, str(tmp_path), ("19_0",), previous) == {
+        published.name: old,
+        later_lane.name: new,
+    }
+    assert (
+        _full_compact_journal_text(transport, str(tmp_path), ("19_0",))
+        == (old + new).decode()
+    )

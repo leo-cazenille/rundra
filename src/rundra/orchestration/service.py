@@ -38,7 +38,10 @@ from rundra.domain.states import (
 )
 from rundra.domain.sweeps import ExpandedConfig
 from rundra.execution_diagnostics import required_outputs_command
-from rundra.orchestration.journal_delta import read_journal_delta
+from rundra.orchestration.journal_delta import (
+    COMPACT_JOURNAL_SELECTION,
+    read_journal_delta,
+)
 from rundra.orchestration.models import (
     SCHEDULER_ARRAY,
     SLURM_ARRAY,
@@ -2451,11 +2454,10 @@ def _full_compact_journal_text(
                 "/bin/sh",
                 "-c",
                 (
-                    'status=$1; shift; for native do aggregate="$status/$native.tsv"; '
-                    'if [ -f "$aggregate" ]; then cat -- "$aggregate"; continue; fi; '
-                    'for path in "$status/$native".lane-*.tsv '
-                    '"$status/$native".lane-*.tsv.*; do '
-                    '[ -f "$path" ] && cat -- "$path"; done; done; :'
+                    "set -eu\n"
+                    "root=$1; shift\n"
+                    'emit() { cat -- "$1" || [ ! -e "$1" ]; }\n'
+                    + COMPACT_JOURNAL_SELECTION
                 ),
                 "rundra-compact-bundle-status",
                 status_value,

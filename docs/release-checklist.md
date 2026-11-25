@@ -38,6 +38,9 @@ tools/check_distribution.sh dist/*.whl dist/*.tar.gz
 - [ ] Run the minimal example twice with the same explicit seed and compare raw
   `result.json` files byte-for-byte.
 - [ ] Parse every checked JSON fixture and verify every local Markdown link.
+- [ ] Confirm the full `docker-slurm-system` GitHub Actions job passed on the
+  exact release candidate commit. It includes the failure matrix, compact SSH
+  retry and export, and cached-versus-full journal reconciliation under Apptainer.
 
 ## Security and live evidence
 

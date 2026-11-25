@@ -8,13 +8,41 @@ from collections.abc import Mapping
 from rundra.domain.models import Command
 from rundra.ports import Transport
 
-_NAME = re.compile(r"[A-Za-z0-9_-]+\.tsv(?:\.[A-Za-z0-9_-]+)?\Z")
-_LANE_NAME = re.compile(
-    r"[A-Za-z0-9_-]+\.lane-[A-Za-z0-9_-]+\.tsv(?:\.[A-Za-z0-9_-]+)?\Z"
+_NAME = re.compile(
+    r"[A-Za-z0-9_-]+(?:\.lane-[A-Za-z0-9_-]+)?"
+    r"(?:\.attempt-[0-9]+)?\.tsv(?:\.[A-Za-z0-9_-]+)?\Z"
 )
 _MAX_CACHE_BYTES = 64 * 1024**2
 
-_READ_DELTAS = """\
+COMPACT_JOURNAL_SELECTION = """\
+for native do
+  legacy="$root/$native.tsv"
+  if [ -f "$legacy" ]; then emit "$legacy"; continue; fi
+  published=' '
+  for path in "$root/$native".attempt-*.tsv; do
+    [ -f "$path" ] || continue
+    attempt=${path##*.attempt-}
+    attempt=${attempt%.tsv}
+    case "$attempt" in ''|*[!0-9]*) continue ;; esac
+    emit "$path"
+    published="$published$attempt "
+  done
+  for path in "$root/$native".lane-*.tsv "$root/$native".lane-*.tsv.*; do
+    [ -f "$path" ] || continue
+    case "${path##*/}" in
+      *.lane-*.attempt-*.tsv*)
+        attempt=${path##*.attempt-}
+        attempt=${attempt%%.*}
+        case "$published" in *" $attempt "*) continue ;; esac
+        ;;
+    esac
+    emit "$path"
+  done
+done
+"""
+
+_READ_DELTAS = (
+    """\
 set -eu
 for utility in stat head sha256sum awk base64 dd; do
   command -v "$utility" >/dev/null || exit 66
@@ -46,14 +74,9 @@ emit() (
   fi
   printf '\\n'
 )
-for native do
-  aggregate="$root/$native.tsv"
-  if [ -f "$aggregate" ]; then emit "$aggregate"; continue; fi
-  for path in "$root/$native".lane-*.tsv "$root/$native".lane-*.tsv.*; do
-    if [ -f "$path" ]; then emit "$path"; fi
-  done
-done
 """
+    + COMPACT_JOURNAL_SELECTION
+)
 
 
 def read_journal_delta(
@@ -116,4 +139,4 @@ def read_journal_delta(
 
 
 def _valid_name(name: str) -> bool:
-    return _NAME.fullmatch(name) is not None or _LANE_NAME.fullmatch(name) is not None
+    return _NAME.fullmatch(name) is not None

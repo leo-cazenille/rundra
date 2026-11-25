@@ -145,7 +145,11 @@ EOF
 case "${RUNDRA_DOCKER_SLURM_SUITE:-scale}" in
     scale)
         set -- tests/system/test_docker_slurm_scale.py tests/system/test_docker_slurm_failures.py \
+            tests/system/test_docker_slurm_compact.py \
             tests/integration/test_fake_slurm_lifecycle.py::test_compact_submission_resume_finishes_interrupted_record_compaction
+        ;;
+    compact)
+        set -- tests/system/test_docker_slurm_compact.py
         ;;
     failures)
         set -- tests/system/test_docker_slurm_failures.py \
@@ -155,7 +159,7 @@ case "${RUNDRA_DOCKER_SLURM_SUITE:-scale}" in
         set -- tests/system/test_docker_campaign.py
         ;;
     *)
-        echo "RUNDRA_DOCKER_SLURM_SUITE must be scale, failures, or campaign" >&2
+        echo "RUNDRA_DOCKER_SLURM_SUITE must be scale, compact, failures, or campaign" >&2
         exit 64
         ;;
 esac

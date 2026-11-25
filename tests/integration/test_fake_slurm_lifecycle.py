@@ -667,7 +667,9 @@ def test_large_worker_pool_persists_and_reconciles_compact_task_state(
     ).refresh(submitted)
     assert pending_record.run.state is ExecutionState.QUEUED
     assert task_store.counts(_RUN_ID).execution[ExecutionState.QUEUED] == 1_000
-    assert str(transport.commands[-1].argv[2]).endswith("done; done; :")
+    journal_command = transport.commands[-1].argv
+    assert journal_command[3] == "rundra-compact-bundle-status"
+    assert journal_command[-2:] == ("42_0", "42_1")
 
     accounting = (
         "42_0|COMPLETED|0:0|2026-08-15T10:00:00|"

@@ -4183,8 +4183,9 @@ the default unit suite.
 
 An SSH poll of a compact Run can reuse journal prefixes from a private table in
 the Task database. The target checks each cached prefix against the current
-file before sending its suffix. The reader rebuilds the current aggregate or
-lane view and passes it through the existing parser. Unsupported targets and
+file before sending its suffix. The reader prefers a published per-attempt
+aggregate over its lanes and passes the current view through the existing
+parser. Unsupported targets and
 unusable caches fall back to a full read. Cached bytes cannot stand in for a
 missing current journal or change Task outcomes.
 
