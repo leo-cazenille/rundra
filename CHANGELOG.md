@@ -6,6 +6,13 @@ All notable user-visible changes are recorded here.
 
 ### Added
 
+- `rundr retry --failed` previews failed Task coordinates and can replay them
+  as a linked Run using retained source and exact effective configs.
+- `rundr export` writes a checksummed Run or campaign evidence archive, with
+  optional materialized result files.
+- Compact SSH status refreshes can reuse validated journal prefixes from the
+  Task database. The Docker Slurm workflow covers additional failure paths.
+
 - Opt-in Run diagnostics for `status`, `await`, and `inspect`. Slurm
   workers record scratch startup failures with the node and original exit
   code, even before Task journals exist.

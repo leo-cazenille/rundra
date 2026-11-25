@@ -242,6 +242,8 @@ class LocalStager:
         if workspace_root == source:
             raise LocalStagerError("Local workspace root must differ from source root")
         workspace_relative = _relative_or_none(workspace_root, source)
+        if request.source_is_sealed and workspace_relative is not None:
+            raise LocalStagerError("Retry workspace must be outside the sealed source")
         runs_root = workspace_root / "runs"
         run_root = runs_root / str(request.run_id)
         try:
@@ -267,7 +269,11 @@ class LocalStager:
             shutil.copytree(
                 source,
                 source_snapshot,
-                ignore=_copy_ignore(source, patterns, workspace_relative),
+                ignore=(
+                    None
+                    if request.source_is_sealed
+                    else _copy_ignore(source, patterns, workspace_relative)
+                ),
                 symlinks=False,
             )
             for directory in (inputs, runtime, outputs, logs, metadata):

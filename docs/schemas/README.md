@@ -59,6 +59,18 @@ estimate is exact. Acquired Git preparation sources report `null` because a
 pure plan does not fetch them. The nested `plan.version` continues to describe
 the execution-plan representation independently.
 
+The [v30 CLI surface](cli-surface-v30.json) adds `retry` and `export`.
+Their version-1 result documents contain `retry` or `export` respectively.
+See the checked [retry preview](retry-preview-v1.json) and
+[export result](export-success-v1.json).
+A retry preview has null `run_id` and `state` and up to 50 coordinate mappings.
+A confirmed retry includes the child Run ID and execution state. The export
+document includes the selector, destination, Run and included result file
+counts, and archive SHA-256. Its `manifest.json` version 1 includes `run_ids`,
+nullable `campaign`, `results_included`, and a `files` map keyed by archive member
+name. Each entry has `size_bytes` and `sha256`. See the
+[retry and export guide](../retry-and-export.md) for retained-input rules.
+
 The [v29 CLI surface](cli-surface-v29.json) adds
 `doctor --probe-container TARGET_IMAGE` and `--diagnostics` for `inspect`,
 `status`, and `await`. The optional [diagnostics v1 report](run-diagnostics-v1.json)

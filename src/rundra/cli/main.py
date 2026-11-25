@@ -33,6 +33,7 @@ from rundra.cli.campaign_operations import (
     campaign_wait_operation,
 )
 from rundra.cli.capability_doctor import DoctorValue, doctor_operation
+from rundra.cli.export_operations import export_operation
 from rundra.cli.notification import write_await_notification, write_wait_notification
 from rundra.cli.operations import (
     LAST_RUN_SELECTOR,
@@ -71,6 +72,7 @@ from rundra.cli.progress import (
     create_progress_reporter,
 )
 from rundra.cli.render import render_human, render_json
+from rundra.cli.retry_operations import RetryValue, retry_operation
 from rundra.config.campaigns import is_campaign_source
 from rundra.config.targets import builtin_targets_source
 from rundra.domain.campaigns import CampaignId, CampaignRecord, CampaignSubmissionState
@@ -89,6 +91,8 @@ _COMMANDS = (
     "run",
     "submit",
     "resume",
+    "retry",
+    "export",
     "resolve-submission",
     "wait",
     "await",
@@ -436,6 +440,25 @@ def build_parser() -> argparse.ArgumentParser:
     purge.add_argument("--dry-run", action="store_true")
     _add_store_option(purge)
     _add_json_option(purge)
+
+    retry = subparsers.add_parser("retry", help="preview or retry failed Tasks")
+    retry.add_argument("run_id", metavar="RUN_ID_OR_CAMPAIGN")
+    retry.add_argument("--failed", action="store_true", required=True)
+    retry.add_argument("--launch", help="select a campaign child")
+    retry.add_argument("--target")
+    retry.add_argument("--targets-file", type=Path)
+    retry.add_argument("--image", type=Path, metavar="TARGET_IMAGE")
+    retry.add_argument("--confirm-tasks", type=int, metavar="N")
+    retry.add_argument("--destination", type=Path)
+    _add_store_option(retry)
+    _add_json_option(retry)
+
+    export = subparsers.add_parser("export", help="archive recorded Run evidence")
+    export.add_argument("run_id", metavar="RUN_ID_OR_CAMPAIGN")
+    export.add_argument("--destination", required=True, type=Path)
+    export.add_argument("--include-results", action="store_true")
+    _add_store_option(export)
+    _add_json_option(export)
 
     agent_guide = subparsers.add_parser(
         "agent-guide", help="print, install, or check agent instructions"
@@ -986,6 +1009,24 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
     elif arguments.command == "targets":
         result = targets_operation(arguments.targets_file)
+    elif arguments.command == "retry":
+        result = retry_operation(
+            arguments.run_id,
+            arguments.data_dir,
+            arguments.targets_file or _default_targets_file(),
+            launch=arguments.launch,
+            target_name=arguments.target,
+            image=arguments.image,
+            confirm_tasks=arguments.confirm_tasks,
+            destination=arguments.destination,
+        )
+    elif arguments.command == "export":
+        result = export_operation(
+            arguments.run_id,
+            arguments.data_dir,
+            arguments.destination,
+            include_results=arguments.include_results,
+        )
     elif arguments.command == "doctor":
         if (
             arguments.probe_container is not None
@@ -1570,6 +1611,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if isinstance(result.value, RunValue):
         return result.value.exit_code
     if isinstance(result.value, AwaitRunsValue):
+        return result.value.exit_code
+    if isinstance(result.value, RetryValue):
         return result.value.exit_code
     if isinstance(result.value, DoctorValue) and not result.value.ready:
         return 1

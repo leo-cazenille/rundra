@@ -18,6 +18,8 @@ command. `-h`/`--help` is human-oriented and its formatting is not stable.
 | `help` | optional `COMMAND` | none | List commands and the common workflow, or show one command's detailed arguments and options. |
 | `submit` | `EXPERIMENT` | same as `run` | Submit asynchronously when the selected scheduler supports it. |
 | `resume` | `RUN_ID`, `CAMPAIGN_ID`, or `--last` | launch paths, `--confirm-tasks`, `--data-dir`, `--json` | Recover an interrupted submission without duplication. |
+| `retry` | `RUN_ID` or `CAMPAIGN_ID` | `--failed`, `--launch`, `--target`, `--targets-file`, `--image`, `--confirm-tasks`, `--destination`, `--data-dir`, `--json` | Preview failed Task coordinates and start a linked retry only after confirming the count. |
+| `export` | `RUN_ID` or `CAMPAIGN_ID` | `--destination`, `--include-results`, `--data-dir`, `--json` | Write a checksummed evidence archive. |
 | `resolve-submission` | `RUN_ID` or `--last` | `--not-submitted`, `--confirm RUN_ID`, `--data-dir`, `--json` | Close an unknown submission only after proving no scheduler job exists. |
 | `status` | `RUN_ID` or `--last` | `--summary`, `--diagnostics`, `--data-dir`, `--json` | Reconcile scheduler state; `--summary` omits per-Task detail. |
 | `tasks` | `RUN_ID` or `--last` | `--offset`, `--limit`, `--data-dir`, `--json` | Return one bounded Task-state page. |
@@ -39,6 +41,9 @@ which own scientific Tasks. Do not infer that a preparation job ID executed a
 scientific Task. For large Runs, use `status --summary --json` and
 `inspect --summary --json`, then page individual records with `tasks` and
 `artifacts`.
+
+For command examples, retained-input requirements, and archive contents, see
+[Retry failed Tasks and export recorded evidence](retry-and-export.md).
 
 ## Worker and Task diagnostics
 

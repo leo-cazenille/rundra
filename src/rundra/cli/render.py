@@ -27,6 +27,7 @@ from rundra.cli.campaign_operations import (
     CampaignWaitValue,
 )
 from rundra.cli.capability_doctor import DoctorValue
+from rundra.cli.export_operations import ExportValue
 from rundra.cli.operations import (
     ArtifactsValue,
     AwaitRunsValue,
@@ -49,6 +50,7 @@ from rundra.cli.operations import (
     ValidationValue,
     WaitValue,
 )
+from rundra.cli.retry_operations import RetryValue
 from rundra.domain.models import Artifact, Command, ResourceRequest, Target, Task
 from rundra.domain.preparation import (
     PreparationImage,
@@ -92,7 +94,34 @@ def result_document(result: OperationResult[Any]) -> dict[str, Any]:
             "details": dict(result.error.details),
         }
         return document
-    if isinstance(value, CampaignValidationValue):
+    if isinstance(value, RetryValue):
+        document["retry"] = {
+            "parent_run_id": str(value.parent_run_id),
+            "target": value.target,
+            "task_count": value.task_count,
+            "run_id": None if value.run_id is None else str(value.run_id),
+            "state": None if value.state is None else value.state.value,
+            "scheduler_job_ids": list(value.scheduler_job_ids),
+            "task_preview_truncated": len(value.preview) < value.task_count,
+            "tasks": [
+                {
+                    "parent_task_id": parent_id,
+                    "task_id": task_id,
+                    "seed": seed,
+                    "parameter_set": parameter,
+                }
+                for parent_id, task_id, seed, parameter in value.preview
+            ],
+        }
+    elif isinstance(value, ExportValue):
+        document["export"] = {
+            "selector": value.selector,
+            "destination": str(value.destination),
+            "run_count": value.run_count,
+            "result_count": value.result_count,
+            "archive_sha256": value.archive_sha256,
+        }
+    elif isinstance(value, CampaignValidationValue):
         document["campaign"] = {
             "name": value.definition.name,
             "schema_version": value.definition.version,
@@ -682,6 +711,32 @@ def render_human(result: OperationResult[Any]) -> str:
         if value.project is not None and value.project.version >= 2:
             rendered += f"; project preparation v{value.project.version} validated"
         return rendered
+    if isinstance(value, RetryValue):
+        lines = [
+            f"Parent Run: {value.parent_run_id}",
+            f"Target: {value.target}",
+            f"Failed Tasks selected: {value.task_count}",
+        ]
+        if value.run_id is None:
+            lines.extend(
+                f"  {parent} -> {child}, seed={seed}"
+                + ("" if parameter is None else f", parameter_set={parameter}")
+                for parent, child, seed, parameter in value.preview
+            )
+            if len(value.preview) < value.task_count:
+                lines.append(
+                    f"  ... {value.task_count - len(value.preview)} additional Tasks"
+                )
+            lines.append(f"To launch, repeat with --confirm-tasks {value.task_count}")
+        else:
+            assert value.state is not None
+            lines.extend((f"Run: {value.run_id}", f"State: {value.state.value}"))
+        return "\n".join(lines)
+    if isinstance(value, ExportValue):
+        return (
+            f"Archive: {value.destination}\nRuns: {value.run_count}\n"
+            f"Result files: {value.result_count}\nSHA-256: {value.archive_sha256}"
+        )
     if isinstance(value, PlanValue):
         plan = value.plan
         seeds = _human_sequence(tuple(unit.seed for unit in plan.units))

@@ -1424,6 +1424,21 @@ portable resources/states, and stable identities are mandatory.
 
 ## 20. Artifacts and results
 
+### Run evidence exports and retry lineage
+
+`export` writes a local tar.gz archive from one saved Run or recorded campaign.
+The versioned manifest lists the content hash and size of each member. Recorded
+configs retain their exact bytes. The portable document includes a normalized
+experiment and provenance identities, and may include retrieved regular files
+from the recorded destination. Export leaves Run and retrieval state intact.
+
+`retry --failed` uses a terminal Run's failed coordinates and sealed inputs.
+It previews without submitting and requires `--confirm-tasks` before creating
+a new Run. This may be a sparse materialized subset of the original compact
+TaskSpace. The new Run persists its parent identity and a versioned ordinal
+mapping. Original Task outcomes and submission receipts stay attached to the
+respective Runs. A campaign retry selects a child launch explicitly.
+
 ### Required Task outputs and execution diagnostics
 
 Experiment schema v2 optionally declares `outputs.required`. Entries are
@@ -4165,6 +4180,13 @@ failure, and durable cancellation. It uses a shared workspace and OpenPBS
 the default unit suite.
 
 ## M20 journal reconciliation and aggregate repair
+
+An SSH poll of a compact Run can reuse journal prefixes from a private table in
+the Task database. The target checks each cached prefix against the current
+file before sending its suffix. The reader rebuilds the current aggregate or
+lane view and passes it through the existing parser. Unsupported targets and
+unusable caches fall back to a full read. Cached bytes cannot stand in for a
+missing current journal or change Task outcomes.
 
 Worker-pool journal discovery treats no matching files as an empty event set,
 which is expected while scheduler workers wait on a preparation dependency.

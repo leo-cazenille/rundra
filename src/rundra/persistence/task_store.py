@@ -414,6 +414,38 @@ class SqliteTaskStore:
             for row in rows
         )
 
+    def journal_cache(self, run_id: RunId) -> dict[str, bytes]:
+        """Read optional, reconstructable transport state from the Task database."""
+        try:
+            with self._open_existing(run_id) as connection:
+                present = connection.execute(
+                    "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='journal_cache'"
+                ).fetchone()
+                if present is None:
+                    return {}
+                return dict(
+                    connection.execute("SELECT name, payload FROM journal_cache")
+                )
+        except sqlite3.Error as error:
+            raise RunStoreError("Could not read compact journal cache") from error
+
+    def replace_journal_cache(
+        self, run_id: RunId, payloads: Mapping[str, bytes]
+    ) -> None:
+        try:
+            with self._open_existing(run_id) as connection:
+                connection.execute(
+                    "CREATE TABLE IF NOT EXISTS journal_cache "
+                    "(name TEXT PRIMARY KEY, payload BLOB NOT NULL)"
+                )
+                connection.execute("DELETE FROM journal_cache")
+                connection.executemany(
+                    "INSERT INTO journal_cache (name, payload) VALUES (?, ?)",
+                    payloads.items(),
+                )
+        except sqlite3.Error as error:
+            raise RunStoreError("Could not save compact journal cache") from error
+
     def set_all_retrieval(self, run_id: RunId, target: RetrievalState) -> None:
         """Transition retrieval state for every initialized compact Task."""
 

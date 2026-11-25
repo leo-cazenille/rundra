@@ -773,6 +773,8 @@ continues on the scheduler if the waiting client is interrupted.
 | `purge` | Safely remove terminal Run data after exact-ID confirmation. |
 
 Run `rundr help` or `rundr help COMMAND` for the installed command surface.
+Use [retry and export](docs/retry-and-export.md) to replay a terminal Run's
+failed Tasks or package recorded evidence for another machine.
 
 ## Configuration model
 

@@ -38,13 +38,18 @@ from rundra.domain.states import (
 )
 from rundra.domain.sweeps import ExpandedConfig
 from rundra.execution_diagnostics import required_outputs_command
+from rundra.orchestration.journal_delta import read_journal_delta
 from rundra.orchestration.models import (
     SCHEDULER_ARRAY,
     SLURM_ARRAY,
     ExecutionPlan,
     ExecutionUnit,
 )
-from rundra.orchestration.planner import create_plan, create_sweep_plan
+from rundra.orchestration.planner import (
+    create_plan,
+    create_sweep_plan,
+    create_task_subset_plan,
+)
 from rundra.orchestration.preparation import (
     RemotePreparationSpec,
     build_remote_preparation_command,
@@ -707,6 +712,8 @@ class RunExecutionRequest:
     requested_task_slots_per_worker: int | None = None
     compact_plan: ExecutionPlan | None = None
     compact_configs: tuple[ExpandedConfig, ...] = ()
+    retry_parent: RunId | None = None
+    retry_image_digest: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.plan) is not ExecutionPlan:
@@ -797,6 +804,12 @@ class RunExecutionRequest:
             raise TypeError("compact_configs must contain ExpandedConfigs")
         if self.compact_plan is None and self.compact_configs:
             raise ValueError("compact_configs require a compact_plan")
+        if self.retry_parent is not None and (
+            type(self.retry_parent) is not RunId
+            or self.compact_plan is not None
+            or self.preparation is not None
+        ):
+            raise ValueError("A retry requires a materialized plan for sealed inputs")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1209,6 +1222,7 @@ class OrchestrationService:
                         )
                     ),
                     remote_source_root=request.remote_source_root,
+                    source_is_sealed=request.retry_parent is not None,
                 )
             )
         except Exception as error:
@@ -1950,7 +1964,13 @@ class OrchestrationService:
                     message="Compact plan and experiment names do not match",
                 )
             return
-        if request.plan.version == 3:
+        if request.retry_parent is not None:
+            expected_plan = create_task_subset_plan(
+                request.experiment,
+                request.plan.target,
+                tuple((unit.config, unit.seed, unit.parameter_set) for unit in units),
+            )
+        elif request.plan.version == 3:
             parameter_configs: list[ExpandedConfig] = []
             seen_parameters: set[str] = set()
             for unit in units:
@@ -2066,10 +2086,17 @@ class OrchestrationService:
             container_digest=(
                 request.preparation.image_sha256
                 if request.preparation is not None
-                else None
+                else request.retry_image_digest
             ),
             preparation=request.preparation,
-            scheduler_metadata=_execution_storage_metadata(request),
+            scheduler_metadata={
+                **_execution_storage_metadata(request),
+                **(
+                    {"retry_parent_run_id": str(request.retry_parent)}
+                    if request.retry_parent is not None
+                    else {}
+                ),
+            },
             task_array_mapping=request.plan.array_mapping,
             task_retrieval_states={
                 unit.task_id: RetrievalState.NOT_REQUESTED
@@ -2222,7 +2249,9 @@ def _compact_observed_record(
         observation.reference.native_id: observation
         for observation in scheduler_observations
     }
-    started, finished = _compact_bundle_events(record, reference_ids, transport)
+    started, finished = _compact_bundle_events(
+        record, reference_ids, transport, task_store
+    )
     updated_states: list[TaskState] = []
     for state in states:
         if state.execution_state in _TERMINAL_STATES:
@@ -2377,6 +2406,7 @@ def _compact_bundle_events(
     record: RunRecord,
     reference_ids: tuple[str, ...],
     transport: Transport | None,
+    task_store: SqliteTaskStore,
 ) -> tuple[
     dict[TaskId, tuple[int, int, str]],
     dict[TaskId, tuple[int, int, int, str]],
@@ -2386,6 +2416,35 @@ def _compact_bundle_events(
         raise ValueError("Compact worker-pool Run has no bundle status root")
     if transport is None:
         raise ValueError("Compact worker-pool reconciliation requires transport")
+    previous: dict[str, bytes] = {}
+    snapshot = None
+    if getattr(transport, "supports_incremental_journals", False) is True:
+        try:
+            previous = task_store.journal_cache(record.run.id)
+        except RunStoreError:
+            pass
+        else:
+            snapshot = read_journal_delta(
+                transport, status_value, reference_ids, previous
+            )
+    if snapshot is None:
+        journal_text = _full_compact_journal_text(
+            transport, status_value, reference_ids
+        )
+    else:
+        journal_text = b"".join(snapshot.values()).decode("utf-8", errors="replace")
+    started, finished = _parse_compact_journal_text(record, journal_text)
+    if snapshot is not None and snapshot != previous:
+        try:
+            task_store.replace_journal_cache(record.run.id, snapshot)
+        except RunStoreError:
+            pass
+    return started, finished
+
+
+def _full_compact_journal_text(
+    transport: Transport, status_value: str, reference_ids: tuple[str, ...]
+) -> str:
     result = transport.run(
         Command(
             (
@@ -2410,10 +2469,16 @@ def _compact_bundle_events(
             f"{result.exit_code} while reading compact bundled Task journals; "
             "the Run was not cancelled and may still be active"
         )
+    return result.stdout
+
+
+def _parse_compact_journal_text(
+    record: RunRecord, journal_text: str
+) -> tuple[dict[TaskId, tuple[int, int, str]], dict[TaskId, tuple[int, int, int, str]]]:
     assert record.task_space is not None
     started: dict[TaskId, tuple[int, int, str]] = {}
     finished: dict[TaskId, tuple[int, int, int, str]] = {}
-    for line in result.stdout.splitlines():
+    for line in journal_text.splitlines():
         fields = line.split("\t")
         if fields in (
             ["RUNDRA_TASK_EVENTS", "1"],

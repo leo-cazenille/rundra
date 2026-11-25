@@ -664,6 +664,7 @@ class StageRequest:
     task_configs: Mapping[TaskId, ConfigSnapshot] = field(default_factory=dict)
     task_manifest: str | None = None
     remote_source_root: PurePath | None = None
+    source_is_sealed: bool = False
 
     def __post_init__(self) -> None:
         if type(self.run_id) is not RunId:
@@ -695,6 +696,8 @@ class StageRequest:
             raise ValueError("StageRequest task_configs must match task_ids")
         if self.task_manifest is not None and type(self.task_manifest) is not str:
             raise TypeError("StageRequest task_manifest must be a string or None")
+        if type(self.source_is_sealed) is not bool:
+            raise TypeError("StageRequest source_is_sealed must be a boolean")
         if self.remote_source_root is not None and (
             not isinstance(self.remote_source_root, PurePath)
             or not self.remote_source_root.is_absolute()

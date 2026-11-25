@@ -1,0 +1,22 @@
+{
+  "format_version": 1,
+  "ok": true,
+  "operation": "retry",
+  "retry": {
+    "parent_run_id": "run_0123456789abcdef0123456789abcdef",
+    "target": "cluster",
+    "task_count": 1,
+    "run_id": null,
+    "state": null,
+    "scheduler_job_ids": [],
+    "task_preview_truncated": false,
+    "tasks": [
+      {
+        "parent_task_id": "task_000009",
+        "task_id": "task_000000",
+        "seed": 42,
+        "parameter_set": "parameter_set_000001"
+      }
+    ]
+  }
+}

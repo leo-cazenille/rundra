@@ -34,6 +34,8 @@ class SSHExecutionError(SSHTransportError):
 class SSHTransport:
     """Use the user's OpenSSH client configuration to reach one host alias."""
 
+    supports_incremental_journals = True
+
     def __init__(
         self, host: str, *, executable: str = "ssh", config_file: PurePath | None = None
     ) -> None:

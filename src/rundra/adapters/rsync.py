@@ -132,7 +132,11 @@ class RsyncStager:
             raise TypeError("RsyncStager.stage requires a StageRequest")
         _validate_remote_target(request)
         self.check()
-        exclusions = _validated_exclusions(request.experiment.sync_excludes)
+        exclusions = (
+            ()
+            if request.source_is_sealed
+            else _validated_exclusions(request.experiment.sync_excludes)
+        )
         source = (
             _source_directory(request.source_root)
             if request.remote_source_root is None
@@ -379,6 +383,31 @@ class RsyncStager:
                     self._transport.run(Command(("rmdir", "--", str(lock))))
                 except Exception:
                     pass
+
+    def copy_sealed_source(self, workspace: StagedWorkspace, destination: Path) -> None:
+        """Copy a retained remote source tree into a private client directory."""
+        validate_remote_workspace(workspace)
+        if self._host is None:
+            raise RsyncRetrievalError("Source retrieval requires a configured host")
+        self.check()
+        _require_remote_success(
+            self._transport,
+            Command(
+                (
+                    "sh",
+                    "-c",
+                    'set -eu; [ -d "$1" ] && [ ! -L "$1" ]; '
+                    'unexpected=$(find "$1" ! -type d ! -type f -print -quit); '
+                    '[ -z "$unexpected" ]',
+                    "rundra-retry-source",
+                    str(workspace.source),
+                )
+            ),
+            "check retained source tree",
+        )
+        self._retrieve_tree(
+            self._host, workspace.source, destination, tree="sealed source"
+        )
 
     def fetch(self, request: FetchRequest) -> FetchResult:
         """Idempotently retrieve remote output, logs, and metadata."""

@@ -17,6 +17,7 @@ from rundra.domain.models import (
     Task,
     TaskId,
 )
+from rundra.domain.parameters import ParameterSet
 from rundra.domain.preparation import PreparationPlan
 from rundra.domain.scaling import ExecutionPolicy, SeedRange, TaskSpace
 from rundra.domain.sweeps import ExpandedConfig
@@ -498,6 +499,43 @@ def create_sweep_plan(
         ),
         strategy=(capabilities.array_strategy if uses_array else ONE_UNIT_PER_TASK),
         preparation=preparation,
+    )
+
+
+def create_task_subset_plan(
+    spec: ExperimentSpec,
+    target: Target,
+    inputs: Sequence[tuple[ConfigSnapshot, int, ParameterSet | None]],
+) -> ExecutionPlan:
+    """Materialize exact Task coordinates without taking a Cartesian product."""
+    _validate_placeholders(spec.command)
+    resources, _ = route_scheduler_resources(spec.resources, target)
+    units = tuple(
+        ExecutionUnit(
+            TaskId.from_ordinal(index),
+            seed,
+            config,
+            _render_command(spec.command, config, seed),
+            resources,
+            parameter_set,
+        )
+        for index, (config, seed, parameter_set) in enumerate(inputs)
+    )
+    capabilities = scheduler_capabilities(target.scheduler.kind)
+    uses_array = capabilities.arrays and len(units) > 1
+    return ExecutionPlan(
+        version=3 if any(unit.parameter_set is not None for unit in units) else 1,
+        experiment_name=spec.name,
+        target=target,
+        units=units,
+        groups=_execution_groups(target, units),
+        array_mapping=tuple(
+            ArrayTaskMapping(unit.task_id, unit.seed, index)
+            for index, unit in enumerate(units)
+        )
+        if uses_array
+        else (),
+        strategy=capabilities.array_strategy if uses_array else ONE_UNIT_PER_TASK,
     )
 
 
