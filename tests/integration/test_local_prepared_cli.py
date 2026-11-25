@@ -16,6 +16,8 @@ def test_one_command_local_prepared_run_persists_v6_provenance(
 ) -> None:
     project = tmp_path / "project"
     project.mkdir()
+    # A distinct input keeps this cold-cache assertion valid on repeated runs.
+    (project / "fixture-id.txt").write_text(str(tmp_path), encoding="utf-8")
     experiment = project / "experiment.yaml"
     experiment.write_text(
         """\
