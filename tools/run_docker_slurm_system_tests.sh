@@ -144,18 +144,23 @@ EOF
 
 case "${RUNDRA_DOCKER_SLURM_SUITE:-scale}" in
     scale)
-        test_source=tests/system/test_docker_slurm_scale.py
+        set -- tests/system/test_docker_slurm_scale.py tests/system/test_docker_slurm_failures.py \
+            tests/integration/test_fake_slurm_lifecycle.py::test_compact_submission_resume_finishes_interrupted_record_compaction
+        ;;
+    failures)
+        set -- tests/system/test_docker_slurm_failures.py \
+            tests/integration/test_fake_slurm_lifecycle.py::test_compact_submission_resume_finishes_interrupted_record_compaction
         ;;
     campaign)
-        test_source=tests/system/test_docker_campaign.py
+        set -- tests/system/test_docker_campaign.py
         ;;
     *)
-        echo "RUNDRA_DOCKER_SLURM_SUITE must be scale or campaign" >&2
+        echo "RUNDRA_DOCKER_SLURM_SUITE must be scale, failures, or campaign" >&2
         exit 64
         ;;
 esac
 
 HOME="$state/home" \
 RUNDRA_DOCKER_SLURM_TARGETS_FILE="$state/targets.yaml" \
-uv run pytest "$test_source" \
+uv run pytest "$@" \
     --run-docker-slurm-system-tests
